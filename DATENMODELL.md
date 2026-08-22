@@ -1,8 +1,16 @@
 # Datenmodell
 
-Das produktive Datenmodell liegt in SQLite unter `data/app.db`. Maßgebliche
-Quelle für das tatsächliche Schema bleibt `server.js`; diese Datei beschreibt
-die Tabellen, Beziehungen und fachlichen Regeln.
+Das produktive Datenmodell liegt in MySQL 8. Maßgebliche Quelle für das Schema
+ist `schema.sql`; `api.php` enthält die fachlichen Abfragen und
+Validierungsregeln. Diese Datei beschreibt Tabellen, Beziehungen und
+fachliche Regeln.
+
+`schema.sql` wird nicht durch den FTPS-Workflow deployt. Schemaänderungen
+werden vor dem Anwendungscode kontrolliert über die Datenbankverwaltung des
+Hosters eingespielt.
+
+Für lokale Entwicklung initialisiert der MySQL-Container dasselbe
+`schema.sql` nur beim Anlegen eines neuen Docker-Volumes.
 
 ## Überblick
 
@@ -40,17 +48,17 @@ jeder fachlichen Abfrage.
 
 | Spalte | Typ | Bedeutung |
 |---|---|---|
-| `id` | INTEGER, PK | Interne ID der Wehr |
-| `name` | TEXT, NOT NULL | Name der Wehr |
+| `id` | BIGINT UNSIGNED, PK | Interne ID der Wehr |
+| `name` | VARCHAR(200), NOT NULL | Name der Wehr |
 
 ### `units`
 
 | Spalte | Typ | Bedeutung |
 |---|---|---|
-| `id` | INTEGER, PK | Interne ID der Einheit |
-| `organization_id` | INTEGER, FK | Zugehörige Wehr |
-| `name` | TEXT, NOT NULL | Innerhalb der Wehr eindeutiger Name |
-| `divera_access_key` | TEXT, NULL | Server-seitiger DIVERA-Schlüssel |
+| `id` | BIGINT UNSIGNED, PK | Interne ID der Einheit |
+| `organization_id` | BIGINT UNSIGNED, FK | Zugehörige Wehr |
+| `name` | VARCHAR(200), NOT NULL | Innerhalb der Wehr eindeutiger Name |
+| `divera_access_key` | VARCHAR(500), NULL | Server-seitiger DIVERA-Schlüssel |
 
 Eindeutig ist `(organization_id, name)`.
 
@@ -60,13 +68,13 @@ Anmeldebenutzer sind von den in Einsätzen verwendeten Mitgliedern getrennt.
 
 | Spalte | Typ | Bedeutung |
 |---|---|---|
-| `id` | INTEGER, PK | Interne Benutzer-ID |
-| `organization_id` | INTEGER, FK | Zugehörige Wehr |
-| `unit_id` | INTEGER, FK, NULL | Kompatible Primärzuordnung; maßgeblich ist `user_units` |
-| `name` | TEXT, NOT NULL | Anzeigename |
-| `email` | TEXT, NOT NULL, UNIQUE | Groß-/Kleinschreibung wird ignoriert |
-| `password_hash` | TEXT, NOT NULL | `scrypt`-Hash mit individuellem Salt |
-| `role` | TEXT, NOT NULL | `wehrleitung`, `einheitsleitung` oder `fuehrungskraft` |
+| `id` | BIGINT UNSIGNED, PK | Interne Benutzer-ID |
+| `organization_id` | BIGINT UNSIGNED, FK | Zugehörige Wehr |
+| `unit_id` | BIGINT UNSIGNED, FK, NULL | Kompatible Primärzuordnung; maßgeblich ist `user_units` |
+| `name` | VARCHAR(200), NOT NULL | Anzeigename |
+| `email` | VARCHAR(320), NOT NULL, UNIQUE | Groß-/Kleinschreibung wird ignoriert |
+| `password_hash` | VARCHAR(255), NOT NULL | Durch `password_hash` erzeugter Hash |
+| `role` | ENUM, NOT NULL | `wehrleitung`, `einheitsleitung` oder `fuehrungskraft` |
 
 Nur die Wehrleitung darf ohne Einheitszuordnung existieren.
 
@@ -76,8 +84,8 @@ Viele-zu-viele-Zuordnung von Benutzern zu Einheiten.
 
 | Spalte | Typ | Bedeutung |
 |---|---|---|
-| `user_id` | INTEGER, FK, PK | Benutzer |
-| `unit_id` | INTEGER, FK, PK | Einheit |
+| `user_id` | BIGINT UNSIGNED, FK, PK | Benutzer |
+| `unit_id` | BIGINT UNSIGNED, FK, PK | Einheit |
 
 Beide Fremdschlüssel werden beim Löschen ihres Elternsatzes kaskadiert.
 
@@ -85,9 +93,9 @@ Beide Fremdschlüssel werden beim Löschen ihres Elternsatzes kaskadiert.
 
 | Spalte | Typ | Bedeutung |
 |---|---|---|
-| `token` | TEXT, PK | Zufälliger Sitzungswert |
-| `user_id` | INTEGER, FK | Angemeldeter Benutzer |
-| `expires_at` | TEXT, NOT NULL | Ablaufzeitpunkt; Sitzungen gelten zwölf Stunden |
+| `token` | CHAR(64), PK | Zufälliger 256-Bit-Sitzungswert |
+| `user_id` | BIGINT UNSIGNED, FK | Angemeldeter Benutzer |
+| `expires_at` | DATETIME, NOT NULL | Ablaufzeitpunkt; Sitzungen gelten zwölf Stunden |
 
 Sitzungen werden beim Löschen des Benutzers mitgelöscht.
 
@@ -95,25 +103,27 @@ Sitzungen werden beim Löschen des Benutzers mitgelöscht.
 
 | Spalte | Typ | Bedeutung |
 |---|---|---|
-| `id` | INTEGER, PK | Interne Einsatz-ID |
-| `organization_id` | INTEGER, FK | Zugehörige Wehr |
-| `divera_id` | TEXT, NULL | DIVERA-ID; bei manuellen Einsätzen leer |
-| `foreign_id` | TEXT, NOT NULL | Externe Einsatznummer |
-| `divera_date` | INTEGER, NULL | Unveränderter DIVERA-Zeitwert |
-| `title` | TEXT, NOT NULL | Einsatzstichwort |
-| `started_at` | TEXT, NOT NULL | Alarmierungszeit als ISO-Zeitpunkt |
+| `id` | BIGINT UNSIGNED, PK | Interne Einsatz-ID |
+| `organization_id` | BIGINT UNSIGNED, FK | Zugehörige Wehr |
+| `divera_id` | VARCHAR(200), NULL | DIVERA-ID; bei manuellen Einsätzen leer |
+| `foreign_id` | VARCHAR(200), NOT NULL | Externe Einsatznummer |
+| `divera_date` | BIGINT, NULL | Unveränderter DIVERA-Zeitwert |
+| `title` | VARCHAR(300), NOT NULL | Einsatzstichwort |
+| `started_at` | VARCHAR(100), NOT NULL | Alarmierungszeit als ISO-Zeitpunkt |
 | `message` | TEXT, NOT NULL | Meldung beziehungsweise DIVERA-`text` |
-| `address` | TEXT, NOT NULL | Einsatzadresse |
-| `lat`, `lng` | REAL, NULL | Koordinaten |
+| `address` | VARCHAR(500), NOT NULL | Einsatzadresse |
+| `lat`, `lng` | DOUBLE, NULL | Koordinaten |
 | `remark` | TEXT, NOT NULL | Bemerkung |
 | `patient` | TEXT, NOT NULL | Sensible Patientenangabe |
 | `caller` | TEXT, NOT NULL | Sensible Angabe zur meldenden Person |
 | `consolidated_text` | TEXT, NOT NULL | Gesamtbericht der Wehrleitung |
-| `consolidated_at` | TEXT, NULL | Zeitpunkt der Konsolidierung |
+| `consolidated_at` | DATETIME, NULL | Zeitpunkt der Konsolidierung |
 
 Ein importierter Einsatz ist über `(organization_id, divera_id)` eindeutig.
 Ein erneuter Import aktualisiert ihn. Manuelle Einsätze haben keine
-`divera_id`.
+`divera_id`. Beim Import sendet der Browser nur diese ID; alle kanonischen
+Einsatzfelder werden unmittelbar danach serverseitig erneut aus DIVERA
+gelesen.
 
 ### `incident_units`
 
@@ -121,9 +131,9 @@ Verknüpft einen Einsatz mit den alarmierten Einheiten.
 
 | Spalte | Typ | Bedeutung |
 |---|---|---|
-| `incident_id` | INTEGER, FK, PK | Einsatz |
-| `unit_id` | INTEGER, FK, PK | Beteiligte Einheit |
-| `vehicles` | TEXT, NOT NULL | JSON-Liste der beim Import erkannten Fahrzeuge |
+| `incident_id` | BIGINT UNSIGNED, FK, PK | Einsatz |
+| `unit_id` | BIGINT UNSIGNED, FK, PK | Beteiligte Einheit |
+| `vehicles` | JSON, NOT NULL | Liste der beim Import erkannten Fahrzeuge |
 
 Ein Einsatz kann jeder Einheit nur einmal zugeordnet sein. Beim Löschen des
 Einsatzes wird die Zuordnung mitgelöscht.
@@ -150,10 +160,10 @@ Kompatibilitätsgründen reine Fahrzeugnamen enthalten.
 
 | Spalte | Typ | Bedeutung |
 |---|---|---|
-| `id` | INTEGER, PK | Interne Mitglieds-ID |
-| `organization_id` | INTEGER, FK | Zugehörige Wehr |
-| `divera_id` | TEXT, NOT NULL | DIVERA-Mitglieds-ID |
-| `name` | TEXT, NOT NULL | Anzeigename |
+| `id` | BIGINT UNSIGNED, PK | Interne Mitglieds-ID |
+| `organization_id` | BIGINT UNSIGNED, FK | Zugehörige Wehr |
+| `divera_id` | VARCHAR(200), NOT NULL | DIVERA-Mitglieds-ID |
+| `name` | VARCHAR(200), NOT NULL | Anzeigename |
 
 Ein Mitglied ist über `(organization_id, divera_id)` innerhalb einer Wehr
 eindeutig und kann mehreren Einheiten angehören.
@@ -164,18 +174,18 @@ Viele-zu-viele-Zuordnung von Mitgliedern zu Einheiten.
 
 | Spalte | Typ | Bedeutung |
 |---|---|---|
-| `member_id` | INTEGER, FK, PK | Mitglied |
-| `unit_id` | INTEGER, FK, PK | Einheit |
+| `member_id` | BIGINT UNSIGNED, FK, PK | Mitglied |
+| `unit_id` | BIGINT UNSIGNED, FK, PK | Einheit |
 
 ### `qualifications`
 
 | Spalte | Typ | Bedeutung |
 |---|---|---|
-| `id` | INTEGER, PK | Interne Qualifikations-ID |
-| `unit_id` | INTEGER, FK | Einheit, aus deren DIVERA-Konfiguration sie stammt |
-| `divera_id` | TEXT, NOT NULL | DIVERA-Qualifikations-ID |
-| `name` | TEXT, NOT NULL | Bezeichnung |
-| `shortname` | TEXT, NOT NULL | Kurzbezeichnung |
+| `id` | BIGINT UNSIGNED, PK | Interne Qualifikations-ID |
+| `unit_id` | BIGINT UNSIGNED, FK | Einheit, aus deren DIVERA-Konfiguration sie stammt |
+| `divera_id` | VARCHAR(200), NOT NULL | DIVERA-Qualifikations-ID |
+| `name` | VARCHAR(200), NOT NULL | Bezeichnung |
+| `shortname` | VARCHAR(100), NOT NULL | Kurzbezeichnung |
 
 Eindeutig ist `(unit_id, divera_id)`.
 
@@ -185,30 +195,30 @@ Viele-zu-viele-Zuordnung von Mitgliedern zu Qualifikationen.
 
 | Spalte | Typ | Bedeutung |
 |---|---|---|
-| `member_id` | INTEGER, FK, PK | Mitglied |
-| `qualification_id` | INTEGER, FK, PK | Qualifikation |
+| `member_id` | BIGINT UNSIGNED, FK, PK | Mitglied |
+| `qualification_id` | BIGINT UNSIGNED, FK, PK | Qualifikation |
 
 ### `reports`
 
 | Spalte | Typ | Bedeutung |
 |---|---|---|
-| `id` | INTEGER, PK | Interne Berichts-ID |
-| `incident_id` | INTEGER, FK | Zugehöriger Einsatz |
-| `unit_id` | INTEGER, FK | Berichtende Einheit |
-| `author_id` | INTEGER, FK | Erstellender Benutzer |
+| `id` | BIGINT UNSIGNED, PK | Interne Berichts-ID |
+| `incident_id` | BIGINT UNSIGNED, FK | Zugehöriger Einsatz |
+| `unit_id` | BIGINT UNSIGNED, FK | Berichtende Einheit |
+| `author_id` | BIGINT UNSIGNED, FK | Erstellender Benutzer |
 | `narrative` | TEXT, NOT NULL | Freitext des Einheitsberichts |
 | `vehicles` | TEXT, NOT NULL | Abgeleitete, kommagetrennte Fahrzeugübersicht |
 | `personnel` | TEXT, NOT NULL | Abgeleitete, kommagetrennte Personalübersicht |
-| `alarmed_at` | TEXT, NULL | Alarmierungszeit aus `incidents.started_at` |
-| `departed_at` | TEXT, NULL | Ausrückezeit |
-| `arrived_at` | TEXT, NULL | Eintreffzeit |
-| `ended_at` | TEXT, NULL | Einsatzende |
-| `incident_type` | TEXT, NOT NULL | Validierte Einsatzart |
-| `classification` | TEXT, NOT NULL | JSON-Aufgliederung |
-| `status` | TEXT, NOT NULL | `draft` oder `released` |
-| `created_at` | TEXT, NOT NULL | Erstellungszeit |
-| `updated_at` | TEXT, NOT NULL | Letzte Änderung |
-| `released_at` | TEXT, NULL | Freigabezeit |
+| `alarmed_at` | VARCHAR(100), NULL | Alarmierungszeit aus `incidents.started_at` |
+| `departed_at` | VARCHAR(100), NULL | Ausrückezeit |
+| `arrived_at` | VARCHAR(100), NULL | Eintreffzeit |
+| `ended_at` | VARCHAR(100), NULL | Einsatzende |
+| `incident_type` | VARCHAR(100), NOT NULL | Validierte Einsatzart |
+| `classification` | JSON, NOT NULL | Aufgliederung |
+| `status` | ENUM, NOT NULL | `draft` oder `released` |
+| `created_at` | DATETIME, NOT NULL | Erstellungszeit |
+| `updated_at` | DATETIME, NOT NULL | Letzte Änderung |
+| `released_at` | DATETIME, NULL | Freigabezeit |
 
 Eindeutig ist `(incident_id, unit_id)`: Jede Einheit schreibt pro Einsatz
 genau einen Bericht. Die vier Einsatzzeiten müssen chronologisch sein.
@@ -234,10 +244,10 @@ Die Spalten `vehicles` und `personnel` sind nur lesbare Zusammenfassungen aus
 
 | Spalte | Typ | Bedeutung |
 |---|---|---|
-| `report_id` | INTEGER, FK, PK | Bericht |
-| `member_id` | INTEGER, FK, PK | Eingesetztes Mitglied |
-| `vehicle` | TEXT, NOT NULL | Fahrzeugname; leer bedeutet „Ohne Fahrzeug“ |
-| `role` | TEXT, NOT NULL | `maschinist`, `einheitsfuehrer` oder `besatzung` |
+| `report_id` | BIGINT UNSIGNED, FK, PK | Bericht |
+| `member_id` | BIGINT UNSIGNED, FK, PK | Eingesetztes Mitglied |
+| `vehicle` | VARCHAR(200), NOT NULL | Fahrzeugname; leer bedeutet „Ohne Fahrzeug“ |
+| `role` | ENUM, NOT NULL | `maschinist`, `einheitsfuehrer` oder `besatzung` |
 
 Ein Mitglied kann pro Bericht nur einmal vorkommen. Pro Fahrzeug sind
 höchstens ein Maschinist und ein Einheitsführer zulässig; die Besatzung ist
@@ -247,7 +257,8 @@ validiert.
 
 ## Lösch- und Konsistenzverhalten
 
-- SQLite-Fremdschlüssel sind aktiviert.
+- Alle Tabellen verwenden InnoDB und `utf8mb4`; MySQL-Fremdschlüssel sind
+  aktiv.
 - Einsätze löschen ihre Einheitszuordnungen, Berichte und
   Besatzungszuordnungen kaskadierend.
 - Benutzer löschen ihre Sitzungen und Einheitszuordnungen kaskadierend.

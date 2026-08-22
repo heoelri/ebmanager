@@ -11,9 +11,30 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: einsatzberichte
+          MYSQL_ROOT_PASSWORD: test-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -ptest-password"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm test
+      - name: PHP und MySQL-Client installieren
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends php-cli php-mysql mysql-client
+      - name: PHP-Syntax prüfen
+        run: find . -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Testskripte prüfen
+        run: bash -n test/smoke.sh
+      - name: Schema und API prüfen
+        env:
+          MYSQL_PWD: test-password
+        run: |
+          mysql --host=127.0.0.1 --user=root einsatzberichte < schema.sql
+          bash test/smoke.sh
