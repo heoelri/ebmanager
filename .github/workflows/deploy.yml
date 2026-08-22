@@ -1,0 +1,57 @@
+name: Deployment
+
+on:
+  workflow_run:
+    workflows:
+      - Tests
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hiba-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: hiba
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Anwendung per FTPS hochladen
+        env:
+          FTP_SERVER: ${{ secrets.FTP_SERVER }}
+          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
+          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
+          FTP_PATH: ${{ secrets.FTP_PATH }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${FTP_SERVER:?Secret FTP_SERVER fehlt}"
+          : "${FTP_USERNAME:?Secret FTP_USERNAME fehlt}"
+          : "${FTP_PASSWORD:?Secret FTP_PASSWORD fehlt}"
+
+          remote_path="${FTP_PATH#/}"
+          remote_path="${remote_path%/}"
+          base_url="ftp://${FTP_SERVER}"
+          if [[ -n "$remote_path" ]]; then
+            base_url="${base_url}/${remote_path}"
+          fi
+
+          for file in .htaccess api.php public/index.html; do
+            curl --fail --silent --show-error \
+              --ssl-reqd \
+              --ftp-create-dirs \
+              --user "${FTP_USERNAME}:${FTP_PASSWORD}" \
+              --upload-file "$file" \
+              "${base_url}/${file}"
+          done

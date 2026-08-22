@@ -1,0 +1,24 @@
+Options -Indexes
+DirectoryIndex public/index.html
+
+<FilesMatch "^(config(?:\..*)?\.php|schema\.sql)$">
+  Require all denied
+</FilesMatch>
+
+RewriteEngine On
+
+RewriteCond %{HTTPS} !=on
+RewriteCond %{HTTP_HOST} !^[A-Za-z0-9.-]+(?::[0-9]+)?$ [NC]
+RewriteRule ^ - [R=400,L]
+RewriteCond %{HTTPS} !=on
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L,NE]
+
+RewriteRule ^api(?:/.*)?$ api.php [L,QSA]
+RewriteRule ^$ public/index.html [L]
+
+<IfModule mod_headers.c>
+  Header always set Strict-Transport-Security "max-age=31536000"
+  Header always set Content-Security-Policy "frame-ancestors 'none'"
+  Header always set Referrer-Policy "no-referrer"
+  Header always set X-Content-Type-Options "nosniff"
+</IfModule>

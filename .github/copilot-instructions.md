@@ -9,11 +9,18 @@
   relativieren würde, frage den Benutzer vor der Umsetzung.
 - Dokumentiere neue dauerhafte Produkt- oder Architekturentscheidungen in
   dieser Datei. Temporäre Implementierungsdetails gehören nicht hierher.
+- Aktualisiere `CHANGELOG.md` bei jeder relevanten funktionalen, technischen oder betrieblichen Änderung. Nicht rückwärtskompatible Änderungen müssen ausdrücklich unter `Breaking Changes` stehen.
+- Dokumentiere jeden nicht automatisierbaren Aktualisierungsschritt vollständig in `CHANGELOG.md` und im Aktualisierungsabschnitt der `README.md`; insbesondere müssen erforderliche SQL-Migrationen, Konfigurationswerte und ihre Ausführungsreihenfolge genannt werden.
+- `docs/WEBSPACE-DEPLOYMENT.md` ist die maßgebliche ausführliche Anleitung für Installation, Deployment, Updates und Rollback auf Webspace. Andere Dokumente verlinken darauf, statt dieselben Schritte zu duplizieren.
 - Aktualisiere `DATENMODELL.md` bei jeder Änderung am Code, damit Tabellen,
   Beziehungen, Datenformate und fachliche Regeln immer dem aktuellen
   Implementierungsstand entsprechen.
+- Größere Änderungen an Anwendung, Berechtigungen, Datenmodell oder
+  Infrastruktur müssen vor Abschluss einen Security Review durchlaufen.
+  Dokumentiere Befunde und Entscheidungen in `SECURITY-REVIEW.md`.
 - Halte Änderungen klein und vollständig. Verwende zuerst vorhandenen Code,
-  dann Node.js- oder Browser-APIs und erst danach zusätzliche Abhängigkeiten.
+  dann PHP-, MySQL- oder Browser-Funktionen und erst danach zusätzliche
+  Abhängigkeiten.
 
 ## Produkt und Sprache
 
@@ -26,17 +33,25 @@
 
 ## Technische Architektur
 
-- Laufzeit: Node.js 22.5 oder neuer.
-- Backend: `server.js` mit `node:http`, `node:sqlite` und weiteren
-  Node.js-Standardmodulen.
+- Zielbetrieb ist regulärer Webspace mit FTP- oder SFTP-Zugang, PHP 8.2 oder
+  neuer, Apache und MySQL 8.0 oder neuer.
+- Backend: `api.php` mit PHP-Standardfunktionen und PDO MySQL.
 - Frontend: `public/index.html` mit nativem HTML, CSS und JavaScript.
-- Es gibt keine Laufzeitabhängigkeiten aus npm. Füge keine Abhängigkeit hinzu,
-  wenn Standardbibliothek oder Browserplattform die Aufgabe lösen.
-- SQLite liegt unter `data/app.db`; Tests verwenden `:memory:`.
-- Das Schema wird beim Start erzeugt. Notwendige bestehende Datenbanken werden
-  durch kleine additive Migrationen im Server aktualisiert.
+- Es gibt keine Composer-Laufzeitabhängigkeiten.
+- Lokale Entwicklung läuft über `compose.yaml` mit PHP 8.2/Apache, MySQL 8.4
+  und einem ausschließlich lokalen, selbstsignierten HTTPS-Zertifikat.
+- Das initiale MySQL-Schema liegt in `schema.sql`. Spätere Schemaänderungen
+  benötigen kleine, vor dem Anwendungscode auszuführende SQL-Migrationen.
+- Apache leitet `/api/*` über `.htaccess` an `api.php` weiter und liefert
+  `public/index.html` als Startseite aus.
+- Nach erfolgreichen Tests eines Pushs auf `main` lädt der Deployment-Workflow
+  nur `.htaccess`, `api.php` und `public/index.html` per verpflichtendem FTPS
+  hoch. Konfiguration und SQL-Dateien werden nie automatisch deployt.
+- Das produktive GitHub-Environment heißt `hiba`. Weitere Ziele wie `devpreview` müssen eigene Environments, Secrets, Schutzregeln und Concurrency-Gruppen verwenden; Produktionszugangsdaten werden nicht geteilt.
+- Datenbankzugangsdaten, das einmalige Einrichtungstoken, die öffentliche HTTPS-Anwendungsadresse und die Absenderadresse kommen aus Umgebungsvariablen oder der nicht versionierten `config.local.php`.
 - API-Fehler haben die Form `{ "error": "..." }`. Eingaben werden an der
   API-Grenze validiert; Fehler dürfen nicht still ignoriert werden.
+- `GET /api/bootstrap` prüft Datenbankkonfiguration, Erreichbarkeit und das vollständige Schema. Fehler werden ohne Zugangsdaten mit HTTP 503 gemeldet und in der Oberfläche als Betriebszustand angezeigt.
 
 ## Mandanten und Berechtigungen
 
@@ -52,6 +67,7 @@
   Feld `users.unit_id` bleibt nur als kompatible Primärzuordnung bestehen.
 - Benutzer können durch die Wehrleitung bearbeitet werden. Ein neues Passwort
   ist dabei optional.
+- Vergessene Passwörter werden über einen per E-Mail versendeten, nur als SHA-256-Hash gespeicherten Einmal-Token zurückgesetzt. Der Token gilt 30 Minuten, Anforderungen sind pro Benutzer fünf Minuten gesperrt und ein erfolgreicher Reset widerruft alle Sitzungen.
 - Freigegebene Berichte sind unveränderlich.
 - Sitzungen liegen in einem `HttpOnly`- und `SameSite=Strict`-Cookie und laufen
   nach zwölf Stunden ab.
@@ -130,7 +146,7 @@
   fremdes Fahrzeug markiert. Nur eigene Fahrzeuge sind Besatzungsziele.
 - Die Besatzungs-Endpunkte von DIVERA werden niemals verwendet. Alle
   Personal-Fahrzeug-Zuordnungen existieren ausschließlich lokal.
-- Ein lokaler POST-Import oder Sync schreibt nur in SQLite und ist kein
+- Ein lokaler POST-Import oder Sync schreibt nur in MySQL und ist kein
   schreibender DIVERA-Aufruf.
 
 ## Oberfläche
@@ -151,7 +167,15 @@
 
 ## Datenschutz und Sicherheit
 
-- Passwörter werden mit `scrypt` und individuellem Salt gespeichert.
+- Passwörter werden mit `password_hash` gespeichert und mit
+  `password_verify` geprüft.
+- Die öffentliche Ersteinrichtung erfordert ein zufälliges, mindestens 32
+  Zeichen langes `SETUP_TOKEN`.
+- Sitzungscookies sind `HttpOnly`, `SameSite=Strict` und bei HTTPS `Secure`.
+  Eine Passwortänderung widerruft alle Sitzungen des betroffenen Benutzers.
+- Das Sitzungscookie heißt `__Host-session`. Alle schreibenden API-Anfragen
+  erfordern `application/json`; vorhandene `Origin`-Header müssen exakt der
+  HTTPS-Anwendungsorigin entsprechen.
 - Passwort-Hashes, Sitzungswerte und DIVERA-Schlüssel werden nie über die API
   ausgegeben.
 - Mandanten- und Einheitsgrenzen werden serverseitig geprüft; reine
@@ -161,17 +185,27 @@
 
 ## Tests und CI
 
-- Tests verwenden ausschließlich `node:test` und laufen mit `npm test`.
-- GitHub Actions führt denselben Befehl aus
-  `.github/workflows/test.yml` unter Node.js 22 aus.
+- Tests verwenden PHP-, MySQL- und Shell-Bordmittel ohne Testframework.
+- GitHub Actions prüft PHP-Syntax, importiert `schema.sql` in MySQL 8 und
+  führt `test/smoke.sh` aus.
+- Ein unabhängiger CI-Job baut die Docker-Images und führt den Smoke-Test
+  gegen Apache/HTTPS und MySQL aus. Der Test-Workflow ist nur erfolgreich,
+  wenn beide Jobs bestehen.
+- Docker Compose führt denselben Smoke-Test gegen die lokale
+  HTTPS-/MySQL-Umgebung aus.
+- Pull Requests führen ausschließlich Tests aus und erhalten keinen Zugriff auf die Secrets des GitHub-Environments `hiba` oder zukünftiger Deployment-Environments.
+- Dependabot prüft GitHub Actions, Dockerfiles und Docker Compose wöchentlich.
+  Minor- und Patch-Updates werden je Ökosystem gruppiert; Major-Updates
+  bleiben einzeln prüfbar.
 - Ergänze für nicht triviale Änderungen einen fokussierten Test im bestehenden
   End-to-End-Fluss, besonders für Mandantentrennung, Rollen,
   Import-Idempotenz und externe Nur-Lese-Grenzen.
-- Führe keine neuen Testframeworks ein, solange `node:test` ausreicht.
+- Führe kein Testframework ein, solange die fokussierten HTTP-Checks
+  ausreichen.
 
 ## Betrieb und Zurücksetzen
 
 - Es gibt absichtlich keine Lösch- oder Reset-Funktion in der Oberfläche.
-- Ein vollständiger einmaliger Reset erfolgt nur bei beendetem Server durch
-  `Remove-Item .\data\app.db`; danach startet die Ersteinrichtung neu.
+- Ein vollständiger einmaliger Reset erfolgt durch Löschen aller
+  MySQL-Tabellen und erneuten Import von `schema.sql`.
 - Ein Reset löscht alle Benutzer, Einsätze und Berichte endgültig.

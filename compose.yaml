@@ -1,0 +1,58 @@
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: einsatzberichte
+      MYSQL_USER: einsatzberichte
+      MYSQL_PASSWORD: local-password
+      MYSQL_ROOT_PASSWORD: test-password
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    healthcheck:
+      test: [CMD, mysqladmin, ping, -h, localhost, -ptest-password]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_DSN: mysql:host=db;dbname=einsatzberichte;charset=utf8mb4
+      DB_USER: einsatzberichte
+      DB_PASSWORD: local-password
+      SETUP_TOKEN: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      APP_URL: https://localhost:8443
+      MAIL_FROM: einsatzberichte@localhost.test
+    ports:
+      - 127.0.0.1:8080:80
+      - 127.0.0.1:8443:443
+    volumes:
+      - ./api.php:/var/www/html/api.php:ro
+      - ./.htaccess:/var/www/html/.htaccess:ro
+      - ./public:/var/www/html/public:ro
+    healthcheck:
+      test: [CMD, curl, --fail, --insecure, https://localhost/api/bootstrap]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  test:
+    profiles: [test]
+    build: .
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      DB_USER: root
+      DB_PASSWORD: test-password
+      SETUP_TOKEN: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      TEST_BASE_URL: https://web
+      TEST_DB_HOST: db
+    command: [bash, test/smoke.sh]
+
+volumes:
+  mysql-data:
