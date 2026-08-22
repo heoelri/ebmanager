@@ -17,10 +17,10 @@ Secrets, HTTPS und externe DIVERA-Aufrufe.
 | Schweregrad | Befund | Umsetzung |
 |---|---|---|
 | Hoch | Eine ungeschützte Ersteinrichtung könnte vom ersten externen Aufrufer übernommen werden. | `/api/setup` verlangt ein zufälliges `SETUP_TOKEN` mit mindestens 32 Zeichen und vergleicht es mit `hash_equals`. Nach dem ersten Benutzer ist die Route dauerhaft geschlossen. |
-| Mittel | Sitzungscookies könnten ohne `Secure` über unverschlüsseltes HTTP übertragen werden. | Cookies sind immer `Secure`, `HttpOnly` und `SameSite=Strict`. `.htaccess` leitet HTTP auf HTTPS um und setzt HSTS, sofern `mod_headers` verfügbar ist. |
+| Hoch | Beim vorübergehenden HTTP-Betrieb können Sitzungscookies und Anmeldedaten im Netzwerk mitgelesen werden. | Das HTTP-Cookie bleibt `HttpOnly` und `SameSite=Strict`, die Origin-Prüfung bleibt aktiv. Sobald HTTPS verfügbar ist, verwendet die Anwendung automatisch wieder `Secure` und `__Host-session`; Weiterleitung und HSTS müssen dann in `.htaccess` reaktiviert werden. |
 | Mittel | Eine Passwortänderung ließ bereits bestehende Sitzungen aktiv. | Bei einer Passwortänderung werden alle Sitzungen des Benutzers innerhalb derselben Transaktion gelöscht. |
 | Mittel | Der Einsatzimport vertraute den vom Browser gesendeten Einsatzdetails und konnte gemeinsame Einsatzdaten überschreiben. | Der Browser sendet nur die DIVERA-ID. Das Backend lädt den Einsatz mit dem serverseitigen Schlüssel erneut per `GET` und speichert ausschließlich diese verifizierten Daten. |
-| Mittel | `SameSite=Strict` allein schützte auf Shared Hosting nicht vor schreibenden Anfragen einer fremden Subdomain derselben Site. | Alle schreibenden Anfragen erfordern `application/json`; vorhandene `Origin`-Header müssen exakt der HTTPS-Anwendungsorigin entsprechen. |
+| Mittel | `SameSite=Strict` allein schützte auf Shared Hosting nicht vor schreibenden Anfragen einer fremden Subdomain derselben Site. | Alle schreibenden Anfragen erfordern `application/json`; vorhandene `Origin`-Header müssen exakt der Anwendungsorigin einschließlich des tatsächlich verwendeten Schemas entsprechen. |
 | Mittel | Eine parallele Bearbeitung konnte zwischen Statusprüfung und Freigabe noch einen bereits freigegebenen Bericht verändern. | Die Bearbeitung sperrt den Berichtsdatensatz mit `SELECT ... FOR UPDATE` und prüft den Entwurfsstatus innerhalb derselben Transaktion erneut. |
 
 ## Ohne offenen Befund

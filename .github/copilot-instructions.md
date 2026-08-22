@@ -44,6 +44,7 @@
   benötigen kleine, vor dem Anwendungscode auszuführende SQL-Migrationen.
 - Apache leitet `/api/*` über `.htaccess` an `api.php` weiter und liefert
   `public/index.html` als Startseite aus.
+- Die Anwendung unterstützt ohne separate Pfadkonfiguration sowohl den Betrieb im Dokumentenstamm als auch in einem Unterverzeichnis.
 - Nach erfolgreichen Tests eines Pushs auf `main` lädt der Deployment-Workflow
   nur `.htaccess`, `api.php` und `public/index.html` per verpflichtendem FTPS
   hoch. Konfiguration und SQL-Dateien werden nie automatisch deployt.
@@ -173,9 +174,7 @@
   Zeichen langes `SETUP_TOKEN`.
 - Sitzungscookies sind `HttpOnly`, `SameSite=Strict` und bei HTTPS `Secure`.
   Eine Passwortänderung widerruft alle Sitzungen des betroffenen Benutzers.
-- Das Sitzungscookie heißt `__Host-session`. Alle schreibenden API-Anfragen
-  erfordern `application/json`; vorhandene `Origin`-Header müssen exakt der
-  HTTPS-Anwendungsorigin entsprechen.
+- Das Sitzungscookie heißt unter HTTPS `__Host-session` und während des temporären HTTP-Betriebs `session`. Alle schreibenden API-Anfragen erfordern `application/json`; vorhandene `Origin`-Header müssen exakt der Anwendungsorigin mit dem tatsächlich verwendeten Schema entsprechen.
 - Passwort-Hashes, Sitzungswerte und DIVERA-Schlüssel werden nie über die API
   ausgegeben.
 - Mandanten- und Einheitsgrenzen werden serverseitig geprüft; reine

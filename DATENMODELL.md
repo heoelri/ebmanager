@@ -7,6 +7,7 @@ fachliche Regeln.
 
 `GET /api/bootstrap` prüft vor Einrichtung und Anmeldung die Datenbankverbindung sowie das Vorhandensein aller in diesem Dokument beschriebenen Tabellen. Eine fehlende Konfiguration, nicht erreichbare Datenbank oder unvollständige Migration wird mit HTTP 503 gemeldet; dabei werden keine Zugangsdaten ausgegeben.
 Die Anwendung initialisiert jede PDO-Verbindung explizit mit `utf8mb4`.
+API-Routen bleiben unabhängig davon `/api/...`, ob die Anwendung im Dokumentenstamm oder in einem Unterverzeichnis installiert ist; der Installationspfad wird vor dem Routing entfernt.
 
 `schema.sql` wird nicht durch den FTPS-Workflow deployt. Schemaänderungen
 werden vor dem Anwendungscode kontrolliert über die Datenbankverwaltung des
@@ -47,6 +48,8 @@ Eine `organization` ist ein Mandant. Tabellen ohne eigene
 `organization_id` werden über ihre übergeordnete Einheit, ihren Einsatz oder
 ihren Bericht einem Mandanten zugeordnet. Die Anwendung prüft diese Grenze bei
 jeder fachlichen Abfrage.
+
+Sitzungen werden über HTTPS im `Secure`-Cookie `__Host-session` und während des temporären HTTP-Betriebs im Cookie `session` übertragen. Beide Varianten sind `HttpOnly` und `SameSite=Strict`.
 
 ## Tabellen
 

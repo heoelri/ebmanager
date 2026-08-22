@@ -7,7 +7,6 @@ final class ApiError extends RuntimeException
 }
 
 const ROLES = ['wehrleitung', 'einheitsleitung', 'fuehrungskraft'];
-const SESSION_COOKIE = '__Host-session';
 const INCIDENT_TYPES = [
     'Kleinbrand', 'Mittelbrand', 'Großbrand', 'Wald- und Flächenbrand',
     'Schornsteinbrand', 'Kfz-Brand', 'Verkehrsunfall', 'Oelunfall/Oelspur',
@@ -131,6 +130,28 @@ function input(): array
     return $data;
 }
 
+function requestIsHttps(): bool
+{
+    return strtolower((string)($_SERVER['HTTPS'] ?? '')) === 'on';
+}
+
+function sessionCookieName(): string
+{
+    return requestIsHttps() ? '__Host-session' : 'session';
+}
+
+function requestPath(): string
+{
+    $path = parse_url($_SERVER['REQUEST_URI'] ?? '/api', PHP_URL_PATH);
+    $path = is_string($path) ? $path : '/api';
+    $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
+    if (basename($script) === 'api.php') {
+        $base = rtrim(str_replace('\\', '/', dirname($script)), '/.');
+        if ($base !== '' && str_starts_with($path, "$base/")) $path = substr($path, strlen($base));
+    }
+    return rawurldecode($path);
+}
+
 function assertRequestOrigin(string $method): void
 {
     if (in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)) return;
@@ -139,7 +160,8 @@ function assertRequestOrigin(string $method): void
     $origin = rtrim((string)($_SERVER['HTTP_ORIGIN'] ?? ''), '/');
     if ($origin === '') return;
     $host = (string)($_SERVER['HTTP_HOST'] ?? '');
-    if (!preg_match('/^[A-Za-z0-9.-]+(?::[0-9]+)?$/', $host) || !hash_equals("https://$host", $origin)) {
+    $scheme = requestIsHttps() ? 'https' : 'http';
+    if (!preg_match('/^[A-Za-z0-9.-]+(?::[0-9]+)?$/', $host) || !hash_equals("$scheme://$host", $origin)) {
         throw new ApiError(403, 'Anfrageursprung ist ungültig');
     }
 }
@@ -225,7 +247,7 @@ function report(int $id, int $organizationId): ?array
 
 function currentUser(): ?array
 {
-    $token = $_COOKIE[SESSION_COOKIE] ?? '';
+    $token = $_COOKIE[sessionCookieName()] ?? '';
     if (!preg_match('/^[a-f0-9]{64}$/', $token)) return null;
     $user = one(
         'SELECT u.*,o.name organization_name FROM sessions s
@@ -426,8 +448,7 @@ function diveraData(array $unit): array
 try {
     $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
     assertRequestOrigin($method);
-    $path = parse_url($_SERVER['REQUEST_URI'] ?? '/api', PHP_URL_PATH);
-    $path = rawurldecode(is_string($path) ? $path : '/api');
+    $path = requestPath();
     $public = in_array($path, ['/api/bootstrap', '/api/setup', '/api/login', '/api/password-reset/request', '/api/password-reset/confirm'], true);
     $user = $public ? null : currentUser();
     if (!$public && !$user) respond(401, ['error' => 'Bitte anmelden']);
@@ -468,13 +489,14 @@ try {
             throw new ApiError(401, 'E-Mail oder Passwort falsch');
         }
         $token = bin2hex(random_bytes(32));
-        transaction(function () use ($token, $login) {
+        $cookieName = sessionCookieName();
+        transaction(function () use ($token, $login, $cookieName) {
             query('DELETE FROM sessions WHERE expires_at<=UTC_TIMESTAMP()');
-            if (preg_match('/^[a-f0-9]{64}$/', $_COOKIE[SESSION_COOKIE] ?? '')) query('DELETE FROM sessions WHERE token=?', [$_COOKIE[SESSION_COOKIE]]);
+            if (preg_match('/^[a-f0-9]{64}$/', $_COOKIE[$cookieName] ?? '')) query('DELETE FROM sessions WHERE token=?', [$_COOKIE[$cookieName]]);
             query('INSERT INTO sessions(token,user_id,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 12 HOUR)', [$token, $login['id']]);
         });
-        setcookie(SESSION_COOKIE, $token, [
-            'expires' => time() + 43200, 'path' => '/', 'secure' => true,
+        setcookie($cookieName, $token, [
+            'expires' => time() + 43200, 'path' => '/', 'secure' => requestIsHttps(),
             'httponly' => true, 'samesite' => 'Strict'
         ]);
         respond(200, ['ok' => true]);
@@ -519,9 +541,10 @@ try {
     }
 
     if ($method === 'POST' && $path === '/api/logout') {
-        if (isset($_COOKIE[SESSION_COOKIE])) query('DELETE FROM sessions WHERE token=?', [$_COOKIE[SESSION_COOKIE]]);
-        setcookie(SESSION_COOKIE, '', [
-            'expires' => 1, 'path' => '/', 'secure' => true,
+        $cookieName = sessionCookieName();
+        if (isset($_COOKIE[$cookieName])) query('DELETE FROM sessions WHERE token=?', [$_COOKIE[$cookieName]]);
+        setcookie($cookieName, '', [
+            'expires' => 1, 'path' => '/', 'secure' => requestIsHttps(),
             'httponly' => true, 'samesite' => 'Strict'
         ]);
         respond(200, ['ok' => true]);

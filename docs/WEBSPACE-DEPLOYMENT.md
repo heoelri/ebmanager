@@ -19,12 +19,19 @@ Die Anwendung benötigt keinen Paketmanager, Build-Schritt, Cronjob oder dauerha
 
 ## 2. Domain und Zielverzeichnis vorbereiten
 
-1. Eine Domain oder Subdomain beim Hoster anlegen.
-2. Das zugehörige Dokumentenstammverzeichnis ermitteln.
+1. Eine Domain oder Subdomain beim Hoster anlegen und entscheiden, ob die Anwendung direkt im Dokumentenstamm oder in einem Unterverzeichnis wie `ebmanager` betrieben wird.
+2. Das Dokumentenstammverzeichnis beziehungsweise das vollständige Zielverzeichnis ermitteln.
 3. HTTPS aktivieren und prüfen, dass die Domain ohne Zertifikatswarnung erreichbar ist.
 4. Sicherstellen, dass versteckte Dateien wie `.htaccess` hochgeladen werden können.
 
-Die Anwendung gehört direkt in das Dokumentenstammverzeichnis. Ein Betrieb in einem Unterverzeichnis ist nicht vorgesehen, weil das Sitzungscookie das Präfix `__Host-` und den Pfad `/` verwendet.
+Beide Varianten werden unterstützt:
+
+| Variante | Öffentliche Adresse | Zielverzeichnis |
+|---|---|---|
+| Dokumentenstamm | `https://berichte.example.org/` | Dokumentenstamm der Domain |
+| Unterverzeichnis | `https://www.example.org/ebmanager/` | Unterverzeichnis `ebmanager` im Dokumentenstamm |
+
+Das Unterverzeichnis benötigt keine besondere `RewriteBase`-Konfiguration. Die Anwendung muss über die Verzeichnisadresse mit abschließendem `/` geöffnet werden, nicht direkt über `public/index.html`.
 
 ## 3. MySQL-Datenbank anlegen
 
@@ -68,11 +75,11 @@ return [
 ];
 ```
 
-`app_url` muss die öffentliche HTTPS-Adresse der Anwendung enthalten. `mail_from` muss eine beim Hoster zulässige Absenderadresse sein. Alternativ können `DB_DSN`, `DB_USER`, `DB_PASSWORD`, `SETUP_TOKEN`, `APP_URL` und `MAIL_FROM` als Umgebungsvariablen gesetzt werden.
+`app_url` muss die vollständige öffentliche HTTPS-Adresse der Anwendung ohne abschließenden `/` enthalten, beispielsweise `https://berichte.example.org` für den Dokumentenstamm oder `https://www.example.org/ebmanager` für ein Unterverzeichnis. `mail_from` muss eine beim Hoster zulässige Absenderadresse sein. Alternativ können `DB_DSN`, `DB_USER`, `DB_PASSWORD`, `SETUP_TOKEN`, `APP_URL` und `MAIL_FROM` als Umgebungsvariablen gesetzt werden.
 
 ## 6. Dateien hochladen
 
-Folgende Struktur muss im Dokumentenstammverzeichnis entstehen:
+Folgende Struktur muss im gewählten Zielverzeichnis entstehen:
 
 ```text
 .htaccess
@@ -82,13 +89,40 @@ public/
   index.html
 ```
 
-1. `.htaccess`, `api.php`, `config.local.php` und `public/index.html` per SFTP oder verschlüsseltem FTPS hochladen.
+1. Das gewählte Zielverzeichnis anlegen und `.htaccess`, `api.php`, `config.local.php` sowie `public/index.html` per SFTP oder verschlüsseltem FTPS dorthin hochladen.
 2. Prüfen, dass `.htaccess` tatsächlich vorhanden ist; einige FTP-Programme blenden versteckte Dateien aus.
 3. Für Verzeichnisse Berechtigungen wie `755` und für öffentliche Dateien `644` verwenden, sofern der Hoster keine anderen Vorgaben macht.
 4. `config.local.php` so restriktiv wie vom Hoster unterstützt auf `600` oder `640` setzen.
 5. `schema.sql`, `migrations/`, Tests, Dokumentation und Repository-Metadaten nicht in das öffentliche Zielverzeichnis hochladen.
 
 Unverschlüsseltes FTP sollte nicht verwendet werden, weil dabei Zugangsdaten und Anwendungsdateien mitgelesen werden können.
+
+### Upload per SFTP mit Passwort
+
+Ein privater SSH-Schlüssel ist nicht erforderlich, wenn der Hoster ausschließlich Passwortauthentifizierung anbietet. Benötigt werden SFTP-Hostname, Port, Benutzername, Passwort und das Zielverzeichnis.
+
+1. In WinSCP, FileZilla oder einem vergleichbaren Client das Protokoll **SFTP** auswählen; nicht FTP oder FTPS.
+2. Hostname und Port des Hosters eintragen, üblicherweise Port `22`, und die Anmeldung mit Benutzername und Passwort wählen.
+3. Beim ersten Verbindungsaufbau den angezeigten SSH-Host-Key-Fingerabdruck mit einer vertrauenswürdigen Angabe des Hosters vergleichen. Nur bei Übereinstimmung speichern und fortfahren.
+4. Zum Dokumentenstamm wechseln oder dort für die Unterverzeichnisvariante den Ordner `ebmanager` anlegen und öffnen.
+5. Die oben gezeigte Dateistruktur vollständig in dieses Zielverzeichnis übertragen.
+
+Mit dem vorhandenen OpenSSH-Client ist derselbe interaktive Upload möglich:
+
+```text
+sftp -P 22 benutzer@sftp.example.org
+sftp> cd pfad/zum/dokumentenstamm
+sftp> mkdir ebmanager
+sftp> cd ebmanager
+sftp> put .htaccess
+sftp> put api.php
+sftp> put config.local.php
+sftp> mkdir public
+sftp> put public/index.html public/index.html
+sftp> exit
+```
+
+Für eine Installation direkt im Dokumentenstamm entfallen `mkdir ebmanager` und `cd ebmanager`. Eine Ausgabe wie `unsupported KEX method` oder eine reine SSH-Bannerzeile ist kein gültiger Host-Key. Der Schlüssel muss als vollständiger `known_hosts`-Eintrag im Format `hostname schlüsseltyp schlüssel` vorliegen und sein Fingerabdruck muss vor der Verwendung geprüft werden.
 
 ## 7. Installation prüfen
 
@@ -113,6 +147,8 @@ Die Ersteinrichtung ist nach dem ersten Benutzer dauerhaft geschlossen.
 
 Das Repository deployt nach erfolgreichen Tests eines Pushs auf `main` den exakt getesteten Commit. Der Workflow verwendet das GitHub-Environment `hiba`.
 
+Der derzeitige GitHub-Workflow unterstützt explizites FTPS. Bietet der Webspace ausschließlich SFTP an, müssen bis zu einer entsprechenden Workflow-Umstellung die Schritte unter „Upload per SFTP mit Passwort“ verwendet werden.
+
 1. Im GitHub-Repository unter **Settings → Environments** das Environment `hiba` anlegen.
 2. Gewünschte Schutzregeln wie erforderliche Freigaben konfigurieren.
 3. Folgende Environment-Secrets hinterlegen:
@@ -122,7 +158,7 @@ Das Repository deployt nach erfolgreichen Tests eines Pushs auf `main` den exakt
 | `FTP_SERVER` | FTPS-Hostname, optional mit Port, ohne Protokollpräfix |
 | `FTP_USERNAME` | FTPS-Benutzer |
 | `FTP_PASSWORD` | FTPS-Passwort |
-| `FTP_PATH` | Optionales Zielverzeichnis relativ zum FTP-Stamm |
+| `FTP_PATH` | Zielverzeichnis relativ zum FTP-Stamm; leer für dessen Dokumentenstamm oder beispielsweise `ebmanager` für ein Unterverzeichnis |
 
 4. Prüfen, dass der Server explizites FTPS unterstützt.
 5. Einen Push auf `main` durchführen und zuerst den Workflow `Tests`, danach den Workflow `Deployment` beobachten.
@@ -160,10 +196,12 @@ Migrationen dürfen nicht auf Verdacht rückgängig gemacht werden. Maßgeblich 
 | „Datenbankverbindung fehlgeschlagen“ | Hostname, Port, Datenbankname, Benutzer, Passwort und externe MySQL-Freigabe prüfen |
 | „Datenbankschema ist unvollständig“ | `schema.sql` beziehungsweise ausstehende Dateien aus `migrations/` importieren |
 | API-Aufrufe liefern 404 | `.htaccess`, `mod_rewrite` und `AllowOverride` beim Hoster prüfen |
+| Unterverzeichnis öffnet, API-Aufrufe gehen aber an die Domainwurzel | Aktuelle Version von `public/index.html` hochladen und die Anwendung über die Verzeichnisadresse mit abschließendem `/` öffnen |
 | HTTPS-Weiterleitung funktioniert nicht | Zertifikat, Domainzuordnung und Apache-Unterstützung prüfen |
 | Passwort-E-Mail kommt nicht an | `app_url`, `mail_from`, PHP `mail()`, Spamordner und Mailprotokoll des Hosters prüfen |
 | GitHub-Deployment findet Secrets nicht | Environment-Name `hiba`, Secret-Namen und Environment-Freigabe prüfen |
 | FTPS-Deployment schlägt fehl | explizites FTPS, Hostname, Port, Benutzer, Passwort und `FTP_PATH` prüfen |
+| SFTP-Verbindung schlägt fehl | Protokoll SFTP, Port, Passwortauthentifizierung, Zielpfad und den verifizierten SSH-Host-Key prüfen |
 
 Zugangsdaten, Einrichtungstoken, Sitzungstoken und DIVERA-Schlüssel dürfen bei der Fehlersuche nicht in Issues oder Protokollauszüge kopiert werden.
 

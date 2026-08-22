@@ -22,7 +22,7 @@ const reportClassifications={
   technical:['Menschen in Notlage','Tiere in Notlage','Betriebsunfall','Einsturz von Baulichkeiten','Gasausströmung','Gasvergiftung','Schäden durch radioaktive Stoffe','Wasserschaden','Sturmschaden','Sonstige technische Hilfeleistung']
 };
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function api(path,options={}){const r=await fetch(path,{...options,headers:{'content-type':'application/json',...options.headers}}),data=await r.json();if(!r.ok)throw Error(data.error);return data}
+async function api(path,options={}){const r=await fetch(path.replace(/^\/api(?=\/|$)/,'api'),{...options,headers:{'content-type':'application/json',...options.headers}}),data=await r.json();if(!r.ok)throw Error(data.error);return data}
 function formData(form){return Object.fromEntries(new FormData(form))}
 function showError(e){app.insertAdjacentHTML('afterbegin',`<p class="error">${esc(e.message)}</p>`)}
 function bindForm(id,handler){document.querySelector(id).onsubmit=async e=>{e.preventDefault();try{await handler(formData(e.target));}catch(x){showError(x)}}}

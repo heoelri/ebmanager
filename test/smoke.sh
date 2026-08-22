@@ -6,6 +6,8 @@ export DB_USER="${DB_USER:-root}"
 export DB_PASSWORD="${DB_PASSWORD:-test-password}"
 export SETUP_TOKEN="${SETUP_TOKEN:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
 base_url="${TEST_BASE_URL:-http://127.0.0.1:8080}"
+session_cookie='session'
+[[ "$base_url" == https://* ]] && session_cookie='__Host-session'
 db_host="${TEST_DB_HOST:-127.0.0.1}"
 mysql_tls_args=()
 if mysql --help 2>&1 | grep -q -- '--ssl-mode'; then
@@ -15,7 +17,8 @@ elif mysql --help 2>&1 | grep -q -- '--skip-ssl'; then
 fi
 
 DB_DSN='' REQUEST_METHOD=GET REQUEST_URI=/api/bootstrap php api.php | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
-DB_DSN='' php -r '$_COOKIE["__Host-session"]=str_repeat("a",64); $_SERVER["REQUEST_METHOD"]="GET"; $_SERVER["REQUEST_URI"]="/api/me"; require "api.php";' | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
+DB_DSN='' php -r '$_SERVER["REQUEST_METHOD"]="GET"; $_SERVER["REQUEST_URI"]="/ebmanager/api/bootstrap"; $_SERVER["SCRIPT_NAME"]="/ebmanager/api.php"; require "api.php";' | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
+DB_DSN='' php -r '$_COOKIE["session"]=str_repeat("a",64); $_SERVER["REQUEST_METHOD"]="GET"; $_SERVER["REQUEST_URI"]="/api/me"; require "api.php";' | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
 
 if [[ -z "${TEST_BASE_URL:-}" ]]; then
   php -S 127.0.0.1:8080 api.php >php-server.log 2>&1 &
@@ -49,23 +52,24 @@ curl --insecure --silent --fail \
 
 curl --insecure --silent --fail --cookie-jar cookies.txt \
   --header 'Content-Type: application/json' \
+  --header "Origin: $base_url" \
   --data '{"email":"admin@example.test","password":"geheimes-passwort"}' \
   "$base_url/api/login" | grep --quiet '"ok":true'
 
 session_token=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute='SELECT token FROM sessions LIMIT 1')
-curl --insecure --silent --fail --cookie "__Host-session=$session_token" \
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" \
   "$base_url/api/me" | grep --quiet '"role":"wehrleitung"'
 
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
-  --cookie "__Host-session=$session_token" \
+  --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
   --header 'Origin: https://angreifer.example.test' \
   --request POST \
   "$base_url/api/logout")" = 403
 
 incident_id=$(curl --insecure --silent --fail \
-  --cookie "__Host-session=$session_token" \
+  --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
   --data '{"title":"Testeinsatz","startedAt":"2026-08-22T18:00:00.000Z","address":"","unitIds":[1]}' \
   "$base_url/api/incidents" |
@@ -73,7 +77,7 @@ incident_id=$(curl --insecure --silent --fail \
 
 report_payload='{"unitId":1,"narrative":"Ursprünglich","departedAt":"2026-08-22T18:05:00.000Z","arrivedAt":"2026-08-22T18:10:00.000Z","endedAt":"2026-08-22T19:00:00.000Z","incidentType":"Technische Hilfe","classification":{"site":[],"cause":[],"technical":[]},"crew":[]}'
 report_id=$(curl --insecure --silent --fail \
-  --cookie "__Host-session=$session_token" \
+  --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
   --data "$report_payload" \
   "$base_url/api/incidents/$incident_id/reports" |
@@ -89,7 +93,7 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
 release_pid=$!
 sleep 0.25
 edit_status=$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
-  --cookie "__Host-session=$session_token" \
+  --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
   --request PUT \
   --data "${report_payload/Ursprünglich/Manipuliert}" \
@@ -108,7 +112,7 @@ curl --insecure --silent --fail \
   --data "{\"token\":\"$reset_token\",\"password\":\"neues-geheimes-passwort\"}" \
   "$base_url/api/password-reset/confirm" | grep --quiet '"ok":true'
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
-  --cookie "__Host-session=$session_token" "$base_url/api/me")" = 401
+  --cookie "$session_cookie=$session_token" "$base_url/api/me")" = 401
 curl --insecure --silent --fail \
   --header 'Content-Type: application/json' \
   --data '{"email":"admin@example.test","password":"neues-geheimes-passwort"}' \

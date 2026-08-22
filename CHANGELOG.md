@@ -13,6 +13,9 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Changed
 
+- Die Anwendung kann unverändert im Dokumentenstamm oder in einem Unterverzeichnis betrieben werden; Frontend und Backend leiten den jeweiligen Basispfad automatisch aus der aufgerufenen Adresse ab.
+- Die Webspace-Anleitung dokumentiert den manuellen SFTP-Upload mit Passwort, die verpflichtende Host-Key-Prüfung und die Abgrenzung zum derzeit FTPS-basierten GitHub-Workflow.
+- Origin-Prüfung und Sitzungscookie richten sich vorübergehend nach dem tatsächlich verwendeten HTTP- oder HTTPS-Schema; HTTPS verwendet weiterhin ein `Secure`-Cookie mit `__Host-`-Präfix.
 - Der Docker-Smoke-Test prüft Passwort-Reset, Tokenverbrauch, Sitzungswiderruf und anschließende Anmeldung.
 - Datenbankverbindungen initialisieren UTF-8 ohne die unter PHP 8.5 veraltete PDO-Konstante, damit API-Statuscodes nicht durch Deprecation-Ausgaben verfälscht werden.
 - Interne MySQL-Testverbindungen verwenden explizit UTF-8 und verzichten im isolierten Docker-Netz auf die selbstsignierte MySQL-TLS-Verbindung.
