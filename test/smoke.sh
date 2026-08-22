@@ -72,9 +72,14 @@ report_id=$(curl --insecure --silent --fail \
   --data "$report_payload" \
   "$base_url/api/incidents/$incident_id/reports" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
+[[ "$report_id" =~ ^[0-9]+$ ]] || {
+  echo "Ungültige report_id: $report_id" >&2
+  exit 1
+}
+report_id_int=$((report_id))
 
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
-  --execute="START TRANSACTION; UPDATE reports SET status='released' WHERE id=$report_id; DO SLEEP(2); COMMIT;" &
+  --execute="START TRANSACTION; UPDATE reports SET status='released' WHERE id=$report_id_int; DO SLEEP(2); COMMIT;" &
 release_pid=$!
 sleep 0.25
 edit_status=$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
@@ -86,7 +91,7 @@ edit_status=$(curl --insecure --silent --output /dev/null --write-out '%{http_co
 wait "$release_pid"
 test "$edit_status" = 409
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
-  einsatzberichte --execute="SELECT CONCAT(status, ':', narrative) FROM reports WHERE id=$report_id")" = 'released:Ursprünglich'
+  einsatzberichte --execute="SELECT CONCAT(status, ':', narrative) FROM reports WHERE id=$report_id_int")" = 'released:Ursprünglich'
 
 reset_token='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 reset_hash=$(php -r "echo hash('sha256', '$reset_token');")
