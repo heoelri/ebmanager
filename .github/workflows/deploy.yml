@@ -49,7 +49,7 @@ jobs:
           fi
 
           port="${SFTP_PORT:-22}"
-          if [[ ! "$port" =~ ^[0-9]{1,5}$ ]]; then
+          if [[ ! "$port" =~ ^[0-9]{1,5}$ ]] || ((port < 1 || port > 65535)); then
             echo "Secret SFTP_PORT muss eine Portnummer sein" >&2
             exit 1
           fi
