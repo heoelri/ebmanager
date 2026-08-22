@@ -9,6 +9,8 @@
   relativieren würde, frage den Benutzer vor der Umsetzung.
 - Dokumentiere neue dauerhafte Produkt- oder Architekturentscheidungen in
   dieser Datei. Temporäre Implementierungsdetails gehören nicht hierher.
+- Aktualisiere `CHANGELOG.md` bei jeder relevanten funktionalen, technischen oder betrieblichen Änderung. Nicht rückwärtskompatible Änderungen müssen ausdrücklich unter `Breaking Changes` stehen.
+- Dokumentiere jeden nicht automatisierbaren Aktualisierungsschritt vollständig in `CHANGELOG.md` und im Aktualisierungsabschnitt der `README.md`; insbesondere müssen erforderliche SQL-Migrationen, Konfigurationswerte und ihre Ausführungsreihenfolge genannt werden.
 - Aktualisiere `DATENMODELL.md` bei jeder Änderung am Code, damit Tabellen,
   Beziehungen, Datenformate und fachliche Regeln immer dem aktuellen
   Implementierungsstand entsprechen.
@@ -44,8 +46,8 @@
 - Nach erfolgreichen Tests eines Pushs auf `main` lädt der Deployment-Workflow
   nur `.htaccess`, `api.php` und `public/index.html` per verpflichtendem FTPS
   hoch. Konfiguration und SQL-Dateien werden nie automatisch deployt.
-- Datenbankzugangsdaten und das einmalige Einrichtungstoken kommen aus
-  Umgebungsvariablen oder der nicht versionierten `config.local.php`.
+- Das produktive GitHub-Environment heißt `hiba`. Weitere Ziele wie `devpreview` müssen eigene Environments, Secrets, Schutzregeln und Concurrency-Gruppen verwenden; Produktionszugangsdaten werden nicht geteilt.
+- Datenbankzugangsdaten, das einmalige Einrichtungstoken, die öffentliche HTTPS-Anwendungsadresse und die Absenderadresse kommen aus Umgebungsvariablen oder der nicht versionierten `config.local.php`.
 - API-Fehler haben die Form `{ "error": "..." }`. Eingaben werden an der
   API-Grenze validiert; Fehler dürfen nicht still ignoriert werden.
 
@@ -63,6 +65,7 @@
   Feld `users.unit_id` bleibt nur als kompatible Primärzuordnung bestehen.
 - Benutzer können durch die Wehrleitung bearbeitet werden. Ein neues Passwort
   ist dabei optional.
+- Vergessene Passwörter werden über einen per E-Mail versendeten, nur als SHA-256-Hash gespeicherten Einmal-Token zurückgesetzt. Der Token gilt 30 Minuten, Anforderungen sind pro Benutzer fünf Minuten gesperrt und ein erfolgreicher Reset widerruft alle Sitzungen.
 - Freigegebene Berichte sind unveränderlich.
 - Sitzungen liegen in einem `HttpOnly`- und `SameSite=Strict`-Cookie und laufen
   nach zwölf Stunden ab.
@@ -188,8 +191,7 @@
   wenn beide Jobs bestehen.
 - Docker Compose führt denselben Smoke-Test gegen die lokale
   HTTPS-/MySQL-Umgebung aus.
-- Pull Requests führen ausschließlich Tests aus und erhalten keinen Zugriff
-  auf die Secrets des GitHub-Environments `production`.
+- Pull Requests führen ausschließlich Tests aus und erhalten keinen Zugriff auf die Secrets des GitHub-Environments `hiba` oder zukünftiger Deployment-Environments.
 - Dependabot prüft GitHub Actions, Dockerfiles und Docker Compose wöchentlich.
   Minor- und Patch-Updates werden je Ökosystem gruppiert; Major-Updates
   bleiben einzeln prüfbar.

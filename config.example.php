@@ -7,4 +7,6 @@ return [
     'user' => 'database-user',
     'password' => 'database-password',
     'setup_token' => '',
+    'app_url' => 'https://einsatzberichte.example.org',
+    'mail_from' => 'einsatzberichte@example.org',
 ];

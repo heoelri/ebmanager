@@ -38,7 +38,7 @@ curl --insecure --silent --fail --cookie-jar cookies.txt \
   --data '{"email":"admin@example.test","password":"geheimes-passwort"}' \
   "$base_url/api/login" | grep --quiet '"ok":true'
 
-session_token=$(MYSQL_PWD="$DB_PASSWORD" mysql --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+session_token=$(MYSQL_PWD="$DB_PASSWORD" mysql --skip-ssl --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute='SELECT token FROM sessions LIMIT 1')
 curl --insecure --silent --fail --cookie "__Host-session=$session_token" \
   "$base_url/api/me" | grep --quiet '"role":"wehrleitung"'
@@ -65,7 +65,7 @@ report_id=$(curl --insecure --silent --fail \
   "$base_url/api/incidents/$incident_id/reports" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
 
-MYSQL_PWD="$DB_PASSWORD" mysql --host="$db_host" --user="$DB_USER" einsatzberichte \
+MYSQL_PWD="$DB_PASSWORD" mysql --skip-ssl --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="START TRANSACTION; UPDATE reports SET status='released' WHERE id=$report_id; DO SLEEP(2); COMMIT;" &
 release_pid=$!
 sleep 0.25
@@ -77,5 +77,20 @@ edit_status=$(curl --insecure --silent --output /dev/null --write-out '%{http_co
   "$base_url/api/reports/$report_id")
 wait "$release_pid"
 test "$edit_status" = 409
-test "$(MYSQL_PWD="$DB_PASSWORD" mysql --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql --skip-ssl --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT CONCAT(status, ':', narrative) FROM reports WHERE id=$report_id")" = 'released:Ursprünglich'
+
+reset_token='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+reset_hash=$(php -r "echo hash('sha256', '$reset_token');")
+MYSQL_PWD="$DB_PASSWORD" mysql --skip-ssl --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="INSERT INTO password_resets(user_id,token_hash,expires_at) SELECT id,'$reset_hash',UTC_TIMESTAMP()+INTERVAL 30 MINUTE FROM users WHERE email='admin@example.test'"
+curl --insecure --silent --fail \
+  --header 'Content-Type: application/json' \
+  --data "{\"token\":\"$reset_token\",\"password\":\"neues-geheimes-passwort\"}" \
+  "$base_url/api/password-reset/confirm" | grep --quiet '"ok":true'
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "__Host-session=$session_token" "$base_url/api/me")" = 401
+curl --insecure --silent --fail \
+  --header 'Content-Type: application/json' \
+  --data '{"email":"admin@example.test","password":"neues-geheimes-passwort"}' \
+  "$base_url/api/login" | grep --quiet '"ok":true'

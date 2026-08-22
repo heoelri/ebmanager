@@ -1,5 +1,9 @@
 # Security Review
 
+## Passwort-Wiederherstellung vom 22. August 2026
+
+Der neue öffentliche Wiederherstellungsfluss wurde auf Kontoermittlung, Token-Leaks, Token-Wiederverwendung, Sitzungsfortbestand, CSRF und manipulierte Links geprüft. Die API antwortet unabhängig vom Vorhandensein eines Kontos gleich, speichert nur den SHA-256-Hash eines zufälligen 256-Bit-Tokens, begrenzt Anforderungen pro Benutzer auf eine Nachricht in fünf Minuten und lässt Tokens nach 30 Minuten ablaufen. `APP_URL` muss eine konfigurierte HTTPS-URL sein und wird nicht aus dem manipulierbaren Host-Header erzeugt. Ein erfolgreicher Reset löscht Token und sämtliche Sitzungen in derselben Transaktion. Der Webhoster übernimmt den Versand über PHP `mail()`; eine fehlgeschlagene Übergabe wird ohne Adresse oder Token protokolliert und der unzustellbare Token gelöscht. Als verbleibende Betriebsanforderung sollte der Webhoster zusätzlich allgemeines HTTP-Rate-Limiting aktivieren, falls automatisierter Missbrauch beobachtet wird.
+
 ## Vollreview vom 22. August 2026
 
 Geprüft wurden das PHP/PDO-MySQL-Backend, die Browseroberfläche, das

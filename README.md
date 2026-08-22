@@ -51,6 +51,7 @@ allgemein freigegeben.
 - [Architektur](docs/ARCHITEKTUR.md)
 - [Datenmodell](DATENMODELL.md)
 - [Security Review](SECURITY-REVIEW.md)
+- [Changelog und Aktualisierungshinweise](CHANGELOG.md)
 
 ## Voraussetzungen
 
@@ -105,8 +106,7 @@ docker compose --profile test down --volumes
 1. Eine leere MySQL-Datenbank und einen Datenbankbenutzer anlegen.
 2. `schema.sql` einmalig über phpMyAdmin oder die Verwaltungsoberfläche des
    Hosters importieren.
-3. `config.example.php` als `config.local.php` kopieren und DSN,
-   Datenbankbenutzer und Passwort eintragen.
+3. `config.example.php` als `config.local.php` kopieren und DSN, Datenbankbenutzer, Passwort, öffentliche HTTPS-URL `app_url` und Absenderadresse `mail_from` eintragen. Der Webhoster muss den E-Mail-Versand über die PHP-Funktion `mail()` unterstützen.
 4. Ein Einrichtungstoken mit mindestens 32 zufälligen Zeichen erzeugen, zum
    Beispiel lokal mit:
 
@@ -120,9 +120,7 @@ docker compose --profile test down --volumes
 7. Die HTTPS-Adresse öffnen und bei der einmaligen Ersteinrichtung das Token
    eingeben.
 
-Alternativ können `DB_DSN`, `DB_USER`, `DB_PASSWORD` und `SETUP_TOKEN` als
-Umgebungsvariablen gesetzt werden. `config.local.php` wird nicht committed und
-ist über `.htaccess` gegen HTTP-Zugriff gesperrt.
+Alternativ können `DB_DSN`, `DB_USER`, `DB_PASSWORD`, `SETUP_TOKEN`, `APP_URL` und `MAIL_FROM` als Umgebungsvariablen gesetzt werden. `config.local.php` wird nicht committed und ist über `.htaccess` gegen HTTP-Zugriff gesperrt.
 
 Beispiel-DSN:
 
@@ -143,9 +141,13 @@ DIVERA.
 
 ## Aktualisierung
 
-Anwendungsdateien per FTP oder SFTP ersetzen. `config.local.php` dabei nicht
-überschreiben. Schemaänderungen werden als gesondertes SQL-Migrationsskript
-bereitgestellt und müssen vor dem neuen Anwendungscode importiert werden.
+1. Datenbank und `config.local.php` sichern.
+2. `CHANGELOG.md` vollständig lesen und alle Einträge unter `Breaking Changes` sowie `Manuelle Aktualisierung` befolgen.
+3. Neue SQL-Dateien aus `migrations/` in numerischer Reihenfolge vor dem neuen Anwendungscode über die Datenbankverwaltung des Hosters importieren.
+4. Neue Konfigurationswerte in `config.local.php` ergänzen, ohne bestehende Werte zu überschreiben.
+5. Anwendungsdateien per FTP oder SFTP ersetzen und anschließend Anmeldung sowie zentrale Funktionen prüfen.
+
+Für die Passwort-Wiederherstellung muss bei bestehenden Installationen vor dem Anwendungscode einmal `migrations/001-password-resets.sql` importiert werden. Das generische FTPS-Deployment automatisiert Datenbankmigrationen absichtlich nicht, weil es keine Datenbankzugangsdaten erhält und Shared-Hosting-Anbieter unterschiedliche Verwaltungswege bereitstellen.
 
 ## GitHub Actions
 
@@ -160,7 +162,7 @@ Nach einem erfolgreichen Testlauf eines Pushs auf `main` lädt
 `public/index.html` per **FTPS** hoch. `config.local.php`, Datenbankdateien und
 `schema.sql` werden niemals automatisch übertragen.
 
-Im GitHub-Environment `production` werden diese Secrets benötigt:
+Im GitHub-Environment `hiba` werden diese Secrets benötigt:
 
 | Secret | Inhalt |
 |---|---|
@@ -171,6 +173,8 @@ Im GitHub-Environment `production` werden diese Secrets benötigt:
 
 Der Server muss explizites FTPS unterstützen. Unverschlüsseltes FTP wird
 durch `curl --ssl-reqd` abgelehnt.
+
+Weitere Ziele wie `devpreview` erhalten ein eigenes GitHub-Environment mit eigenen Secrets, Schutzregeln und einer eigenen Concurrency-Gruppe. Produktionszugangsdaten aus `hiba` werden nicht wiederverwendet.
 
 ## Datenbank zurücksetzen
 

@@ -50,7 +50,7 @@ function config(): array
     if ($config !== null) return $config;
     $local = __DIR__ . DIRECTORY_SEPARATOR . 'config.local.php';
     $config = is_file($local) ? require $local : [];
-    foreach (['DB_DSN' => 'dsn', 'DB_USER' => 'user', 'DB_PASSWORD' => 'password', 'SETUP_TOKEN' => 'setup_token'] as $environment => $key) {
+    foreach (['DB_DSN' => 'dsn', 'DB_USER' => 'user', 'DB_PASSWORD' => 'password', 'SETUP_TOKEN' => 'setup_token', 'APP_URL' => 'app_url', 'MAIL_FROM' => 'mail_from'] as $environment => $key) {
         $value = getenv($environment);
         if ($value !== false) $config[$key] = $value;
     }
@@ -144,6 +144,32 @@ function optional(mixed $value, string $name, int $max = 10_000): string
     $text = trim(is_scalar($value ?? '') ? (string)($value ?? '') : '');
     if (textLength($text) > $max) throw new ApiError(400, "$name ist zu lang");
     return $text;
+}
+
+function emailAddress(mixed $value): string
+{
+    $email = required($value, 'E-Mail', 320);
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) throw new ApiError(400, 'E-Mail ist ungültig');
+    return $email;
+}
+
+function passwordResetSettings(): array
+{
+    $settings = config();
+    $url = rtrim((string)($settings['app_url'] ?? ''), '/');
+    $from = (string)($settings['mail_from'] ?? '');
+    if (!filter_var($url, FILTER_VALIDATE_URL) || !str_starts_with($url, 'https://') || !filter_var($from, FILTER_VALIDATE_EMAIL)) {
+        throw new ApiError(503, 'Passwort-Wiederherstellung ist nicht konfiguriert');
+    }
+    return compact('url', 'from');
+}
+
+function sendPasswordReset(array $user, string $token): bool
+{
+    ['url' => $url, 'from' => $from] = passwordResetSettings();
+    $link = "$url/?reset=$token";
+    $message = "Hallo {$user['name']},\n\nüber diesen Link können Sie innerhalb von 30 Minuten ein neues Passwort vergeben:\n$link\n\nFalls Sie dies nicht angefordert haben, ignorieren Sie diese Nachricht.";
+    return mail($user['email'], 'Passwort zuruecksetzen', $message, "From: $from\r\nContent-Type: text/plain; charset=UTF-8");
 }
 
 function finiteNumber(mixed $value, string $name): int|float|null
@@ -385,7 +411,7 @@ try {
     assertRequestOrigin($method);
     $path = parse_url($_SERVER['REQUEST_URI'] ?? '/api', PHP_URL_PATH);
     $path = rawurldecode(is_string($path) ? $path : '/api');
-    $public = in_array($path, ['/api/bootstrap', '/api/setup', '/api/login'], true);
+    $public = in_array($path, ['/api/bootstrap', '/api/setup', '/api/login', '/api/password-reset/request', '/api/password-reset/confirm'], true);
     $user = $public ? null : currentUser();
     if (!$public && !$user) respond(401, ['error' => 'Bitte anmelden']);
 
@@ -432,6 +458,44 @@ try {
             'expires' => time() + 43200, 'path' => '/', 'secure' => true,
             'httponly' => true, 'samesite' => 'Strict'
         ]);
+        respond(200, ['ok' => true]);
+    }
+
+    if ($method === 'POST' && $path === '/api/password-reset/request') {
+        $data = input();
+        $email = emailAddress($data['email'] ?? null);
+        passwordResetSettings();
+        $user = one('SELECT id,name,email FROM users WHERE email=?', [$email]);
+        if ($user) {
+            $recent = one('SELECT id FROM password_resets WHERE user_id=? AND requested_at>UTC_TIMESTAMP()-INTERVAL 5 MINUTE', [$user['id']]);
+            if (!$recent) {
+                $token = bin2hex(random_bytes(32));
+                transaction(function () use ($user, $token) {
+                    query('DELETE FROM password_resets WHERE expires_at<=UTC_TIMESTAMP() OR user_id=?', [$user['id']]);
+                    query('INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 30 MINUTE)', [$user['id'], hash('sha256', $token)]);
+                });
+                if (!sendPasswordReset($user, $token)) {
+                    query('DELETE FROM password_resets WHERE user_id=?', [$user['id']]);
+                    error_log('Passwort-Wiederherstellungs-E-Mail konnte nicht versendet werden');
+                }
+            }
+        }
+        respond(202, ['ok' => true]);
+    }
+
+    if ($method === 'POST' && $path === '/api/password-reset/confirm') {
+        $data = input();
+        $token = (string)($data['token'] ?? '');
+        if (!preg_match('/^[a-f0-9]{64}$/', $token)) throw new ApiError(400, 'Wiederherstellungslink ist ungültig oder abgelaufen');
+        $password = required($data['password'] ?? null, 'Passwort', 200);
+        if (textLength($password) < 10) throw new ApiError(400, 'Passwort muss mindestens 10 Zeichen haben');
+        transaction(function () use ($token, $password) {
+            $reset = one('SELECT user_id FROM password_resets WHERE token_hash=? AND expires_at>UTC_TIMESTAMP() FOR UPDATE', [hash('sha256', $token)]);
+            if (!$reset) throw new ApiError(400, 'Wiederherstellungslink ist ungültig oder abgelaufen');
+            query('UPDATE users SET password_hash=? WHERE id=?', [password_hash($password, PASSWORD_DEFAULT), $reset['user_id']]);
+            query('DELETE FROM sessions WHERE user_id=?', [$reset['user_id']]);
+            query('DELETE FROM password_resets WHERE user_id=?', [$reset['user_id']]);
+        });
         respond(200, ['ok' => true]);
     }
 

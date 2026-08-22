@@ -25,6 +25,7 @@ erDiagram
     users ||--o{ user_units : gehoert_zu
     units ||--o{ user_units : hat
     users ||--o{ sessions : verwendet
+    users ||--o{ password_resets : fordert_an
     incidents ||--o{ incident_units : alarmiert
     units ||--o{ incident_units : beteiligt
     members ||--o{ member_units : gehoert_zu
@@ -100,6 +101,18 @@ Beide Fremdschlüssel werden beim Löschen ihres Elternsatzes kaskadiert.
 | `expires_at` | DATETIME, NOT NULL | Ablaufzeitpunkt; Sitzungen gelten zwölf Stunden |
 
 Sitzungen werden beim Löschen des Benutzers mitgelöscht.
+
+### `password_resets`
+
+| Spalte | Typ | Bedeutung |
+|---|---|---|
+| `id` | BIGINT UNSIGNED, PK | Interne ID |
+| `user_id` | BIGINT UNSIGNED, FK, UNIQUE | Benutzer mit höchstens einem aktiven Token |
+| `token_hash` | CHAR(64), UNIQUE | SHA-256-Hash des zufälligen 256-Bit-Tokens |
+| `requested_at` | DATETIME, NOT NULL | Zeitpunkt der Anforderung und Grundlage der Fünf-Minuten-Sperre |
+| `expires_at` | DATETIME, NOT NULL | Ablaufzeitpunkt nach 30 Minuten |
+
+Der Klartexttoken wird nur per E-Mail versendet und nie gespeichert. Nach erfolgreichem Zurücksetzen werden der Token und alle Sitzungen des Benutzers gelöscht. Beim Löschen des Benutzers wird auch sein Token mitgelöscht.
 
 ### `incidents`
 
