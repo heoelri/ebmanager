@@ -9,7 +9,7 @@ fachliche Regeln.
 Die Anwendung initialisiert jede PDO-Verbindung explizit mit `utf8mb4`.
 API-Routen bleiben unabhängig davon `/api/...`, ob die Anwendung im Dokumentenstamm oder in einem Unterverzeichnis installiert ist; der Installationspfad wird vor dem Routing entfernt.
 
-`schema.sql` wird nicht durch den FTPS-Workflow deployt. Schemaänderungen
+`schema.sql` wird nicht durch den SFTP-Workflow deployt. Schemaänderungen
 werden vor dem Anwendungscode kontrolliert über die Datenbankverwaltung des
 Hosters eingespielt.
 

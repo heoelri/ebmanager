@@ -12,7 +12,7 @@ Der Webhoster muss folgende Funktionen bereitstellen:
 - eine Domain oder Subdomain mit dauerhaft aktiviertem HTTPS
 - ausgehende HTTPS-Verbindungen und `allow_url_fopen` für DIVERA
 - E-Mail-Versand über PHP `mail()` für die Passwort-Wiederherstellung
-- FTPS- oder SFTP-Zugang zum Webspace
+- SFTP-Zugang zum Webspace
 - eine Datenbankverwaltung wie phpMyAdmin zum Import von SQL-Dateien
 
 Die Anwendung benötigt keinen Paketmanager, Build-Schritt, Cronjob oder dauerhaft laufenden Hintergrundprozess.
@@ -95,7 +95,7 @@ public/
 4. `config.local.php` so restriktiv wie vom Hoster unterstützt auf `600` oder `640` setzen.
 5. `schema.sql`, `migrations/`, Tests, Dokumentation und Repository-Metadaten nicht in das öffentliche Zielverzeichnis hochladen.
 
-Unverschlüsseltes FTP sollte nicht verwendet werden, weil dabei Zugangsdaten und Anwendungsdateien mitgelesen werden können.
+Unverschlüsseltes FTP darf nicht verwendet werden, weil dabei Zugangsdaten und Anwendungsdateien mitgelesen werden können.
 
 ### Upload per SFTP mit Passwort
 
@@ -160,7 +160,7 @@ Der derzeitige GitHub-Workflow unterstützt explizites FTPS. Bietet der Webspace
 | `FTP_PASSWORD` | FTPS-Passwort |
 | `FTP_PATH` | Zielverzeichnis relativ zum FTP-Stamm; leer für dessen Dokumentenstamm oder beispielsweise `ebmanager` für ein Unterverzeichnis |
 
-4. Prüfen, dass der Server explizites FTPS unterstützt.
+4. Prüfen, dass der Server SFTP über SSH anbietet und der ermittelte Host-Key mit der Angabe des Hosters übereinstimmt.
 5. Einen Push auf `main` durchführen und zuerst den Workflow `Tests`, danach den Workflow `Deployment` beobachten.
 
 Der Workflow lädt ausschließlich `.htaccess`, `api.php` und `public/index.html` hoch. `config.local.php`, Datenbankzugangsdaten, `schema.sql` und Migrationen werden absichtlich nicht automatisiert übertragen.
@@ -177,7 +177,7 @@ Weitere Ziele wie `devpreview` benötigen ein eigenes GitHub-Environment, eigene
 6. Erst danach den neuen Anwendungscode manuell hochladen oder den für `main` vorgesehenen GitHub-Workflow auslösen.
 7. Anmeldung, Passwort-Wiederherstellung und die im Changelog genannten Funktionen prüfen.
 
-Wenn das automatische Deployment verwendet wird, müssen erforderliche Migrationen vor dem Merge beziehungsweise Push nach `main` eingespielt werden. Der FTPS-Workflow kann SQL-Migrationen nicht sicher automatisieren, weil er absichtlich keine Datenbankzugangsdaten besitzt und Shared-Hosting-Anbieter unterschiedliche Verwaltungswege bereitstellen.
+Wenn das automatische Deployment verwendet wird, müssen erforderliche Migrationen vor dem Merge beziehungsweise Push nach `main` eingespielt werden. Der SFTP-Workflow kann SQL-Migrationen nicht sicher automatisieren, weil er absichtlich keine Datenbankzugangsdaten besitzt und Shared-Hosting-Anbieter unterschiedliche Verwaltungswege bereitstellen.
 
 ## 11. Rollback
 

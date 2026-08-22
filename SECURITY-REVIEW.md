@@ -49,7 +49,8 @@ Secrets, HTTPS und externe DIVERA-Aufrufe.
 - CI prüft Anwendung und Schema direkt sowie unabhängig davon das gebaute
   Docker-/Apache-System; veraltete Läufe derselben Referenz werden abgebrochen.
 - Das Deployment läuft nur nach erfolgreichen Tests eines Pushs auf `main`,
-  checkt den exakt getesteten Commit aus und erzwingt verschlüsseltes FTPS.
+  checkt den exakt getesteten Commit aus und überträgt ausschließlich per SSH
+  gesichertes SFTP mit geprüftem Host-Key.
   Datenbankkonfiguration und SQL-Schema werden nicht übertragen.
 
 ## Defense in Depth

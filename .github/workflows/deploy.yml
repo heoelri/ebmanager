@@ -27,31 +27,87 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-      - name: Anwendung per FTPS hochladen
+      - name: Anwendung per SFTP hochladen
         env:
-          FTP_SERVER: ${{ secrets.FTP_SERVER }}
-          FTP_USERNAME: ${{ secrets.FTP_USERNAME }}
-          FTP_PASSWORD: ${{ secrets.FTP_PASSWORD }}
-          FTP_PATH: ${{ secrets.FTP_PATH }}
+          SFTP_SERVER: ${{ secrets.SFTP_SERVER }}
+          SFTP_PORT: ${{ secrets.SFTP_PORT }}
+          SFTP_USERNAME: ${{ secrets.SFTP_USERNAME }}
+          SFTP_PASSWORD: ${{ secrets.SFTP_PASSWORD }}
+          SFTP_PRIVATE_KEY: ${{ secrets.SFTP_PRIVATE_KEY }}
+          SFTP_KNOWN_HOSTS: ${{ secrets.SFTP_KNOWN_HOSTS }}
+          SFTP_PATH: ${{ secrets.SFTP_PATH }}
         shell: bash
         run: |
           set -euo pipefail
-          : "${FTP_SERVER:?Secret FTP_SERVER fehlt}"
-          : "${FTP_USERNAME:?Secret FTP_USERNAME fehlt}"
-          : "${FTP_PASSWORD:?Secret FTP_PASSWORD fehlt}"
+          : "${SFTP_SERVER:?Secret SFTP_SERVER fehlt}"
+          : "${SFTP_USERNAME:?Secret SFTP_USERNAME fehlt}"
+          : "${SFTP_KNOWN_HOSTS:?Secret SFTP_KNOWN_HOSTS fehlt}"
 
-          remote_path="${FTP_PATH#/}"
-          remote_path="${remote_path%/}"
-          base_url="ftp://${FTP_SERVER}"
-          if [[ -n "$remote_path" ]]; then
-            base_url="${base_url}/${remote_path}"
+          if [[ -z "${SFTP_PRIVATE_KEY:-}" && -z "${SFTP_PASSWORD:-}" ]]; then
+            echo "Secret SFTP_PRIVATE_KEY oder SFTP_PASSWORD fehlt" >&2
+            exit 1
           fi
 
-          for file in .htaccess api.php public/index.html; do
-            curl --fail --silent --show-error \
-              --ssl-reqd \
-              --ftp-create-dirs \
-              --user "${FTP_USERNAME}:${FTP_PASSWORD}" \
-              --upload-file "$file" \
-              "${base_url}/${file}"
-          done
+          port="${SFTP_PORT:-22}"
+          if [[ ! "$port" =~ ^[0-9]{1,5}$ ]] || ((port < 1 || port > 65535)); then
+            echo "Secret SFTP_PORT muss eine Portnummer sein" >&2
+            exit 1
+          fi
+
+          remote_path="${SFTP_PATH:-}"
+          remote_path="${remote_path#/}"
+          remote_path="${remote_path%/}"
+          if [[ -n "$remote_path" && ! "$remote_path" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "Secret SFTP_PATH enthält unzulässige Zeichen" >&2
+            exit 1
+          fi
+
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "$workdir"' EXIT
+          chmod 700 "$workdir"
+
+          printf '%s\n' "$SFTP_KNOWN_HOSTS" >"$workdir/known_hosts"
+          chmod 600 "$workdir/known_hosts"
+
+          ssh_options=(
+            -o "StrictHostKeyChecking=yes"
+            -o "UserKnownHostsFile=$workdir/known_hosts"
+            -o "Port=$port"
+          )
+
+          if [[ -n "${SFTP_PRIVATE_KEY:-}" ]]; then
+            printf '%s\n' "$SFTP_PRIVATE_KEY" >"$workdir/id_deploy"
+            chmod 600 "$workdir/id_deploy"
+            ssh_options+=(
+              -o "BatchMode=yes"
+              -o "IdentitiesOnly=yes"
+              -o "PasswordAuthentication=no"
+              -i "$workdir/id_deploy"
+            )
+            sftp_command=(sftp)
+          else
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends sshpass
+            ssh_options+=(
+              -o "BatchMode=no"
+              -o "PubkeyAuthentication=no"
+              -o "PreferredAuthentications=password,keyboard-interactive"
+              -o "NumberOfPasswordPrompts=1"
+            )
+            export SSHPASS="$SFTP_PASSWORD"
+            sftp_command=(sshpass -e sftp)
+          fi
+
+          {
+            if [[ -n "$remote_path" ]]; then
+              printf 'cd "%s"\n' "$remote_path"
+            fi
+            printf -- '-mkdir "public"\n'
+            printf 'put ".htaccess" ".htaccess"\n'
+            printf 'put "api.php" "api.php"\n'
+            printf 'put "public/index.html" "public/index.html"\n'
+          } >"$workdir/batch"
+
+          "${sftp_command[@]}" "${ssh_options[@]}" \
+            -b "$workdir/batch" \
+            "${SFTP_USERNAME}@${SFTP_SERVER}"

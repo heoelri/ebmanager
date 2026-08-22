@@ -68,7 +68,7 @@ lokal gespeichert und niemals an DIVERA zurückgeschrieben.
 ## Betrieb
 
 Produktiv läuft die Anwendung auf PHP-/Apache-Webspace mit MySQL und wird nach
-erfolgreichen Tests per FTPS aktualisiert. Konfiguration und SQL-Dateien sind
+erfolgreichen Tests per SFTP aktualisiert. Konfiguration und SQL-Dateien sind
 vom automatischen Deployment ausgeschlossen.
 
 Für lokale Entwicklung stellt `compose.yaml` Apache/PHP, MySQL und ein
