@@ -20,4 +20,6 @@ npm test
 
 DIVERA wird je Einheit unter **DIVERA** mit dem Access-Key aus
 **Verwaltung → Einstellungen → Schnittstellen → API** verbunden.
+Die Anbindung liest ausschließlich Einsätze und Fahrzeuge per HTTP `GET`;
+der Import speichert Daten nur lokal und verändert nichts in DIVERA.
 # ebmanager
