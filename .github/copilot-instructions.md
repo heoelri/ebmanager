@@ -33,7 +33,7 @@
 
 ## Technische Architektur
 
-- Zielbetrieb ist regulärer Webspace mit FTP- oder SFTP-Zugang, PHP 8.2 oder
+- Zielbetrieb ist regulärer Webspace mit SFTP-Zugang, PHP 8.2 oder
   neuer, Apache und MySQL 8.0 oder neuer.
 - Backend: `api.php` mit PHP-Standardfunktionen und PDO MySQL.
 - Frontend: `public/index.html` mit nativem HTML, CSS und JavaScript.
@@ -45,8 +45,8 @@
 - Apache leitet `/api/*` über `.htaccess` an `api.php` weiter und liefert
   `public/index.html` als Startseite aus.
 - Nach erfolgreichen Tests eines Pushs auf `main` lädt der Deployment-Workflow
-  nur `.htaccess`, `api.php` und `public/index.html` per verpflichtendem FTPS
-  hoch. Konfiguration und SQL-Dateien werden nie automatisch deployt.
+  nur `.htaccess`, `api.php` und `public/index.html` per verpflichtendem SFTP
+  mit geprüftem Host-Key hoch. Konfiguration und SQL-Dateien werden nie automatisch deployt.
 - Das produktive GitHub-Environment heißt `hiba`. Weitere Ziele wie `devpreview` müssen eigene Environments, Secrets, Schutzregeln und Concurrency-Gruppen verwenden; Produktionszugangsdaten werden nicht geteilt.
 - Datenbankzugangsdaten, das einmalige Einrichtungstoken, die öffentliche HTTPS-Anwendungsadresse und die Absenderadresse kommen aus Umgebungsvariablen oder der nicht versionierten `config.local.php`.
 - API-Fehler haben die Form `{ "error": "..." }`. Eingaben werden an der

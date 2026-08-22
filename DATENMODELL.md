@@ -8,7 +8,7 @@ fachliche Regeln.
 `GET /api/bootstrap` prüft vor Einrichtung und Anmeldung die Datenbankverbindung sowie das Vorhandensein aller in diesem Dokument beschriebenen Tabellen. Eine fehlende Konfiguration, nicht erreichbare Datenbank oder unvollständige Migration wird mit HTTP 503 gemeldet; dabei werden keine Zugangsdaten ausgegeben.
 Die Anwendung initialisiert jede PDO-Verbindung explizit mit `utf8mb4`.
 
-`schema.sql` wird nicht durch den FTPS-Workflow deployt. Schemaänderungen
+`schema.sql` wird nicht durch den SFTP-Workflow deployt. Schemaänderungen
 werden vor dem Anwendungscode kontrolliert über die Datenbankverwaltung des
 Hosters eingespielt.
 

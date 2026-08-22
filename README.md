@@ -35,7 +35,7 @@ allgemein freigegeben.
 - strukturierte Fahrzeugbesatzung mit Drag-and-Drop
 - Mitglieder und Qualifikationen aus DIVERA
 - idempotenter, serverseitig verifizierter DIVERA-Einsatzimport
-- lokale Docker-Umgebung, GitHub-Tests und FTPS-Deployment
+- lokale Docker-Umgebung, GitHub-Tests und SFTP-Deployment
 
 ## Rollen
 
@@ -128,7 +128,7 @@ aus.
 
 Nach einem erfolgreichen Testlauf eines Pushs auf `main` lädt
 `.github/workflows/deploy.yml` ausschließlich `.htaccess`, `api.php` und
-`public/index.html` per **FTPS** hoch. `config.local.php`, Datenbankdateien und
+`public/index.html` per **SFTP** hoch. `config.local.php`, Datenbankdateien und
 `schema.sql` werden niemals automatisch übertragen.
 
 Die Einrichtung des Environments `hiba`, alle Secrets und die Trennung zukünftiger Ziele wie `devpreview` sind unter [Automatisches Deployment mit GitHub Actions einrichten](docs/WEBSPACE-DEPLOYMENT.md#9-automatisches-deployment-mit-github-actions-einrichten) dokumentiert.
