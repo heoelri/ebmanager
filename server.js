@@ -38,7 +38,10 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
     );
     CREATE TABLE IF NOT EXISTS incidents (
       id INTEGER PRIMARY KEY, organization_id INTEGER NOT NULL REFERENCES organizations(id),
-      divera_id TEXT, title TEXT NOT NULL, started_at TEXT NOT NULL, address TEXT NOT NULL DEFAULT '',
+      divera_id TEXT, foreign_id TEXT NOT NULL DEFAULT '', divera_date INTEGER,
+      title TEXT NOT NULL, started_at TEXT NOT NULL, message TEXT NOT NULL DEFAULT '',
+      address TEXT NOT NULL DEFAULT '', lat REAL, lng REAL,
+      remark TEXT NOT NULL DEFAULT '', patient TEXT NOT NULL DEFAULT '', caller TEXT NOT NULL DEFAULT '',
       consolidated_text TEXT NOT NULL DEFAULT '', consolidated_at TEXT,
       UNIQUE(organization_id, divera_id)
     );
@@ -46,6 +49,26 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
       incident_id INTEGER NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
       unit_id INTEGER NOT NULL REFERENCES units(id), vehicles TEXT NOT NULL DEFAULT '[]',
       PRIMARY KEY(incident_id, unit_id)
+    );
+    CREATE TABLE IF NOT EXISTS members (
+      id INTEGER PRIMARY KEY, organization_id INTEGER NOT NULL REFERENCES organizations(id),
+      divera_id TEXT NOT NULL, name TEXT NOT NULL,
+      UNIQUE(organization_id, divera_id)
+    );
+    CREATE TABLE IF NOT EXISTS member_units (
+      member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+      PRIMARY KEY(member_id, unit_id)
+    );
+    CREATE TABLE IF NOT EXISTS qualifications (
+      id INTEGER PRIMARY KEY, unit_id INTEGER NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+      divera_id TEXT NOT NULL, name TEXT NOT NULL, shortname TEXT NOT NULL DEFAULT '',
+      UNIQUE(unit_id, divera_id)
+    );
+    CREATE TABLE IF NOT EXISTS member_qualifications (
+      member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      qualification_id INTEGER NOT NULL REFERENCES qualifications(id) ON DELETE CASCADE,
+      PRIMARY KEY(member_id, qualification_id)
     );
     CREATE TABLE IF NOT EXISTS reports (
       id INTEGER PRIMARY KEY, incident_id INTEGER NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
@@ -55,7 +78,32 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       released_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS report_crew (
+      report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+      member_id INTEGER NOT NULL REFERENCES members(id),
+      vehicle TEXT NOT NULL DEFAULT '',
+      role TEXT NOT NULL DEFAULT 'besatzung',
+      PRIMARY KEY(report_id, member_id)
+    );
   `);
+  const incidentColumns = {
+    foreign_id: "TEXT NOT NULL DEFAULT ''",
+    divera_date: 'INTEGER',
+    message: "TEXT NOT NULL DEFAULT ''",
+    lat: 'REAL',
+    lng: 'REAL',
+    remark: "TEXT NOT NULL DEFAULT ''",
+    patient: "TEXT NOT NULL DEFAULT ''",
+    caller: "TEXT NOT NULL DEFAULT ''"
+  };
+  const existingIncidentColumns = new Set(db.prepare('PRAGMA table_info(incidents)').all().map(column => column.name));
+  for (const [name, definition] of Object.entries(incidentColumns)) {
+    if (!existingIncidentColumns.has(name)) db.exec(`ALTER TABLE incidents ADD COLUMN ${name} ${definition}`);
+  }
+  if (!db.prepare('PRAGMA table_info(report_crew)').all().some(column => column.name === 'role')) {
+    db.exec("ALTER TABLE report_crew ADD COLUMN role TEXT NOT NULL DEFAULT 'besatzung'");
+  }
+  db.prepare("UPDATE report_crew SET role='besatzung' WHERE role='mannschaft'").run();
 
   const sql = {
     userBySession: db.prepare(`
@@ -84,7 +132,10 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
   function currentUser(req) {
     const token = parseCookie(req, 'session');
     const user = token ? sql.userBySession.get(token) : null;
-    if (user) user.unitIds = JSON.parse(user.unit_ids);
+    if (user) {
+      user.unitIds = JSON.parse(user.unit_ids);
+      delete user.unit_ids;
+    }
     return user;
   }
 
@@ -109,6 +160,42 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
     return text;
   }
 
+  function optional(value, name, max = 10_000) {
+    const text = String(value ?? '').trim();
+    if (text.length > max) throw Object.assign(new Error(`${name} ist zu lang`), { status: 400 });
+    return text;
+  }
+
+  function finiteNumber(value, name) {
+    if (value === null || value === undefined || value === '') return null;
+    const number = Number(value);
+    if (!Number.isFinite(number)) throw Object.assign(new Error(`${name} ist ungültig`), { status: 400 });
+    return number;
+  }
+
+  function isoDate(value) {
+    if (value === null || value === undefined || value === '') return new Date().toISOString();
+    const number = Number(value);
+    const date = new Date(Number.isFinite(number) ? number * 1000 : value);
+    if (Number.isNaN(date.getTime())) throw Object.assign(new Error('DIVERA-Zeitpunkt ist ungültig'), { status: 502 });
+    return date.toISOString();
+  }
+
+  function vehicleSnapshots(value) {
+    if (!Array.isArray(value)) throw Object.assign(new Error('Fahrzeuge sind ungültig'), { status: 400 });
+    return value.map(vehicle => {
+      if (typeof vehicle === 'string') return required(vehicle, 'Fahrzeug', 200);
+      if (!vehicle || typeof vehicle !== 'object') throw Object.assign(new Error('Fahrzeug ist ungültig'), { status: 400 });
+      return {
+        id: optional(vehicle.id, 'Fahrzeug-ID', 200),
+        name: required(vehicle.name, 'Fahrzeugname', 200),
+        shortname: optional(vehicle.shortname, 'Fahrzeugtyp', 100),
+        fullname: optional(vehicle.fullname, 'Fahrzeugtyp', 200),
+        own: vehicle.own !== false
+      };
+    });
+  }
+
   function passwordHash(password) {
     const salt = randomBytes(16);
     return `${salt.toString('hex')}:${scryptSync(password, salt, 64).toString('hex')}`;
@@ -131,7 +218,8 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
   }
 
   function membershipIds(data, organizationId, requiredForRole = data.role) {
-    const ids = [...new Set((data.unitIds || (data.unitId ? [data.unitId] : [])).map(Number))];
+    const source = Array.isArray(data.unitIds) ? data.unitIds : data.unitId ? [data.unitId] : [];
+    const ids = [...new Set(source.map(Number))];
     if (requiredForRole !== 'wehrleitung' && !ids.length) {
       throw Object.assign(new Error('Für diese Rolle ist mindestens eine Einheit erforderlich'), { status: 400 });
     }
@@ -145,6 +233,40 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
     db.prepare('DELETE FROM user_units WHERE user_id=?').run(userId);
     const add = db.prepare('INSERT INTO user_units(user_id,unit_id) VALUES(?,?)');
     for (const unitId of unitIds) add.run(userId, unitId);
+  }
+
+  function replaceCrew(reportId, incidentId, unitId, crew, organizationId) {
+    if (!Array.isArray(crew)) throw Object.assign(new Error('Besatzung ist ungültig'), { status: 400 });
+    const vehicles = JSON.parse(db.prepare(
+      'SELECT vehicles FROM incident_units WHERE incident_id=? AND unit_id=?').get(incidentId, unitId)?.vehicles || '[]')
+      .filter(vehicle => typeof vehicle === 'string' || vehicle.own !== false)
+      .map(vehicle => typeof vehicle === 'string' ? vehicle : vehicle.name);
+    const seen = new Set();
+    const crewRoles = new Set(['maschinist', 'einheitsfuehrer', 'besatzung']);
+    const occupiedRoles = new Set();
+    const rows = crew.map(item => {
+      const memberId = Number(item.memberId);
+      const vehicle = String(item.vehicle || '').trim();
+      const role = String(item.role || 'besatzung');
+      const occupiedRole = vehicle && role !== 'besatzung' ? `${vehicle}:${role}` : null;
+      if (!Number.isInteger(memberId) || seen.has(memberId) ||
+          !db.prepare(`SELECT 1 FROM members m JOIN member_units mu ON mu.member_id=m.id
+            WHERE m.id=? AND m.organization_id=? AND mu.unit_id=?`).get(memberId, organizationId, unitId) ||
+          (vehicle && !vehicles.includes(vehicle)) || !crewRoles.has(role) ||
+          (!vehicle && role !== 'besatzung') || (occupiedRole && occupiedRoles.has(occupiedRole))) {
+        throw Object.assign(new Error('Besatzung ist ungültig'), { status: 400 });
+      }
+      seen.add(memberId);
+      if (occupiedRole) occupiedRoles.add(occupiedRole);
+      return { memberId, vehicle, role };
+    });
+    db.prepare('DELETE FROM report_crew WHERE report_id=?').run(reportId);
+    const add = db.prepare('INSERT INTO report_crew(report_id,member_id,vehicle,role) VALUES(?,?,?,?)');
+    for (const row of rows) add.run(reportId, row.memberId, row.vehicle, row.role);
+    return {
+      vehicles: [...new Set(rows.map(row => row.vehicle).filter(Boolean))].join(', '),
+      personnel: rows.map(row => db.prepare('SELECT name FROM members WHERE id=?').get(row.memberId).name).join(', ')
+    };
   }
 
   function route(method, pattern, handler) {
@@ -190,7 +312,15 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
       if (token) db.prepare('DELETE FROM sessions WHERE token=?').run(token);
       json(res, 200, { ok: true }, { 'set-cookie': 'session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
     }),
-    route('GET', /^\/api\/me$/, async (req, res, _match, user) => json(res, 200, user)),
+    route('GET', /^\/api\/me$/, async (_req, res, _match, user) => json(res, 200, {
+      id: user.id,
+      organization_id: user.organization_id,
+      organization_name: user.organization_name,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      unitIds: user.unitIds
+    })),
     route('GET', /^\/api\/units$/, async (_req, res, _match, user) => {
       json(res, 200, db.prepare(`
         SELECT id,name,divera_access_key IS NOT NULL divera_configured
@@ -202,6 +332,18 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
       const result = db.prepare('INSERT INTO units(organization_id,name) VALUES(?,?)')
         .run(user.organization_id, required(data.name, 'Name', 200));
       json(res, 201, { id: Number(result.lastInsertRowid) });
+    }),
+    route('GET', /^\/api\/units\/(\d+)\/members$/, async (_req, res, match, user) => {
+      assertOwnUnit(user, match[1]);
+      if (!sql.unit.get(match[1], user.organization_id)) throw Object.assign(new Error('Einheit nicht gefunden'), { status: 404 });
+      json(res, 200, db.prepare(`
+        SELECT m.id,m.name,m.divera_id,
+          COALESCE((SELECT group_concat(q.name, ', ') FROM member_qualifications mq
+            JOIN qualifications q ON q.id=mq.qualification_id
+            WHERE mq.member_id=m.id AND q.unit_id=mu.unit_id),'') qualifications
+        FROM members m
+        JOIN member_units mu ON mu.member_id=m.id
+        WHERE mu.unit_id=? AND m.organization_id=? ORDER BY m.name`).all(match[1], user.organization_id));
     }),
     route('GET', /^\/api\/users$/, async (_req, res, _match, user) => {
       assertRole(user, 'wehrleitung');
@@ -281,7 +423,12 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
           ? ['EXISTS (SELECT 1 FROM user_units uu WHERE uu.user_id=? AND uu.unit_id=r.unit_id)', user.id]
           : ['r.author_id=?', user.id];
       json(res, 200, db.prepare(`
-        SELECT r.*,u.name author_name,un.name unit_name FROM reports r
+        SELECT r.*,u.name author_name,un.name unit_name,
+          COALESCE((SELECT json_group_array(json_object(
+            'memberId',rc.member_id,'name',m.name,'vehicle',rc.vehicle,'role',rc.role))
+            FROM report_crew rc JOIN members m ON m.id=rc.member_id
+            WHERE rc.report_id=r.id),'[]') crew
+        FROM reports r
         JOIN users u ON u.id=r.author_id JOIN units un ON un.id=r.unit_id
         WHERE r.incident_id=? AND ${visible[0]} ORDER BY r.created_at`).all(match[1], ...visible.slice(1)));
     }),
@@ -294,9 +441,20 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
       if (!db.prepare('SELECT 1 FROM incident_units WHERE incident_id=? AND unit_id=?').get(match[1], unitId)) {
         throw Object.assign(new Error('Einheit wurde nicht alarmiert'), { status: 400 });
       }
-      const result = db.prepare(`
-        INSERT INTO reports(incident_id,unit_id,author_id,narrative,vehicles,personnel)
-        VALUES(?,?,?,?,?,?)`).run(match[1], unitId, user.id, required(data.narrative, 'Bericht'), String(data.vehicles || ''), String(data.personnel || ''));
+      db.exec('BEGIN');
+      let result;
+      try {
+        result = db.prepare(`
+          INSERT INTO reports(incident_id,unit_id,author_id,narrative)
+          VALUES(?,?,?,?)`).run(match[1], unitId, user.id, required(data.narrative, 'Bericht'));
+        const summary = replaceCrew(result.lastInsertRowid, Number(match[1]), unitId, data.crew || [], user.organization_id);
+        db.prepare('UPDATE reports SET vehicles=?,personnel=? WHERE id=?')
+          .run(summary.vehicles, summary.personnel, result.lastInsertRowid);
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
       json(res, 201, { id: Number(result.lastInsertRowid) });
     }),
     route('PUT', /^\/api\/reports\/(\d+)$/, async (req, res, match, user) => {
@@ -306,8 +464,16 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
         (report.author_id === user.id || (user.role === 'einheitsleitung' && user.unitIds.includes(report.unit_id)));
       if (!mayEdit) throw Object.assign(new Error('Der Bericht kann nicht bearbeitet werden'), { status: 403 });
       const data = await body(req);
-      db.prepare(`UPDATE reports SET narrative=?,vehicles=?,personnel=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-        .run(required(data.narrative, 'Bericht'), String(data.vehicles || ''), String(data.personnel || ''), report.id);
+      db.exec('BEGIN');
+      try {
+        const summary = replaceCrew(report.id, report.incident_id, report.unit_id, data.crew || [], user.organization_id);
+        db.prepare(`UPDATE reports SET narrative=?,vehicles=?,personnel=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+          .run(required(data.narrative, 'Bericht'), summary.vehicles, summary.personnel, report.id);
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
       json(res, 200, { ok: true });
     }),
     route('POST', /^\/api\/reports\/(\d+)\/release$/, async (_req, res, match, user) => {
@@ -340,30 +506,104 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
       const unit = sql.unit.get(match[1], user.organization_id);
       if (!unit?.divera_access_key) throw Object.assign(new Error('DIVERA ist nicht konfiguriert'), { status: 400 });
       const key = encodeURIComponent(unit.divera_access_key);
-      const [alarmsRes, vehiclesRes] = await Promise.all([
+      const [alarmsRes, unitRes] = await Promise.all([
         fetchImpl(`https://app.divera247.com/api/v2/alarms?accesskey=${key}`, { method: 'GET' }),
-        fetchImpl(`https://www.divera247.com/api/v2/pull/vehicle-status?accesskey=${key}`, { method: 'GET' })
+        fetchImpl(`https://app.divera247.com/api/v2/pull/all?accesskey=${key}`, { method: 'GET' })
       ]);
-      if (!alarmsRes.ok || !vehiclesRes.ok) throw Object.assign(new Error('DIVERA-Abfrage fehlgeschlagen'), { status: 502 });
-      const [alarmsRaw, vehiclesRaw] = await Promise.all([alarmsRes.json(), vehiclesRes.json()]);
+      if (!alarmsRes.ok || !unitRes.ok) throw Object.assign(new Error('DIVERA-Abfrage fehlgeschlagen'), { status: 502 });
+      const [alarmsRaw, unitRaw] = await Promise.all([alarmsRes.json(), unitRes.json()]);
       const array = value => Array.isArray(value) ? value : Object.values(value || {});
-      const vehicles = array(vehiclesRaw.data?.items || vehiclesRaw.data || vehiclesRaw.items || vehiclesRaw).map(v => ({
-        id: String(v.id || v.vehicle_id || ''),
-        name: v.name || v.vehicle || v.callname || String(v.id || '')
+      const ownVehicles = new Map(Object.entries(unitRaw.data?.cluster?.vehicle || {})
+        .map(([id, vehicle]) => [String(vehicle.id || id), vehicle]));
+      const vehicles = [...ownVehicles.entries()].map(([id, vehicle]) => ({
+        id,
+        name: vehicle.name || vehicle.shortname || id,
+        shortname: String(vehicle.shortname || ''),
+        fullname: String(vehicle.fullname || ''),
+        own: true
       }));
       const alarms = array(alarmsRaw.data?.items || alarmsRaw.data || alarmsRaw.items || alarmsRaw).map(a => {
         const assigned = a.vehicles || a.vehicle_ids || a.vehicle || [];
         const ids = Array.isArray(assigned) ? assigned
           : typeof assigned === 'object' ? Object.keys(assigned) : String(assigned).split(',');
+        const diveraDate = finiteNumber(a.date, 'Alarmierungszeit');
         return {
           id: String(a.id || a.cluster_id || a.number || ''),
+          foreignId: String(a.foreign_id || ''),
+          date: diveraDate,
           title: a.title || a.text || a.type || 'Einsatz',
-          startedAt: a.ts_create || a.date || a.created_at || new Date().toISOString(),
+          startedAt: isoDate(a.date ?? a.ts_create ?? a.created_at),
+          text: String(a.text || ''),
           address: a.address || a.location || '',
-          vehicles: ids.map(id => vehicles.find(v => v.id === String(id).trim())?.name || String(id).trim()).filter(Boolean)
+          lat: finiteNumber(a.lat, 'Breitengrad'),
+          lng: finiteNumber(a.lng ?? a.long, 'Längengrad'),
+          remark: String(a.remark || ''),
+          patient: String(a.patient || ''),
+          caller: String(a.caller || ''),
+          vehicles: ids.map(id => {
+            const vehicleId = String(id).trim();
+            const ownVehicle = ownVehicles.get(vehicleId);
+            return {
+            id: vehicleId,
+            name: ownVehicle?.name || ownVehicle?.shortname || vehicleId,
+            shortname: String(ownVehicle?.shortname || ''),
+            fullname: String(ownVehicle?.fullname || ''),
+            own: Boolean(ownVehicle)
+          }}).filter(vehicle => vehicle.id)
         };
       });
       json(res, 200, { alarms, vehicles });
+    }),
+    route('POST', /^\/api\/units\/(\d+)\/divera\/members\/sync$/, async (_req, res, match, user) => {
+      assertRole(user, 'wehrleitung', 'einheitsleitung');
+      assertOwnUnit(user, match[1]);
+      const unit = sql.unit.get(match[1], user.organization_id);
+      if (!unit?.divera_access_key) throw Object.assign(new Error('DIVERA ist nicht konfiguriert'), { status: 400 });
+      const response = await fetchImpl(
+        `https://app.divera247.com/api/v2/pull/all?accesskey=${encodeURIComponent(unit.divera_access_key)}`,
+        { method: 'GET' });
+      if (!response.ok) throw Object.assign(new Error('DIVERA-Mitgliederabgleich fehlgeschlagen'), { status: 502 });
+      const cluster = (await response.json()).data?.cluster || {};
+      const consumers = cluster.consumer || {};
+      const qualifications = new Map();
+      let count = 0;
+      db.exec('BEGIN');
+      try {
+        for (const [externalId, qualification] of Object.entries(cluster.qualification || {})) {
+          const diveraId = String(qualification.id || externalId);
+          const saved = db.prepare(`
+            INSERT INTO qualifications(unit_id,divera_id,name,shortname) VALUES(?,?,?,?)
+            ON CONFLICT(unit_id,divera_id) DO UPDATE SET name=excluded.name,shortname=excluded.shortname
+            RETURNING id`).get(unit.id, diveraId, required(qualification.name, 'Qualifikation', 200),
+              optional(qualification.shortname, 'Qualifikationskürzel', 100));
+          qualifications.set(diveraId, saved.id);
+        }
+        for (const [externalId, consumer] of Object.entries(consumers)) {
+          const diveraId = String(consumer.id || externalId).trim();
+          const name = String(consumer.stdformat_name ||
+            `${consumer.firstname || ''} ${consumer.lastname || ''}`).trim();
+          if (!diveraId || !name) continue;
+          const member = db.prepare(`
+            INSERT INTO members(organization_id,divera_id,name) VALUES(?,?,?)
+            ON CONFLICT(organization_id,divera_id) DO UPDATE SET name=excluded.name
+            RETURNING id`).get(user.organization_id, diveraId, name);
+          db.prepare('INSERT OR IGNORE INTO member_units(member_id,unit_id) VALUES(?,?)').run(member.id, unit.id);
+          db.prepare(`DELETE FROM member_qualifications WHERE member_id=? AND qualification_id IN
+            (SELECT id FROM qualifications WHERE unit_id=?)`).run(member.id, unit.id);
+          const addQualification = db.prepare(
+            'INSERT OR IGNORE INTO member_qualifications(member_id,qualification_id) VALUES(?,?)');
+          for (const qualificationId of consumer.qualifications || []) {
+            const localId = qualifications.get(String(qualificationId));
+            if (localId) addQualification.run(member.id, localId);
+          }
+          count++;
+        }
+        db.exec('COMMIT');
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+      json(res, 200, { count });
     }),
     route('POST', /^\/api\/units\/(\d+)\/divera\/import$/, async (req, res, match, user) => {
       assertRole(user, 'wehrleitung', 'einheitsleitung');
@@ -372,15 +612,27 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
       if (!unit) throw Object.assign(new Error('Einheit nicht gefunden'), { status: 404 });
       const data = await body(req);
       const diveraId = required(data.id, 'DIVERA-ID', 200);
+      const diveraDate = finiteNumber(data.date, 'Alarmierungszeit');
       const incidentId = Number(db.prepare(`
-        INSERT INTO incidents(organization_id,divera_id,title,started_at,address) VALUES(?,?,?,?,?)
+        INSERT INTO incidents(
+          organization_id,divera_id,foreign_id,divera_date,title,started_at,message,address,
+          lat,lng,remark,patient,caller
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(organization_id,divera_id) DO UPDATE SET
-          title=excluded.title,started_at=excluded.started_at,address=excluded.address
-        RETURNING id`).get(user.organization_id, diveraId, required(data.title, 'Stichwort', 300),
-          required(data.startedAt, 'Zeitpunkt', 100), String(data.address || '')).id);
+          foreign_id=excluded.foreign_id,divera_date=excluded.divera_date,title=excluded.title,
+          started_at=excluded.started_at,message=excluded.message,address=excluded.address,
+          lat=excluded.lat,lng=excluded.lng,remark=excluded.remark,
+          patient=excluded.patient,caller=excluded.caller
+        RETURNING id`).get(user.organization_id, diveraId,
+          optional(data.foreignId, 'Einsatznummer', 200), diveraDate,
+          required(data.title, 'Stichwort', 300), required(data.startedAt, 'Zeitpunkt', 100),
+          optional(data.text, 'Meldung'), optional(data.address, 'Adresse', 500),
+          finiteNumber(data.lat, 'Breitengrad'), finiteNumber(data.lng, 'Längengrad'),
+          optional(data.remark, 'Bemerkung'), optional(data.patient, 'Patient'),
+          optional(data.caller, 'Meldende Person')).id);
       db.prepare(`INSERT INTO incident_units(incident_id,unit_id,vehicles) VALUES(?,?,?)
         ON CONFLICT(incident_id,unit_id) DO UPDATE SET vehicles=excluded.vehicles`)
-        .run(incidentId, unit.id, JSON.stringify(data.vehicles || []));
+        .run(incidentId, unit.id, JSON.stringify(vehicleSnapshots(data.vehicles || [])));
       json(res, 201, { id: incidentId });
     })
   ];

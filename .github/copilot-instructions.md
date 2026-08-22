@@ -1,48 +1,153 @@
-# GitHub Copilot instructions
+# GitHub Copilot Instructions
 
-## Project
+## Verbindlicher Arbeitsablauf
 
-- This is a small German-language, multi-tenant web application for writing
-  and consolidating fire-service incident reports.
-- Keep the implementation minimal. Prefer Node.js built-ins and browser APIs;
-  do not add dependencies when the platform already provides the feature.
-- Runtime: Node.js 22.5 or newer.
-- Backend: `server.js` using `node:http` and `node:sqlite`.
-- Frontend: dependency-free HTML, CSS, and JavaScript in
-  `public/index.html`.
-- Data is stored in SQLite at `data/app.db`; tests use an in-memory database.
+- Lies diese Datei vor jeder Änderung vollständig und prüfe den Auftrag gegen
+  die hier dokumentierten Entscheidungen.
+- Ändere keine dieser Grundentscheidungen stillschweigend. Wenn ein Auftrag
+  ihnen widerspricht oder eine Entscheidung ersetzen, erweitern oder
+  relativieren würde, frage den Benutzer vor der Umsetzung.
+- Dokumentiere neue dauerhafte Produkt- oder Architekturentscheidungen in
+  dieser Datei. Temporäre Implementierungsdetails gehören nicht hierher.
+- Halte Änderungen klein und vollständig. Verwende zuerst vorhandenen Code,
+  dann Node.js- oder Browser-APIs und erst danach zusätzliche Abhängigkeiten.
 
-## Domain and authorization
+## Produkt und Sprache
 
-- An organization (`organization`) is a tenant and contains multiple units.
-- `wehrleitung` can access all incidents and reports in its organization and
-  writes the consolidated report.
-- `einheitsleitung` can access and edit draft reports for its own unit and
-  release them to the organization leadership.
-- `fuehrungskraft` can write reports and only access reports authored by that
-  user.
-- Every database query involving tenant data must be scoped by
-  `organization_id`. Unit-bound users must additionally be restricted to
-  their own `unit_id`.
-- Released reports are immutable.
+- Die Anwendung erstellt und konsolidiert Einsatzberichte für Feuerwehren.
+- Oberfläche, Validierungsfehler und fachliche Begriffe sind deutsch.
+- Eine Organisation beziehungsweise Wehr ist ein Mandant und besitzt mehrere
+  Einheiten.
+- Die Anwendung bleibt eine einfache, responsive Weboberfläche ohne
+  Frontend-Framework.
+
+## Technische Architektur
+
+- Laufzeit: Node.js 22.5 oder neuer.
+- Backend: `server.js` mit `node:http`, `node:sqlite` und weiteren
+  Node.js-Standardmodulen.
+- Frontend: `public/index.html` mit nativem HTML, CSS und JavaScript.
+- Es gibt keine Laufzeitabhängigkeiten aus npm. Füge keine Abhängigkeit hinzu,
+  wenn Standardbibliothek oder Browserplattform die Aufgabe lösen.
+- SQLite liegt unter `data/app.db`; Tests verwenden `:memory:`.
+- Das Schema wird beim Start erzeugt. Notwendige bestehende Datenbanken werden
+  durch kleine additive Migrationen im Server aktualisiert.
+- API-Fehler haben die Form `{ "error": "..." }`. Eingaben werden an der
+  API-Grenze validiert; Fehler dürfen nicht still ignoriert werden.
+
+## Mandanten und Berechtigungen
+
+- Jede Abfrage fachlicher Daten muss über `organization_id` auf den aktuellen
+  Mandanten begrenzt sein.
+- `wehrleitung` sieht alle Einsätze und Berichte der eigenen Organisation,
+  verwaltet Einheiten und Benutzer und schreibt den Gesamtbericht.
+- `einheitsleitung` kann mehreren Einheiten angehören. Sie sieht und bearbeitet
+  Entwürfe ihrer Einheiten und gibt diese für die Wehrleitung frei.
+- `fuehrungskraft` kann mehreren Einheiten angehören und für jede dieser
+  Einheiten Berichte schreiben. Sie sieht nur selbst verfasste Berichte.
+- Benutzer gehören über `user_units` zu beliebig vielen Einheiten. Das alte
+  Feld `users.unit_id` bleibt nur als kompatible Primärzuordnung bestehen.
+- Benutzer können durch die Wehrleitung bearbeitet werden. Ein neues Passwort
+  ist dabei optional.
+- Freigegebene Berichte sind unveränderlich.
+- Sitzungen liegen in einem `HttpOnly`- und `SameSite=Strict`-Cookie und laufen
+  nach zwölf Stunden ab.
+
+## Einsätze und Berichte
+
+- Ein Einsatz kann mehreren Einheiten zugeordnet sein.
+- Jede beteiligte Einheit verfasst eigene Berichte; die Wehrleitung
+  konsolidiert diese in `incidents.consolidated_text`.
+- Ein DIVERA-Einsatz ist innerhalb einer Organisation über `divera_id`
+  eindeutig. Wiederholter Import aktualisiert ihn, statt ihn zu duplizieren.
+- `incident_units` ist je Kombination aus Einsatz und Einheit eindeutig.
+  Wiederholter Import aktualisiert diese Zuordnung und ihre Fahrzeuge.
+- Importierte Einsatzdaten umfassen `foreign_id`, DIVERA-`date`,
+  Alarmierungszeit, `title`, `text`, Adresse, `lat`/`lng`, `remark`, `patient`
+  und `caller`.
+- `patient` und `caller` sind sensible, mandantengebundene Daten. Sie dürfen
+  weder protokolliert noch organisationsübergreifend ausgegeben werden.
+
+## Mitglieder, Qualifikationen und Besatzung
+
+- Mitglieder sind fachliche Personen und von Anmeldebenutzern getrennt.
+- Eine Person wird anhand ihrer DIVERA-ID organisationsweit einmal in
+  `members` gespeichert und über `member_units` mehreren Einheiten zugeordnet.
+- Qualifikationen sind einheitsspezifisch. Der Sync aktualisiert
+  `cluster.qualification` und die IDs aus
+  `cluster.consumer[*].qualifications`.
+- Berichtsbesatzungen liegen strukturiert in `report_crew`. Ein Mitglied kann
+  pro Bericht höchstens einmal eingesetzt werden.
+- Zulässige Funktionen sind `maschinist`, `einheitsfuehrer` und `besatzung`.
+- Je Fahrzeug gibt es höchstens einen Maschinisten und einen Einheitsführer,
+  aber beliebig viele Personen in der Besatzung.
+- Nur eigene Fahrzeuge der berichtenden Einheit oder „Ohne Fahrzeug“ sind als
+  Besatzungsziel zulässig. Der Server erzwingt diese Regel unabhängig von der
+  Oberfläche.
+- In der Berichtsansicht stehen zuerst die Fahrzeugspalten mit den drei
+  Funktionen und darunter eine volle Breite mit verfügbarem Personal.
+- Drag-and-Drop ist die primäre Bedienung. Auswahlfelder bleiben als
+  barrierearmer Tastatur- und Mobil-Fallback erhalten.
 
 ## DIVERA 24/7
 
-- DIVERA integration is configured per unit with an access key.
-- Treat DIVERA as strictly read-only. External DIVERA requests must use HTTP
-  `GET` and may only retrieve alarms and vehicle information.
-- Never call DIVERA endpoints that create, update, acknowledge, close, or
-  delete data.
-- Importing a DIVERA alarm writes only to the application's local SQLite
-  database; it must never write back to DIVERA.
-- Never log, return, or commit DIVERA access keys.
+- DIVERA wird je Einheit mit einem eigenen Access-Key konfiguriert.
+- DIVERA ist strikt nur lesend angebunden. Jeder externe DIVERA-Aufruf muss
+  HTTP `GET` verwenden.
+- Rufe niemals Endpunkte auf, die Alarme, Rückmeldungen, Status,
+  Fahrzeugbesatzungen, Dateien oder andere DIVERA-Daten erstellen, ändern,
+  bestätigen, schließen oder löschen.
+- Access-Keys dürfen nie geloggt, an den Browser zurückgegeben oder committed
+  werden.
+- Einsätze werden über `GET /api/v2/alarms` gelesen.
+- Mitglieder, Qualifikationen und Fahrzeugstammdaten werden über
+  `GET /api/v2/pull/all` gelesen.
+- Der Live-Fahrzeugstatus aus `pull/vehicle-status` wird ausdrücklich nicht
+  abgerufen, gespeichert oder angezeigt; er ist für Einsatzberichte nicht
+  relevant.
+- `cluster.vehicle` bestimmt die eigenen Fahrzeuge der konfigurierten Einheit.
+  Alle im Alarm enthaltenen Fahrzeuge werden importiert und als eigenes oder
+  fremdes Fahrzeug markiert. Nur eigene Fahrzeuge sind Besatzungsziele.
+- Die Besatzungs-Endpunkte von DIVERA werden niemals verwendet. Alle
+  Personal-Fahrzeug-Zuordnungen existieren ausschließlich lokal.
+- Ein lokaler POST-Import oder Sync schreibt nur in SQLite und ist kein
+  schreibender DIVERA-Aufruf.
 
-## Development
+## Oberfläche
 
-- Run tests with `npm test`.
-- GitHub Actions runs the same command from
-  `.github/workflows/test.yml`.
-- Add one focused `node:test` check for non-trivial behavior, especially
-  authorization, tenant isolation, and external API boundaries.
-- Preserve the existing JSON error format and validate input at API
-  boundaries.
+- Hauptnavigation: Einsätze, Mitglieder & Fahrzeuge, rollenabhängig
+  Verwaltung und DIVERA sowie Abmelden.
+- Der Tab „Mitglieder & Fahrzeuge“ zeigt je zugänglicher Einheit
+  synchronisierte Mitglieder und Qualifikationen sowie eigene und fremde
+  Fahrzeuge aus den letzten Einsatzimporten.
+- Die DIVERA-Seite konfiguriert den Access-Key, synchronisiert Mitglieder und
+  Qualifikationen und importiert Einsätze.
+- Externe Kartenlinks verwenden OpenStreetMap und öffnen mit
+  `rel="noopener"`.
+
+## Datenschutz und Sicherheit
+
+- Passwörter werden mit `scrypt` und individuellem Salt gespeichert.
+- Passwort-Hashes, Sitzungswerte und DIVERA-Schlüssel werden nie über die API
+  ausgegeben.
+- Mandanten- und Einheitsgrenzen werden serverseitig geprüft; reine
+  UI-Ausblendung ist keine Berechtigungsprüfung.
+- Behalte die Größenbegrenzung für Request-Bodies und validiere IDs,
+  Koordinaten, Rollen und Freitextlängen.
+
+## Tests und CI
+
+- Tests verwenden ausschließlich `node:test` und laufen mit `npm test`.
+- GitHub Actions führt denselben Befehl aus
+  `.github/workflows/test.yml` unter Node.js 22 aus.
+- Ergänze für nicht triviale Änderungen einen fokussierten Test im bestehenden
+  End-to-End-Fluss, besonders für Mandantentrennung, Rollen,
+  Import-Idempotenz und externe Nur-Lese-Grenzen.
+- Führe keine neuen Testframeworks ein, solange `node:test` ausreicht.
+
+## Betrieb und Zurücksetzen
+
+- Es gibt absichtlich keine Lösch- oder Reset-Funktion in der Oberfläche.
+- Ein vollständiger einmaliger Reset erfolgt nur bei beendetem Server durch
+  `Remove-Item .\data\app.db`; danach startet die Ersteinrichtung neu.
+- Ein Reset löscht alle Benutzer, Einsätze und Berichte endgültig.
