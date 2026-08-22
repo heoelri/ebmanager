@@ -62,7 +62,7 @@ function db(): PDO
     static $pdo;
     if ($pdo) return $pdo;
     $config = config();
-    if (empty($config['dsn'])) throw new RuntimeException('Datenbank ist nicht konfiguriert');
+    if (empty($config['dsn'])) throw new ApiError(503, 'Datenbankzugang ist nicht konfiguriert. Prüfen Sie DB_DSN oder config.local.php.');
     $pdo = new PDO($config['dsn'], $config['user'] ?? '', $config['password'] ?? '', [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -454,7 +454,7 @@ try {
             query(
                 "INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) VALUES(?,?,?,?,?,'wehrleitung')",
                 [$org, $unitId, required($data['name'] ?? null, 'Name', 200),
-                 required($data['email'] ?? null, 'E-Mail', 320), password_hash($password, PASSWORD_DEFAULT)]
+                 emailAddress($data['email'] ?? null), password_hash($password, PASSWORD_DEFAULT)]
             );
             replaceMemberships((int)db()->lastInsertId(), [$unitId]);
         });
@@ -591,7 +591,7 @@ try {
             query(
                 'INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) VALUES(?,?,?,?,?,?)',
                 [$user['organization_id'], $unitIds[0] ?? null, required($data['name'] ?? null, 'Name', 200),
-                 required($data['email'] ?? null, 'E-Mail', 320), password_hash($password, PASSWORD_DEFAULT), $data['role']]
+                 emailAddress($data['email'] ?? null), password_hash($password, PASSWORD_DEFAULT), $data['role']]
             );
             $id = (int)db()->lastInsertId();
             replaceMemberships($id, $unitIds);
@@ -613,7 +613,7 @@ try {
             query(
                 'UPDATE users SET unit_id=?,name=?,email=?,role=?,password_hash=? WHERE id=?',
                 [$unitIds[0] ?? null, required($data['name'] ?? null, 'Name', 200),
-                 required($data['email'] ?? null, 'E-Mail', 320), $data['role'],
+                 emailAddress($data['email'] ?? null), $data['role'],
                  $password ? password_hash($password, PASSWORD_DEFAULT) : $existing['password_hash'], $existing['id']]
             );
             replaceMemberships((int)$existing['id'], $unitIds);

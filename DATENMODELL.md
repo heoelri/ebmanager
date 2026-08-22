@@ -77,7 +77,7 @@ Anmeldebenutzer sind von den in Einsätzen verwendeten Mitgliedern getrennt.
 | `organization_id` | BIGINT UNSIGNED, FK | Zugehörige Wehr |
 | `unit_id` | BIGINT UNSIGNED, FK, NULL | Kompatible Primärzuordnung; maßgeblich ist `user_units` |
 | `name` | VARCHAR(200), NOT NULL | Anzeigename |
-| `email` | VARCHAR(320), NOT NULL, UNIQUE | Groß-/Kleinschreibung wird ignoriert |
+| `email` | VARCHAR(320), NOT NULL, UNIQUE | Syntaktisch validierte E-Mail-Adresse; Groß-/Kleinschreibung wird ignoriert |
 | `password_hash` | VARCHAR(255), NOT NULL | Durch `password_hash` erzeugter Hash |
 | `role` | ENUM, NOT NULL | `wehrleitung`, `einheitsleitung` oder `fuehrungskraft` |
 

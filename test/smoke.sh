@@ -9,6 +9,7 @@ base_url="${TEST_BASE_URL:-http://127.0.0.1:8080}"
 db_host="${TEST_DB_HOST:-127.0.0.1}"
 
 DB_DSN='' REQUEST_METHOD=GET REQUEST_URI=/api/bootstrap php api.php | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
+DB_DSN='' php -r '$_COOKIE["__Host-session"]=str_repeat("a",64); $_SERVER["REQUEST_METHOD"]="GET"; $_SERVER["REQUEST_URI"]="/api/me"; require "api.php";' | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
 
 if [[ -z "${TEST_BASE_URL:-}" ]]; then
   php -S 127.0.0.1:8080 api.php >php-server.log 2>&1 &
@@ -29,6 +30,11 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --header 'Content-Type: application/json' \
   --data '{"organization":"Testwehr","unit":"Löschzug","name":"Admin","email":"admin@example.test","password":"geheimes-passwort","setupToken":"falsch"}' \
   "$base_url/api/setup")" = 403
+
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --header 'Content-Type: application/json' \
+  --data "{\"organization\":\"Testwehr\",\"unit\":\"Löschzug\",\"name\":\"Admin\",\"email\":\"ungültig\",\"password\":\"geheimes-passwort\",\"setupToken\":\"$SETUP_TOKEN\"}" \
+  "$base_url/api/setup")" = 400
 
 curl --insecure --silent --fail \
   --header 'Content-Type: application/json' \
