@@ -49,6 +49,7 @@ allgemein freigegeben.
 
 - [Dokumentationsübersicht](docs/README.md)
 - [Architektur](docs/ARCHITEKTUR.md)
+- [Deployment auf Webspace](docs/WEBSPACE-DEPLOYMENT.md)
 - [Datenmodell](DATENMODELL.md)
 - [Security Review](SECURITY-REVIEW.md)
 - [Changelog und Aktualisierungshinweise](CHANGELOG.md)
@@ -103,33 +104,7 @@ docker compose --profile test down --volumes
 
 ## Installation auf Webspace
 
-1. Eine leere MySQL-Datenbank und einen Datenbankbenutzer anlegen.
-2. `schema.sql` einmalig über phpMyAdmin oder die Verwaltungsoberfläche des
-   Hosters importieren.
-3. `config.example.php` als `config.local.php` kopieren und DSN, Datenbankbenutzer, Passwort, öffentliche HTTPS-URL `app_url` und Absenderadresse `mail_from` eintragen. Der Webhoster muss den E-Mail-Versand über die PHP-Funktion `mail()` unterstützen.
-4. Ein Einrichtungstoken mit mindestens 32 zufälligen Zeichen erzeugen, zum
-   Beispiel lokal mit:
-
-   ```powershell
-   php -r "echo bin2hex(random_bytes(32));"
-   ```
-
-5. Das Token in `config.local.php` als `setup_token` eintragen.
-6. `.htaccess`, `api.php`, `config.local.php` und den Ordner `public` per FTP
-   oder SFTP in das Stammverzeichnis der Domain hochladen.
-7. Die HTTPS-Adresse öffnen und bei der einmaligen Ersteinrichtung das Token
-   eingeben.
-
-Alternativ können `DB_DSN`, `DB_USER`, `DB_PASSWORD`, `SETUP_TOKEN`, `APP_URL` und `MAIL_FROM` als Umgebungsvariablen gesetzt werden. `config.local.php` wird nicht committed und ist über `.htaccess` gegen HTTP-Zugriff gesperrt.
-
-Beispiel-DSN:
-
-```text
-mysql:host=mysql.example.net;port=3306;dbname=einsatzberichte;charset=utf8mb4
-```
-
-Nach dem Schemaimport benötigt der Laufzeitbenutzer nur `SELECT`, `INSERT`,
-`UPDATE` und `DELETE` auf der Anwendungsdatenbank.
+Die vollständige Erstinstallation mit Hosting-Voraussetzungen, Datenbank, Konfiguration, Dateistruktur, Einrichtung und Funktionsprüfung steht in [Deployment auf Webspace](docs/WEBSPACE-DEPLOYMENT.md).
 
 ## DIVERA
 
@@ -141,13 +116,7 @@ DIVERA.
 
 ## Aktualisierung
 
-1. Datenbank und `config.local.php` sichern.
-2. `CHANGELOG.md` vollständig lesen und alle Einträge unter `Breaking Changes` sowie `Manuelle Aktualisierung` befolgen.
-3. Neue SQL-Dateien aus `migrations/` in numerischer Reihenfolge vor dem neuen Anwendungscode über die Datenbankverwaltung des Hosters importieren.
-4. Neue Konfigurationswerte in `config.local.php` ergänzen, ohne bestehende Werte zu überschreiben.
-5. Anwendungsdateien per FTP oder SFTP ersetzen und anschließend Anmeldung sowie zentrale Funktionen prüfen.
-
-Für die Passwort-Wiederherstellung muss bei bestehenden Installationen vor dem Anwendungscode einmal `migrations/001-password-resets.sql` importiert werden. Das generische FTPS-Deployment automatisiert Datenbankmigrationen absichtlich nicht, weil es keine Datenbankzugangsdaten erhält und Shared-Hosting-Anbieter unterschiedliche Verwaltungswege bereitstellen.
+Vor jeder Aktualisierung müssen [CHANGELOG.md](CHANGELOG.md) und der Abschnitt [Bestehende Installation aktualisieren](docs/WEBSPACE-DEPLOYMENT.md#10-bestehende-installation-aktualisieren) gelesen werden. Nicht automatisierbare Migrationen und Konfigurationsschritte werden dort in Ausführungsreihenfolge dokumentiert.
 
 ## GitHub Actions
 
@@ -162,19 +131,7 @@ Nach einem erfolgreichen Testlauf eines Pushs auf `main` lädt
 `public/index.html` per **FTPS** hoch. `config.local.php`, Datenbankdateien und
 `schema.sql` werden niemals automatisch übertragen.
 
-Im GitHub-Environment `hiba` werden diese Secrets benötigt:
-
-| Secret | Inhalt |
-|---|---|
-| `FTP_SERVER` | FTPS-Hostname, optional mit Port |
-| `FTP_USERNAME` | FTP-Benutzer |
-| `FTP_PASSWORD` | FTP-Passwort |
-| `FTP_PATH` | Optionales Zielverzeichnis relativ zum FTP-Stamm |
-
-Der Server muss explizites FTPS unterstützen. Unverschlüsseltes FTP wird
-durch `curl --ssl-reqd` abgelehnt.
-
-Weitere Ziele wie `devpreview` erhalten ein eigenes GitHub-Environment mit eigenen Secrets, Schutzregeln und einer eigenen Concurrency-Gruppe. Produktionszugangsdaten aus `hiba` werden nicht wiederverwendet.
+Die Einrichtung des Environments `hiba`, alle Secrets und die Trennung zukünftiger Ziele wie `devpreview` sind unter [Automatisches Deployment mit GitHub Actions einrichten](docs/WEBSPACE-DEPLOYMENT.md#9-automatisches-deployment-mit-github-actions-einrichten) dokumentiert.
 
 ## Datenbank zurücksetzen
 

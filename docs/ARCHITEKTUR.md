@@ -77,6 +77,6 @@ selbstsigniertes HTTPS-Zertifikat bereit. Die Dienste sind nur an
 
 Details:
 
-- [Installation und Deployment](../README.md)
+- [Installation und Deployment](WEBSPACE-DEPLOYMENT.md)
 - [Datenmodell](../DATENMODELL.md)
 - [Security Review](../SECURITY-REVIEW.md)

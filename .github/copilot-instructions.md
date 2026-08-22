@@ -11,6 +11,7 @@
   dieser Datei. Temporäre Implementierungsdetails gehören nicht hierher.
 - Aktualisiere `CHANGELOG.md` bei jeder relevanten funktionalen, technischen oder betrieblichen Änderung. Nicht rückwärtskompatible Änderungen müssen ausdrücklich unter `Breaking Changes` stehen.
 - Dokumentiere jeden nicht automatisierbaren Aktualisierungsschritt vollständig in `CHANGELOG.md` und im Aktualisierungsabschnitt der `README.md`; insbesondere müssen erforderliche SQL-Migrationen, Konfigurationswerte und ihre Ausführungsreihenfolge genannt werden.
+- `docs/WEBSPACE-DEPLOYMENT.md` ist die maßgebliche ausführliche Anleitung für Installation, Deployment, Updates und Rollback auf Webspace. Andere Dokumente verlinken darauf, statt dieselben Schritte zu duplizieren.
 - Aktualisiere `DATENMODELL.md` bei jeder Änderung am Code, damit Tabellen,
   Beziehungen, Datenformate und fachliche Regeln immer dem aktuellen
   Implementierungsstand entsprechen.
