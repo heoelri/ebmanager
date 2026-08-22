@@ -20,6 +20,10 @@ for _ in {1..20}; do
 done
 
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --data '{"organization":"Testwehr"}' \
+  "$base_url/api/setup")" = 415
+
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --header 'Content-Type: application/json' \
   --data '{"organization":"Testwehr","unit":"Löschzug","name":"Admin","email":"admin@example.test","password":"geheimes-passwort","setupToken":"falsch"}' \
   "$base_url/api/setup")" = 403
@@ -36,5 +40,42 @@ curl --insecure --silent --fail --cookie-jar cookies.txt \
 
 session_token=$(MYSQL_PWD="$DB_PASSWORD" mysql --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute='SELECT token FROM sessions LIMIT 1')
-curl --insecure --silent --fail --cookie "session=$session_token" \
+curl --insecure --silent --fail --cookie "__Host-session=$session_token" \
   "$base_url/api/me" | grep --quiet '"role":"wehrleitung"'
+
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "__Host-session=$session_token" \
+  --header 'Content-Type: application/json' \
+  --header 'Origin: https://angreifer.example.test' \
+  --request POST \
+  "$base_url/api/logout")" = 403
+
+incident_id=$(curl --insecure --silent --fail \
+  --cookie "__Host-session=$session_token" \
+  --header 'Content-Type: application/json' \
+  --data '{"title":"Testeinsatz","startedAt":"2026-08-22T18:00:00.000Z","address":"","unitIds":[1]}' \
+  "$base_url/api/incidents" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
+
+report_payload='{"unitId":1,"narrative":"Ursprünglich","departedAt":"2026-08-22T18:05:00.000Z","arrivedAt":"2026-08-22T18:10:00.000Z","endedAt":"2026-08-22T19:00:00.000Z","incidentType":"Technische Hilfe","classification":{"site":[],"cause":[],"technical":[]},"crew":[]}'
+report_id=$(curl --insecure --silent --fail \
+  --cookie "__Host-session=$session_token" \
+  --header 'Content-Type: application/json' \
+  --data "$report_payload" \
+  "$base_url/api/incidents/$incident_id/reports" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
+
+MYSQL_PWD="$DB_PASSWORD" mysql --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="START TRANSACTION; UPDATE reports SET status='released' WHERE id=$report_id; DO SLEEP(2); COMMIT;" &
+release_pid=$!
+sleep 0.25
+edit_status=$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "__Host-session=$session_token" \
+  --header 'Content-Type: application/json' \
+  --request PUT \
+  --data "${report_payload/Ursprünglich/Manipuliert}" \
+  "$base_url/api/reports/$report_id")
+wait "$release_pid"
+test "$edit_status" = 409
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT CONCAT(status, ':', narrative) FROM reports WHERE id=$report_id")" = 'released:Ursprünglich'

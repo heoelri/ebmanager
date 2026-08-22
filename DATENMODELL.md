@@ -10,7 +10,9 @@ werden vor dem Anwendungscode kontrolliert über die Datenbankverwaltung des
 Hosters eingespielt.
 
 Für lokale Entwicklung initialisiert der MySQL-Container dasselbe
-`schema.sql` nur beim Anlegen eines neuen Docker-Volumes.
+`schema.sql` nur beim Anlegen eines neuen Docker-Volumes. Die lokale
+Webanwendung ist ausschließlich an die Loopback-Adresse gebunden und erhält
+keine lokale Produktivkonfiguration.
 
 ## Überblick
 
@@ -254,6 +256,11 @@ höchstens ein Maschinist und ein Einheitsführer zulässig; die Besatzung ist
 unbegrenzt. Ohne Fahrzeug ist nur die Rolle `besatzung` erlaubt. Diese Regeln
 und die Zugehörigkeit des Mitglieds zur Einheit werden von der Anwendung
 validiert.
+
+Bearbeitung und Freigabe eines Berichts werden über eine Zeilensperre
+koordiniert. Nach der Freigabe kann auch eine bereits begonnene parallele
+Bearbeitung keine Daten mehr ändern. Der HTTP-Smoke-Test bildet dieses Race
+mit zwei getrennten Datenbankverbindungen nach.
 
 ## Lösch- und Konsistenzverhalten
 

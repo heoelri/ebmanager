@@ -168,6 +168,9 @@
   Zeichen langes `SETUP_TOKEN`.
 - Sitzungscookies sind `HttpOnly`, `SameSite=Strict` und bei HTTPS `Secure`.
   Eine Passwortänderung widerruft alle Sitzungen des betroffenen Benutzers.
+- Das Sitzungscookie heißt `__Host-session`. Alle schreibenden API-Anfragen
+  erfordern `application/json`; vorhandene `Origin`-Header müssen exakt der
+  HTTPS-Anwendungsorigin entsprechen.
 - Passwort-Hashes, Sitzungswerte und DIVERA-Schlüssel werden nie über die API
   ausgegeben.
 - Mandanten- und Einheitsgrenzen werden serverseitig geprüft; reine
@@ -180,10 +183,16 @@
 - Tests verwenden PHP-, MySQL- und Shell-Bordmittel ohne Testframework.
 - GitHub Actions prüft PHP-Syntax, importiert `schema.sql` in MySQL 8 und
   führt `test/smoke.sh` aus.
+- Ein unabhängiger CI-Job baut die Docker-Images und führt den Smoke-Test
+  gegen Apache/HTTPS und MySQL aus. Der Test-Workflow ist nur erfolgreich,
+  wenn beide Jobs bestehen.
 - Docker Compose führt denselben Smoke-Test gegen die lokale
   HTTPS-/MySQL-Umgebung aus.
 - Pull Requests führen ausschließlich Tests aus und erhalten keinen Zugriff
   auf die Secrets des GitHub-Environments `production`.
+- Dependabot prüft GitHub Actions, Dockerfiles und Docker Compose wöchentlich.
+  Minor- und Patch-Updates werden je Ökosystem gruppiert; Major-Updates
+  bleiben einzeln prüfbar.
 - Ergänze für nicht triviale Änderungen einen fokussierten Test im bestehenden
   End-to-End-Fluss, besonders für Mandantentrennung, Rollen,
   Import-Idempotenz und externe Nur-Lese-Grenzen.

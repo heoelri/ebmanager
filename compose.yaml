@@ -26,10 +26,12 @@ services:
       DB_PASSWORD: local-password
       SETUP_TOKEN: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
     ports:
-      - 8080:80
-      - 8443:443
+      - 127.0.0.1:8080:80
+      - 127.0.0.1:8443:443
     volumes:
-      - .:/var/www/html
+      - ./api.php:/var/www/html/api.php:ro
+      - ./.htaccess:/var/www/html/.htaccess:ro
+      - ./public:/var/www/html/public:ro
     healthcheck:
       test: [CMD, curl, --fail, --insecure, https://localhost/api/bootstrap]
       interval: 5s

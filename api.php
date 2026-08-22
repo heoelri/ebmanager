@@ -7,6 +7,7 @@ final class ApiError extends RuntimeException
 }
 
 const ROLES = ['wehrleitung', 'einheitsleitung', 'fuehrungskraft'];
+const SESSION_COOKIE = '__Host-session';
 const INCIDENT_TYPES = [
     'Kleinbrand', 'Mittelbrand', 'Großbrand', 'Wald- und Flächenbrand',
     'Schornsteinbrand', 'Kfz-Brand', 'Verkehrsunfall', 'Oelunfall/Oelspur',
@@ -108,8 +109,22 @@ function input(): array
     } catch (JsonException) {
         throw new ApiError(400, 'Ungültiges JSON');
     }
+
     if (!is_array($data)) throw new ApiError(400, 'Ungültiges JSON');
     return $data;
+}
+
+function assertRequestOrigin(string $method): void
+{
+    if (in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)) return;
+    $contentType = strtolower(trim(explode(';', (string)($_SERVER['CONTENT_TYPE'] ?? ''))[0]));
+    if ($contentType !== 'application/json') throw new ApiError(415, 'Content-Type muss application/json sein');
+    $origin = rtrim((string)($_SERVER['HTTP_ORIGIN'] ?? ''), '/');
+    if ($origin === '') return;
+    $host = (string)($_SERVER['HTTP_HOST'] ?? '');
+    if (!preg_match('/^[A-Za-z0-9.-]+(?::[0-9]+)?$/', $host) || !hash_equals("https://$host", $origin)) {
+        throw new ApiError(403, 'Anfrageursprung ist ungültig');
+    }
 }
 
 function textLength(string $value): int
@@ -167,7 +182,7 @@ function report(int $id, int $organizationId): ?array
 
 function currentUser(): ?array
 {
-    $token = $_COOKIE['session'] ?? '';
+    $token = $_COOKIE[SESSION_COOKIE] ?? '';
     if (!preg_match('/^[a-f0-9]{64}$/', $token)) return null;
     $user = one(
         'SELECT u.*,o.name organization_name FROM sessions s
@@ -367,6 +382,7 @@ function diveraData(array $unit): array
 
 try {
     $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+    assertRequestOrigin($method);
     $path = parse_url($_SERVER['REQUEST_URI'] ?? '/api', PHP_URL_PATH);
     $path = rawurldecode(is_string($path) ? $path : '/api');
     $public = in_array($path, ['/api/bootstrap', '/api/setup', '/api/login'], true);
@@ -409,10 +425,10 @@ try {
         $token = bin2hex(random_bytes(32));
         transaction(function () use ($token, $login) {
             query('DELETE FROM sessions WHERE expires_at<=UTC_TIMESTAMP()');
-            if (preg_match('/^[a-f0-9]{64}$/', $_COOKIE['session'] ?? '')) query('DELETE FROM sessions WHERE token=?', [$_COOKIE['session']]);
+            if (preg_match('/^[a-f0-9]{64}$/', $_COOKIE[SESSION_COOKIE] ?? '')) query('DELETE FROM sessions WHERE token=?', [$_COOKIE[SESSION_COOKIE]]);
             query('INSERT INTO sessions(token,user_id,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 12 HOUR)', [$token, $login['id']]);
         });
-        setcookie('session', $token, [
+        setcookie(SESSION_COOKIE, $token, [
             'expires' => time() + 43200, 'path' => '/', 'secure' => true,
             'httponly' => true, 'samesite' => 'Strict'
         ]);
@@ -420,8 +436,8 @@ try {
     }
 
     if ($method === 'POST' && $path === '/api/logout') {
-        if (isset($_COOKIE['session'])) query('DELETE FROM sessions WHERE token=?', [$_COOKIE['session']]);
-        setcookie('session', '', [
+        if (isset($_COOKIE[SESSION_COOKIE])) query('DELETE FROM sessions WHERE token=?', [$_COOKIE[SESSION_COOKIE]]);
+        setcookie(SESSION_COOKIE, '', [
             'expires' => 1, 'path' => '/', 'secure' => true,
             'httponly' => true, 'samesite' => 'Strict'
         ]);
@@ -634,14 +650,18 @@ try {
         if (!$mayEdit) throw new ApiError(403, 'Der Bericht kann nicht bearbeitet werden');
         $data = input();
         transaction(function () use ($data, $foundReport, $user) {
-            $foundIncident = incident((int)$foundReport['incident_id'], $user['organization_id']);
+            $lockedReport = one('SELECT * FROM reports WHERE id=? FOR UPDATE', [$foundReport['id']]);
+            if (!$lockedReport || $lockedReport['status'] !== 'draft') {
+                throw new ApiError(409, 'Der Bericht wurde bereits freigegeben');
+            }
+            $foundIncident = incident((int)$lockedReport['incident_id'], $user['organization_id']);
             $details = reportDetails($data, $foundIncident);
-            $summary = replaceCrew((int)$foundReport['id'], (int)$foundReport['incident_id'], (int)$foundReport['unit_id'], $data['crew'] ?? [], $user['organization_id']);
+            $summary = replaceCrew((int)$lockedReport['id'], (int)$lockedReport['incident_id'], (int)$lockedReport['unit_id'], $data['crew'] ?? [], $user['organization_id']);
             query(
                 'UPDATE reports SET narrative=?,vehicles=?,personnel=?,alarmed_at=?,departed_at=?,arrived_at=?,ended_at=?,incident_type=?,classification=? WHERE id=?',
                 [required($data['narrative'] ?? null, 'Bericht'), $summary['vehicles'], $summary['personnel'],
                  $details['alarmedAt'], $details['departedAt'], $details['arrivedAt'], $details['endedAt'],
-                 $details['incidentType'], $details['classification'], $foundReport['id']]
+                 $details['incidentType'], $details['classification'], $lockedReport['id']]
             );
         });
         respond(200, ['ok' => true]);

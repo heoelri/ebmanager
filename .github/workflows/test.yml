@@ -7,10 +7,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  application:
+    name: PHP and MySQL
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     services:
       mysql:
         image: mysql:8.4
@@ -38,3 +43,17 @@ jobs:
         run: |
           mysql --host=127.0.0.1 --user=root einsatzberichte < schema.sql
           bash test/smoke.sh
+
+  containers:
+    name: Docker Compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose-Konfiguration prüfen
+        run: docker compose config --quiet
+      - name: Images bauen und End-to-End-Test ausführen
+        run: docker compose --profile test up --build --abort-on-container-exit --exit-code-from test
+      - name: Container und Volumes entfernen
+        if: always()
+        run: docker compose --profile test down --volumes
