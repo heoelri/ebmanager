@@ -446,15 +446,15 @@ try {
         if (!hash_equals($setupToken, (string)($data['setupToken'] ?? ''))) throw new ApiError(403, 'Einrichtungstoken ist ungültig');
         $password = required($data['password'] ?? null, 'Passwort', 200);
         if (textLength($password) < 10) throw new ApiError(400, 'Passwort muss mindestens 10 Zeichen haben');
-        transaction(function () use ($data, $password) {
+        $email = emailAddress($data['email'] ?? null);
+        transaction(function () use ($data, $email, $password) {
             query('INSERT INTO organizations(name) VALUES(?)', [required($data['organization'] ?? null, 'Wehr', 200)]);
             $org = (int)db()->lastInsertId();
             query('INSERT INTO units(organization_id,name) VALUES(?,?)', [$org, required($data['unit'] ?? null, 'Einheit', 200)]);
             $unitId = (int)db()->lastInsertId();
             query(
                 "INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) VALUES(?,?,?,?,?,'wehrleitung')",
-                [$org, $unitId, required($data['name'] ?? null, 'Name', 200),
-                 emailAddress($data['email'] ?? null), password_hash($password, PASSWORD_DEFAULT)]
+                [$org, $unitId, required($data['name'] ?? null, 'Name', 200), $email, password_hash($password, PASSWORD_DEFAULT)]
             );
             replaceMemberships((int)db()->lastInsertId(), [$unitId]);
         });
