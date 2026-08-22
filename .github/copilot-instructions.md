@@ -56,7 +56,7 @@
 ## Einsätze und Berichte
 
 - Ein Einsatz kann mehreren Einheiten zugeordnet sein.
-- Jede beteiligte Einheit verfasst eigene Berichte; die Wehrleitung
+- Jede beteiligte Einheit verfasst genau einen Bericht pro Einsatz; die Wehrleitung
   konsolidiert diese in `incidents.consolidated_text`.
 - Ein DIVERA-Einsatz ist innerhalb einer Organisation über `divera_id`
   eindeutig. Wiederholter Import aktualisiert ihn, statt ihn zu duplizieren.
@@ -65,6 +65,22 @@
 - Importierte Einsatzdaten umfassen `foreign_id`, DIVERA-`date`,
   Alarmierungszeit, `title`, `text`, Adresse, `lat`/`lng`, `remark`, `patient`
   und `caller`.
+- Jeder Einheitsbericht enthält die Alarmierungszeit des Einsatzes sowie
+  `departed_at`, `arrived_at` und `ended_at`. Die Alarmierungszeit ist im
+  Bericht nicht frei änderbar und stammt bei DIVERA-Einsätzen aus `date`.
+- Einsatzzeiten müssen vollständig und chronologisch sein. Die Einsatzdauer
+  wird aus Alarmierungszeit und Einsatzende berechnet und nicht separat
+  gespeichert.
+- Zulässige Einsatzarten sind: Kleinbrand, Mittelbrand, Großbrand, Wald- und
+  Flächenbrand, Schornsteinbrand, Kfz-Brand, Verkehrsunfall,
+  Oelunfall/Oelspur, Chemieunfall, Technische Hilfe, Sturmeinsatz,
+  Hochwassereinsatz, Fehlalarm BMA, BMA, Fehlalarm, Böswilliger Alarm und
+  Sonstiges.
+- Die Aufgliederung ist eine Mehrfachauswahl in den drei Gruppen
+  `site` (Einsatzstelle), `cause` (Schadensursache) und `technical`
+  (Technische Hilfe). Die Werte entsprechen dem Formular
+  `FW-Einsatzbericht 66.2026 F4 Hilchenbach.pdf`.
+- Andere Felder aus diesem PDF werden vorerst ausdrücklich nicht übernommen.
 - `patient` und `caller` sind sensible, mandantengebundene Daten. Sie dürfen
   weder protokolliert noch organisationsübergreifend ausgegeben werden.
 
@@ -86,6 +102,7 @@
   Oberfläche.
 - In der Berichtsansicht stehen zuerst die Fahrzeugspalten mit den drei
   Funktionen und darunter eine volle Breite mit verfügbarem Personal.
+- Die Box mit verfügbarem Personal ist nativ ein- und ausklappbar.
 - Drag-and-Drop ist die primäre Bedienung. Auswahlfelder bleiben als
   barrierearmer Tastatur- und Mobil-Fallback erhalten.
 
@@ -122,6 +139,10 @@
   Fahrzeuge aus den letzten Einsatzimporten.
 - Die DIVERA-Seite konfiguriert den Access-Key, synchronisiert Mitglieder und
   Qualifikationen und importiert Einsätze.
+- Bereits für die ausgewählte Einheit importierte DIVERA-Einsätze zeigen einen
+  deaktivierten Import-Button.
+- Einzelberichte zeigen Besatzungen nach Fahrzeug gruppiert; innerhalb des
+  Fahrzeugs stehen Einheitsführer, Maschinist und Besatzung.
 - Externe Kartenlinks verwenden OpenStreetMap und öffnen mit
   `rel="noopener"`.
 

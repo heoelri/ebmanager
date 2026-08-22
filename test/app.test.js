@@ -37,6 +37,17 @@ test('setup, login and tenant-scoped incident flow', async t => {
   t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}`;
   const call = (path, options) => fetch(base + path, options);
+  const reportDetails = {
+    departedAt: '2026-08-22T19:05:00.000Z',
+    arrivedAt: '2026-08-22T19:10:00.000Z',
+    endedAt: '2026-08-22T20:20:00.000Z',
+    incidentType: 'Technische Hilfe',
+    classification: {
+      site: ['Verkehrsfläche'],
+      cause: [],
+      technical: ['Menschen in Notlage']
+    }
+  };
 
   let response = await call('/api/setup', {
     method: 'POST', headers: { 'content-type': 'application/json' },
@@ -119,7 +130,14 @@ test('setup, login and tenant-scoped incident flow', async t => {
   assert.equal((await call('/api/users', { headers: { cookie: memberCookie } })).status, 403);
   response = await call(`/api/incidents/${incidents[0].id}/reports`, {
     method: 'POST', headers: { cookie: memberCookie, 'content-type': 'application/json' },
-    body: JSON.stringify({ unitId: secondUnit.id, narrative: 'Brand gelöscht', vehicles: 'LF 10', personnel: '1/8' })
+    body: JSON.stringify({
+      ...reportDetails,
+      departedAt: '2026-08-22T18:05:00.000Z',
+      arrivedAt: '2026-08-22T18:10:00.000Z',
+      endedAt: '2026-08-22T18:30:00.000Z',
+      unitId: secondUnit.id,
+      narrative: 'Brand gelöscht'
+    })
   });
   const report = await response.json();
   assert.equal(response.status, 201);
@@ -179,6 +197,7 @@ test('setup, login and tenant-scoped incident flow', async t => {
   response = await call(`/api/incidents/${diveraIncidents[0].id}/reports`, {
     method: 'POST', headers: { cookie: memberCookie, 'content-type': 'application/json' },
     body: JSON.stringify({
+      ...reportDetails,
       unitId: secondUnit.id,
       narrative: 'Ungültige fremde Besatzung',
       crew: [{ memberId: members[0].id, vehicle: '21', role: 'maschinist' }]
@@ -188,6 +207,7 @@ test('setup, login and tenant-scoped incident flow', async t => {
   response = await call(`/api/incidents/${diveraIncidents[0].id}/reports`, {
     method: 'POST', headers: { cookie: memberCookie, 'content-type': 'application/json' },
     body: JSON.stringify({
+      ...reportDetails,
       unitId: secondUnit.id,
       narrative: 'Doppelter Maschinist',
       crew: members.map(member => ({ memberId: member.id, vehicle: 'HLF 20', role: 'maschinist' }))
@@ -197,6 +217,7 @@ test('setup, login and tenant-scoped incident flow', async t => {
   response = await call(`/api/incidents/${diveraIncidents[0].id}/reports`, {
     method: 'POST', headers: { cookie: memberCookie, 'content-type': 'application/json' },
     body: JSON.stringify({
+      ...reportDetails,
       unitId: secondUnit.id,
       narrative: 'Einsatz mit Fahrzeugbesatzung',
       crew: [
@@ -211,5 +232,17 @@ test('setup, login and tenant-scoped incident flow', async t => {
     { memberId: members[0].id, name: members[0].name, vehicle: 'HLF 20', role: 'maschinist' },
     { memberId: members[1].id, name: members[1].name, vehicle: 'HLF 20', role: 'besatzung' }
   ]);
+  assert.equal(reports[0].alarmed_at, imported.startedAt);
+  assert.equal(reports[0].departed_at, reportDetails.departedAt);
+  assert.equal(reports[0].arrived_at, reportDetails.arrivedAt);
+  assert.equal(reports[0].ended_at, reportDetails.endedAt);
+  assert.equal(reports[0].duration_minutes, 80);
+  assert.equal(reports[0].incident_type, reportDetails.incidentType);
+  assert.deepEqual(JSON.parse(reports[0].classification), reportDetails.classification);
+  response = await call(`/api/incidents/${diveraIncidents[0].id}/reports`, {
+    method: 'POST', headers: { cookie: memberCookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ unitId: secondUnit.id, narrative: 'Zweiter Bericht', crew: [] })
+  });
+  assert.equal(response.status, 409);
   assert.ok(diveraRequests.every(request => request.options.method === 'GET'));
 });

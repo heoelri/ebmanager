@@ -6,6 +6,32 @@ const { DatabaseSync } = require('node:sqlite');
 
 const html = readFileSync(join(__dirname, 'public', 'index.html'));
 const roles = new Set(['wehrleitung', 'einheitsleitung', 'fuehrungskraft']);
+const incidentTypes = new Set([
+  'Kleinbrand', 'Mittelbrand', 'Großbrand', 'Wald- und Flächenbrand',
+  'Schornsteinbrand', 'Kfz-Brand', 'Verkehrsunfall', 'Oelunfall/Oelspur',
+  'Chemieunfall', 'Technische Hilfe', 'Sturmeinsatz', 'Hochwassereinsatz',
+  'Fehlalarm BMA', 'BMA', 'Fehlalarm', 'Böswilliger Alarm', 'Sonstiges'
+]);
+const classifications = {
+  site: new Set([
+    'Wohngebäude', 'Büro und Verwaltungsgebäude', 'Landwirtschaftlicher Betrieb',
+    'Gewerbebetrieb', 'Industriebetrieb', 'Theater, Kino, Versammlungsstätte',
+    'Alten- u. Pflegeeinrichtung, Klinik', 'Verkehrsfläche',
+    'Wald, Heide, Moor, Feldflur', 'Sonstige'
+  ]),
+  cause: new Set([
+    'Bauliche Mängel', 'Betriebliche u. maschinelle Mängel', 'Blitzschlag',
+    'Elektrizität', 'Explosion', 'Fahrlässigkeit', 'Selbstentzündung',
+    'Sonst. Feuer-, Licht- u. Wärmequelle', 'Verursacht durch Kinder',
+    'Vorsätzliche Brandstiftung', 'Unbekannt'
+  ]),
+  technical: new Set([
+    'Menschen in Notlage', 'Tiere in Notlage', 'Betriebsunfall',
+    'Einsturz von Baulichkeiten', 'Gasausströmung', 'Gasvergiftung',
+    'Schäden durch radioaktive Stoffe', 'Wasserschaden', 'Sturmschaden',
+    'Sonstige technische Hilfeleistung'
+  ])
+};
 
 function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fetch } = {}) {
   if (dbPath !== ':memory:') mkdirSync(join(__dirname, 'data'), { recursive: true });
@@ -74,9 +100,11 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
       id INTEGER PRIMARY KEY, incident_id INTEGER NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
       unit_id INTEGER NOT NULL REFERENCES units(id), author_id INTEGER NOT NULL REFERENCES users(id),
       narrative TEXT NOT NULL, vehicles TEXT NOT NULL DEFAULT '', personnel TEXT NOT NULL DEFAULT '',
+      alarmed_at TEXT, departed_at TEXT, arrived_at TEXT, ended_at TEXT,
+      incident_type TEXT NOT NULL DEFAULT '', classification TEXT NOT NULL DEFAULT '{}',
       status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','released')),
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      released_at TEXT
+      released_at TEXT, UNIQUE(incident_id, unit_id)
     );
     CREATE TABLE IF NOT EXISTS report_crew (
       report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
@@ -103,7 +131,27 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
   if (!db.prepare('PRAGMA table_info(report_crew)').all().some(column => column.name === 'role')) {
     db.exec("ALTER TABLE report_crew ADD COLUMN role TEXT NOT NULL DEFAULT 'besatzung'");
   }
+  const reportColumns = {
+    alarmed_at: 'TEXT',
+    departed_at: 'TEXT',
+    arrived_at: 'TEXT',
+    ended_at: 'TEXT',
+    incident_type: "TEXT NOT NULL DEFAULT ''",
+    classification: "TEXT NOT NULL DEFAULT '{}'"
+  };
+  const existingReportColumns = new Set(db.prepare('PRAGMA table_info(reports)').all().map(column => column.name));
+  for (const [name, definition] of Object.entries(reportColumns)) {
+    if (!existingReportColumns.has(name)) db.exec(`ALTER TABLE reports ADD COLUMN ${name} ${definition}`);
+  }
+  db.exec(`UPDATE reports SET alarmed_at=(
+    SELECT started_at FROM incidents WHERE incidents.id=reports.incident_id
+  ) WHERE alarmed_at IS NULL`);
   db.prepare("UPDATE report_crew SET role='besatzung' WHERE role='mannschaft'").run();
+  const duplicateReport = db.prepare(`
+    SELECT incident_id,unit_id FROM reports GROUP BY incident_id,unit_id HAVING count(*)>1 LIMIT 1`).get();
+  if (duplicateReport) throw new Error(
+    `Mehrere Berichte für Einsatz ${duplicateReport.incident_id} und Einheit ${duplicateReport.unit_id}; vor dem Start manuell zusammenführen`);
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS reports_incident_unit_unique ON reports(incident_id,unit_id)');
 
   const sql = {
     userBySession: db.prepare(`
@@ -194,6 +242,40 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
         own: vehicle.own !== false
       };
     });
+  }
+
+  function reportDetails(data, incident) {
+    if (!incidentTypes.has(data.incidentType)) {
+      throw Object.assign(new Error('Einsatzart ist ungültig'), { status: 400 });
+    }
+    const times = {
+      alarmedAt: new Date(incident.started_at),
+      departedAt: new Date(required(data.departedAt, 'Ausgerückt um', 100)),
+      arrivedAt: new Date(required(data.arrivedAt, 'Eingetroffen um', 100)),
+      endedAt: new Date(required(data.endedAt, 'Einsatz beendet um', 100))
+    };
+    if (Object.values(times).some(date => Number.isNaN(date.getTime())) ||
+        times.departedAt < times.alarmedAt || times.arrivedAt < times.departedAt ||
+        times.endedAt < times.arrivedAt) {
+      throw Object.assign(new Error('Einsatzzeiten müssen vollständig und chronologisch sein'), { status: 400 });
+    }
+    const selected = data.classification || {};
+    const classification = {};
+    for (const [group, allowed] of Object.entries(classifications)) {
+      const values = Array.isArray(selected[group]) ? [...new Set(selected[group].map(String))] : [];
+      if (values.some(value => !allowed.has(value))) {
+        throw Object.assign(new Error('Aufgliederung ist ungültig'), { status: 400 });
+      }
+      classification[group] = values;
+    }
+    return {
+      alarmedAt: times.alarmedAt.toISOString(),
+      departedAt: times.departedAt.toISOString(),
+      arrivedAt: times.arrivedAt.toISOString(),
+      endedAt: times.endedAt.toISOString(),
+      incidentType: data.incidentType,
+      classification: JSON.stringify(classification)
+    };
   }
 
   function passwordHash(password) {
@@ -397,7 +479,11 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
       const args = user.role === 'wehrleitung' ? [user.organization_id] : [user.organization_id, user.id];
       json(res, 200, db.prepare(`
         SELECT i.*, group_concat(u.name, ', ') units,
-          json_group_array(json_object('unitId',iu.unit_id,'vehicles',iu.vehicles)) assignments
+          json_group_array(json_object(
+            'unitId',iu.unit_id,
+            'vehicles',iu.vehicles,
+            'hasReport',EXISTS(SELECT 1 FROM reports r WHERE r.incident_id=i.id AND r.unit_id=iu.unit_id)
+          )) assignments
         FROM incidents i LEFT JOIN incident_units iu ON iu.incident_id=i.id
         LEFT JOIN units u ON u.id=iu.unit_id WHERE ${where}
         GROUP BY i.id ORDER BY i.started_at DESC`).all(...args));
@@ -424,6 +510,7 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
           : ['r.author_id=?', user.id];
       json(res, 200, db.prepare(`
         SELECT r.*,u.name author_name,un.name unit_name,
+          CAST(ROUND((julianday(r.ended_at)-julianday(r.alarmed_at))*1440) AS INTEGER) duration_minutes,
           COALESCE((SELECT json_group_array(json_object(
             'memberId',rc.member_id,'name',m.name,'vehicle',rc.vehicle,'role',rc.role))
             FROM report_crew rc JOIN members m ON m.id=rc.member_id
@@ -441,12 +528,21 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
       if (!db.prepare('SELECT 1 FROM incident_units WHERE incident_id=? AND unit_id=?').get(match[1], unitId)) {
         throw Object.assign(new Error('Einheit wurde nicht alarmiert'), { status: 400 });
       }
+      if (db.prepare('SELECT 1 FROM reports WHERE incident_id=? AND unit_id=?').get(match[1], unitId)) {
+        throw Object.assign(new Error('Für diese Einheit existiert bereits ein Einsatzbericht'), { status: 409 });
+      }
       db.exec('BEGIN');
       let result;
       try {
+        const details = reportDetails(data, incident);
         result = db.prepare(`
-          INSERT INTO reports(incident_id,unit_id,author_id,narrative)
-          VALUES(?,?,?,?)`).run(match[1], unitId, user.id, required(data.narrative, 'Bericht'));
+          INSERT INTO reports(
+            incident_id,unit_id,author_id,narrative,alarmed_at,departed_at,arrived_at,
+            ended_at,incident_type,classification
+          ) VALUES(?,?,?,?,?,?,?,?,?,?)`).run(
+            match[1], unitId, user.id, required(data.narrative, 'Bericht'),
+            details.alarmedAt, details.departedAt, details.arrivedAt, details.endedAt,
+            details.incidentType, details.classification);
         const summary = replaceCrew(result.lastInsertRowid, Number(match[1]), unitId, data.crew || [], user.organization_id);
         db.prepare('UPDATE reports SET vehicles=?,personnel=? WHERE id=?')
           .run(summary.vehicles, summary.personnel, result.lastInsertRowid);
@@ -466,9 +562,15 @@ function createApp({ dbPath = join(__dirname, 'data', 'app.db'), fetchImpl = fet
       const data = await body(req);
       db.exec('BEGIN');
       try {
+        const incident = sql.incident.get(report.incident_id, user.organization_id);
+        const details = reportDetails(data, incident);
         const summary = replaceCrew(report.id, report.incident_id, report.unit_id, data.crew || [], user.organization_id);
-        db.prepare(`UPDATE reports SET narrative=?,vehicles=?,personnel=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
-          .run(required(data.narrative, 'Bericht'), summary.vehicles, summary.personnel, report.id);
+        db.prepare(`UPDATE reports SET narrative=?,vehicles=?,personnel=?,alarmed_at=?,
+          departed_at=?,arrived_at=?,ended_at=?,incident_type=?,classification=?,
+          updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(
+            required(data.narrative, 'Bericht'), summary.vehicles, summary.personnel,
+            details.alarmedAt, details.departedAt, details.arrivedAt, details.endedAt,
+            details.incidentType, details.classification, report.id);
         db.exec('COMMIT');
       } catch (error) {
         db.exec('ROLLBACK');
