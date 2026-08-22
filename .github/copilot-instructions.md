@@ -9,6 +9,9 @@
   relativieren würde, frage den Benutzer vor der Umsetzung.
 - Dokumentiere neue dauerhafte Produkt- oder Architekturentscheidungen in
   dieser Datei. Temporäre Implementierungsdetails gehören nicht hierher.
+- Aktualisiere `DATENMODELL.md` bei jeder Änderung am Code, damit Tabellen,
+  Beziehungen, Datenformate und fachliche Regeln immer dem aktuellen
+  Implementierungsstand entsprechen.
 - Halte Änderungen klein und vollständig. Verwende zuerst vorhandenen Code,
   dann Node.js- oder Browser-APIs und erst danach zusätzliche Abhängigkeiten.
 
