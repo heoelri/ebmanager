@@ -8,6 +8,8 @@ export SETUP_TOKEN="${SETUP_TOKEN:-0123456789abcdef0123456789abcdef0123456789abc
 base_url="${TEST_BASE_URL:-http://127.0.0.1:8080}"
 db_host="${TEST_DB_HOST:-127.0.0.1}"
 
+DB_DSN='' REQUEST_METHOD=GET REQUEST_URI=/api/bootstrap php api.php | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
+
 if [[ -z "${TEST_BASE_URL:-}" ]]; then
   php -S 127.0.0.1:8080 api.php >php-server.log 2>&1 &
   server_pid=$!

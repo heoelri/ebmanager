@@ -50,6 +50,7 @@
 - Datenbankzugangsdaten, das einmalige Einrichtungstoken, die öffentliche HTTPS-Anwendungsadresse und die Absenderadresse kommen aus Umgebungsvariablen oder der nicht versionierten `config.local.php`.
 - API-Fehler haben die Form `{ "error": "..." }`. Eingaben werden an der
   API-Grenze validiert; Fehler dürfen nicht still ignoriert werden.
+- `GET /api/bootstrap` prüft Datenbankkonfiguration, Erreichbarkeit und das vollständige Schema. Fehler werden ohne Zugangsdaten mit HTTP 503 gemeldet und in der Oberfläche als Betriebszustand angezeigt.
 
 ## Mandanten und Berechtigungen
 

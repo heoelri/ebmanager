@@ -27,12 +27,14 @@ function formData(form){return Object.fromEntries(new FormData(form))}
 function showError(e){app.insertAdjacentHTML('afterbegin',`<p class="error">${esc(e.message)}</p>`)}
 function bindForm(id,handler){document.querySelector(id).onsubmit=async e=>{e.preventDefault();try{await handler(formData(e.target));}catch(x){showError(x)}}}
 async function start(){
-  const state=await api('/api/bootstrap');
+  let state;
+  try{state=await api('/api/bootstrap')}catch(e){return databaseUnavailable(e.message)}
   if(state.needsSetup)return setup();
   const resetToken=new URLSearchParams(location.search).get('reset');
   if(resetToken)return resetPassword(resetToken);
   try{me=await api('/api/me');await load();home()}catch{login()}
 }
+function databaseUnavailable(message){nav.innerHTML='';app.innerHTML=`<section class="card"><h1>Datenbank nicht verfügbar</h1><p class="error">${esc(message)}</p><p>Prüfen Sie die Datenbankwerte in <code>config.local.php</code> oder den Umgebungsvariablen und importieren Sie fehlende SQL-Migrationen.</p><button onclick="location.reload()">Erneut prüfen</button></section>`}
 function setup(){nav.innerHTML='';app.innerHTML=`<section class="card"><h1>Ersteinrichtung</h1><form id="setup" class="grid">
   <label>Wehr<input name="organization" required></label><label>Erste Einheit<input name="unit" required></label>
   <label>Ihr Name<input name="name" required></label><label>E-Mail<input name="email" type="email" required></label>

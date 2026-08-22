@@ -72,6 +72,23 @@ function db(): PDO
     return $pdo;
 }
 
+function databaseConfigurationError(): ?string
+{
+    if (empty(config()['dsn'])) return 'Datenbankzugang ist nicht konfiguriert. Prüfen Sie DB_DSN oder config.local.php.';
+    try {
+        $tables = db()->query(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN
+             ('organizations','units','users','user_units','sessions','password_resets','incidents','incident_units',
+              'members','member_units','qualifications','member_qualifications','reports','report_crew')"
+        )->fetchColumn();
+        if ((int)$tables !== 14) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
+    } catch (PDOException $error) {
+        error_log((string)$error);
+        return 'Datenbankverbindung fehlgeschlagen. Prüfen Sie DSN, Benutzername, Passwort und Erreichbarkeit.';
+    }
+    return null;
+}
+
 function query(string $sql, array $params = []): PDOStatement
 {
     $statement = db()->prepare($sql);
@@ -416,6 +433,8 @@ try {
     if (!$public && !$user) respond(401, ['error' => 'Bitte anmelden']);
 
     if ($method === 'GET' && $path === '/api/bootstrap') {
+        $databaseError = databaseConfigurationError();
+        if ($databaseError) respond(503, ['error' => $databaseError]);
         respond(200, ['needsSetup' => !one('SELECT id FROM users LIMIT 1')]);
     }
 
