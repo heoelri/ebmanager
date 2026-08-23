@@ -56,6 +56,7 @@ assert.deepEqual([...times.matchAll(/<dt>([^<]+)<\/dt>/g)].map(match => match[1]
 
 const restoreFocusSource = html.match(/function restoreDialogFocus[^\n]+/)?.[0];
 assert(restoreFocusSource, 'restoreDialogFocus fehlt');
+assert.match(html, /\.form-section>summary:focus-visible\{outline-offset:-3px\}/);
 let closeHandler;
 let focusCount = 0;
 const restoreDialogFocus = new Function('dialog', `${restoreFocusSource}; return restoreDialogFocus;`)({
@@ -73,6 +74,8 @@ const editReportSource = html.match(/async function editReport[^\n]+/)?.[0];
 assert(editReportSource, 'editReport fehlt');
 assert.match(editReportSource, /<button type="submit" disabled>Speichern<\/button>/);
 assert(editReportSource.indexOf("bindForm('#edit'") < editReportSource.indexOf("await loadReportCrew(form,'#editCrew'"));
+assert.match(html, /onclick="editReport\(\$\{r\.id\},this\)"/);
+assert.match(html, /onclick="editUser\(\$\{u\.id\},this\)"/);
 
 const loadCrewSource = html.match(/async function loadReportCrew[^\n]+/)?.[0];
 assert(loadCrewSource, 'loadReportCrew fehlt');
