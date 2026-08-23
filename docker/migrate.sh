@@ -38,6 +38,11 @@ if [[ "$had_history" == 0 ]]; then
     "${mysql[@]}" < /migrations/004-login-history.sql
   fi
   mark 004-login-history.sql
+
+  if [[ "$(query "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='divera_imports'")" == 0 ]]; then
+    "${mysql[@]}" < /migrations/005-divera-imports.sql
+  fi
+  mark 005-divera-imports.sql
 fi
 
 for file in /migrations/*.sql; do

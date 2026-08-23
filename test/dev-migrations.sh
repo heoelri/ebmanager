@@ -23,6 +23,9 @@ ALTER TABLE reports
 SQL
 
 "${compose[@]}" run --rm migrate
+"${compose[@]}" exec -T db mysql --user=root --password=test-password einsatzberichte \
+  --execute="DROP TABLE schema_migrations"
+"${compose[@]}" run --rm migrate
 "${compose[@]}" run --rm migrate
 
 result="$("${compose[@]}" exec -T db mysql --user=root --password=test-password --batch --skip-column-names einsatzberichte --execute="

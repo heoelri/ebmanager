@@ -20,6 +20,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 ### Fixed
 
 - Der Dev-Migrations-Test wartet nach dem Healthcheck zusätzlich auf die endgültige MySQL-Instanz, da der Healthcheck kurzzeitig während des internen Neustarts als „healthy“ gilt und Folgebefehle sonst zufällig mit einem Socket-Verbindungsfehler abbrachen.
+- Die lokale Baseline erkennt eine bereits vorhandene DIVERA-Importhistorie auch dann, wenn einem älteren Dev-Volume noch `schema_migrations` fehlt.
 - Der Compose-End-to-End-Test behandelt den erfolgreichen Abschluss des einmaligen Migrationsdienstes nicht mehr als Abbruchsignal.
 
 ### Changed
