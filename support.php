@@ -25,7 +25,7 @@ function config(): array
         'DB_DSN' => 'dsn', 'DB_USER' => 'user', 'DB_PASSWORD' => 'password', 'SETUP_TOKEN' => 'setup_token',
         'APP_URL' => 'app_url', 'MAIL_FROM' => 'mail_from', 'SMTP_HOST' => 'smtp_host',
         'SMTP_PORT' => 'smtp_port', 'SMTP_USERNAME' => 'smtp_username', 'SMTP_PASSWORD' => 'smtp_password',
-        'SMTP_CA_FILE' => 'smtp_ca_file'
+        'SMTP_CA_FILE' => 'smtp_ca_file', 'DIVERA_API_BASE_URL' => 'divera_api_base_url'
     ] as $environment => $key) {
         $value = getenv($environment);
         if ($value !== false) $config[$key] = $value;

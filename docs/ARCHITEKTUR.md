@@ -60,20 +60,15 @@ muss exakt der HTTPS-Origin der Anwendung entsprechen.
 
 ## Einsatz- und Berichtsfluss
 
-1. Ein Einsatz wird manuell angelegt oder anhand seiner ID aus DIVERA
-   importiert.
-2. Beim Import lädt das Backend die kanonischen Daten erneut mit dem
-   serverseitig gespeicherten Schlüssel.
+1. Ein Einsatz wird manuell angelegt oder anhand seiner ID aus DIVERA importiert.
+2. Beim Import lädt das Backend die kanonischen Daten erneut mit dem serverseitig gespeicherten Schlüssel.
 3. Jede alarmierte Einheit kann genau einen Bericht erstellen.
-4. Führungskräfte ordnen Mitglieder den eigenen Fahrzeugen und den Funktionen
-   Einheitsführer, Maschinist oder Besatzung zu.
-5. Das Berichtsformular zeigt die fachliche DIVERA-Einsatznummer nur lesend,
-   trennt Gesamt- und Einheitseinsatzleitung und gliedert optionale Angaben in
-   native aufklappbare Bereiche.
-6. Die Einheitsführung kann einen Entwurf bearbeiten und freigeben.
-7. Freigegebene Berichte sind unveränderlich. Bearbeitung und Freigabe werden
-   durch eine Datenbank-Zeilensperre koordiniert.
-8. Die Wehrführung konsolidiert die Einzelberichte.
+4. Führungskräfte ordnen Mitglieder den eigenen Fahrzeugen und den Funktionen Einheitsführer, Maschinist oder Besatzung zu.
+5. Das Berichtsformular zeigt die fachliche DIVERA-Einsatznummer nur lesend, trennt Gesamt- und Einheitseinsatzleitung und gliedert optionale Angaben in native aufklappbare Bereiche.
+6. Ein Bericht startet je nach Erstellerrolle in `author_draft`, `unit_review` oder `wehr_review`.
+7. Die Führungskraft sendet ihren Entwurf an die Einheitsführung. Diese darf ihn bearbeiten, mit Pflichtkommentar zurückgeben oder an die Wehrführung senden.
+8. In `wehr_review` bleibt der Einheitsbericht unveränderlich. Die Wehrführung konsolidiert ihn oder gibt ihn mit Pflichtkommentar zurück; dadurch wird eine bestehende Konsolidierung als veraltet markiert.
+9. Jeder Übergang sperrt den Bericht mit `SELECT ... FOR UPDATE`, prüft den erwarteten Zustand erneut und schreibt Status und `report_transitions` atomar.
 
 Nach dem erfolgreichen Speichern versendet die API die fachlich vorgesehenen
 E-Mail-Benachrichtigungen direkt über die bestehende Mail-Infrastruktur.
@@ -89,10 +84,9 @@ rollenbegrenzten Einsatzliste des Benutzers enthalten ist.
 
 ## DIVERA-Grenze
 
-Die Integration verwendet nur feste HTTPS-Endpunkte und explizite
-`GET`-Anfragen. Einsatzdetails werden beim Import nicht aus dem Browser
-übernommen. Personal-Fahrzeug-Zuordnungen und Berichte werden ausschließlich
-lokal gespeichert und niemals an DIVERA zurückgeschrieben.
+Die Integration verwendet im Produktivbetrieb die feste HTTPS-Basisadresse von DIVERA und ausschließlich explizite `GET`-Anfragen. Eine abweichende Basisadresse ist nur als serverseitige Testkonfiguration vorgesehen. Einsatzdetails werden beim Import nicht aus dem Browser übernommen. Personal-Fahrzeug-Zuordnungen und Berichte werden ausschließlich lokal gespeichert und niemals an DIVERA zurückgeschrieben.
+
+Der Gesamtabgleich lädt `pull/all` und `alarms` jeweils einmal, ersetzt den aktuellen Mitglieds-, Qualifikations- und Fahrzeugstamm der Einheit und upsertet alle gelieferten Einsätze. Historische Fahrzeugdaten bleiben als Snapshot in `incident_units.vehicles`; historisch in Berichten eingesetzte Mitglieder werden nicht gelöscht. Fügt der Import einem bereits konsolidierten Einsatz eine weitere Einheit hinzu, wird die Konsolidierung als veraltet markiert.
 
 ## Betrieb
 

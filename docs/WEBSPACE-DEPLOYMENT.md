@@ -225,6 +225,8 @@ Weitere Ziele wie `devpreview` benötigen ein eigenes GitHub-Environment, eigene
 
 Wenn das automatische Deployment verwendet wird, müssen erforderliche Migrationen vor dem Merge beziehungsweise Push nach `main` eingespielt werden. Der SFTP-Workflow kann SQL-Migrationen nicht sicher automatisieren, weil er absichtlich keine Datenbankzugangsdaten besitzt und Shared-Hosting-Anbieter unterschiedliche Verwaltungswege bereitstellen.
 
+Für das aktuelle Release ist `migrations/001-report-workflow-and-vehicles.sql` verpflichtend. Die Datei migriert bestehende Berichtsstatus, legt die unveränderliche Übergangshistorie und den DIVERA-Fahrzeugstamm an und darf genau einmal vor dem Anwendungscode ausgeführt werden.
+
 ## 11. Rollback
 
 1. Vor jeder Aktualisierung eine Datenbanksicherung und eine Kopie der bisherigen Anwendungsdateien erstellen.

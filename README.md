@@ -30,14 +30,15 @@ allgemein freigegeben.
 ## Funktionsumfang
 
 - mehrere Wehren als strikt getrennte Mandanten
-- mehrere Einheiten und Mehrfachzuordnung von Führungskräften
+- mehrere Einheiten, genau eine Einheit je Einheitsführung und Mehrfachzuordnung von Führungskräften
 - Login-Historie mit den fünf neuesten erfolgreichen Anmeldungen in der Benutzerverwaltung
 - ein Einheitsbericht pro Einsatz und Einheit
 - manuelle laufende Nummern je Einheit und Jahr sowie strukturierte Angaben zu Geschädigten, Schädigern und Einsatzleitung
 - übersichtliche Berichtsformulare mit unveränderlicher DIVERA-Einsatznummer, einklappbaren Bereichen und klar getrennten Einsatzleitungen
-- Entwurf, Bearbeitung, Freigabe und Konsolidierung
+- dreistufiger Prüfworkflow mit unveränderlicher Historie, kommentierten Rückgaben und Konsolidierung
 - strukturierte Fahrzeugbesatzung mit Drag-and-Drop
-- Mitglieder und Qualifikationen aus DIVERA
+- Mitglieder, Qualifikationen und Fahrzeugstammdaten aus DIVERA
+- vollständige DIVERA-Synchronisation aller Stammdaten und gelieferten Einsätze
 - idempotenter, serverseitig verifizierter DIVERA-Einsatzimport
 - Hinweis, Direktimport und letzter Importzeitpunkt für neue DIVERA-Einsätze in der Einsatzübersicht
 - E-Mail-Benachrichtigungen an Einheits- und Wehrführungen bei neuen Einsätzen, erstellten Berichten und Freigaben
@@ -47,9 +48,9 @@ allgemein freigegeben.
 
 | Rolle | Berechtigung |
 |---|---|
-| `fuehrungskraft` | Schreibt Berichte für ihre zugeordneten Einheiten und sieht eigene Berichte. |
-| `einheitsleitung` | Sieht und bearbeitet Entwürfe ihrer Einheiten und gibt sie frei. |
-| `wehrleitung` | Verwaltet Wehr, Einheiten und Benutzer, sieht die Systemübersicht, alle Berichte und konsolidiert sie. |
+| `fuehrungskraft` | Gehört mindestens einer Einheit an, schreibt und bearbeitet dort eigene Entwürfe, reicht sie ein und darf DIVERA-Einsätze erkennen und importieren. |
+| `einheitsleitung` | Gehört exakt einer Einheit an, prüft und bearbeitet eingereichte Berichte, gibt sie kommentiert zurück oder sendet sie an die Wehrführung. |
+| `wehrleitung` | Hat wehrweiten Zugriff ohne Einheitszuordnung, verwaltet Wehr, Einheiten und Benutzer, prüft Berichte, gibt sie kommentiert zurück und konsolidiert sie. |
 
 ## Fachliche Anpassung
 
@@ -130,7 +131,8 @@ Die Docker-Tests verwenden dieselben MySQL- und HTTP-Prüfungen wie CI:
 
 ```powershell
 docker compose --profile test down --volumes
-docker compose up --build --detach --wait web
+$env:DIVERA_API_BASE_URL='http://divera:8090'
+docker compose --profile test up --build --detach --wait divera web
 docker compose --profile test run --rm test
 docker compose --profile test down --volumes
 ```
@@ -141,20 +143,11 @@ Die vollständige Erstinstallation mit Hosting-Voraussetzungen, Datenbank, Konfi
 
 ## DIVERA
 
-DIVERA wird je Einheit unter **DIVERA** mit dem Access-Key aus
-**Verwaltung → Einstellungen → Schnittstellen → API** verbunden. Die
-Anbindung liest ausschließlich Einsätze, Mitglieder, Qualifikationen und
-Fahrzeugstammdaten per HTTPS `GET`; lokale Importe verändern keine Daten in
-DIVERA.
+DIVERA wird je Einheit unter **DIVERA** mit dem Access-Key aus **Verwaltung → Einstellungen → Schnittstellen → API** verbunden. Die Anbindung liest ausschließlich Einsätze, Mitglieder, Qualifikationen und Fahrzeugstammdaten per HTTPS `GET`; lokale Importe verändern keine Daten in DIVERA. Führungskräfte können Einsätze ihrer Einheiten abrufen und importieren, während Konfiguration und Stammdatensynchronisation der Einheits- und Wehrführung vorbehalten bleiben.
 
 ## Benachrichtigungen
 
-Einheitsführungen werden über neue Einsätze ihrer Einheiten sowie über durch
-Führungskräfte erstellte Berichte informiert. Gibt eine Einheitsführung einen
-Bericht frei, erhalten die Wehrführungen der Organisation eine E-Mail. Die
-Nachrichten enthalten die Eckdaten und einen direkten, aus `APP_URL`
-gebildeten Link zum Einsatz. Versandfehler ändern den gespeicherten Vorgang
-nicht und werden in der Oberfläche als Warnung angezeigt.
+Einheitsführungen werden über neue Einsätze ihrer Einheiten und eingereichte Berichte informiert. Rückgaben informieren den ursprünglichen Autor beziehungsweise die zuständige Einheitsführung einschließlich Kommentar; Übergaben an die Wehrführung informieren alle Wehrführungen der Organisation. Die Nachrichten enthalten die Eckdaten und einen direkten, aus `APP_URL` gebildeten Link zum Einsatz. Versandfehler ändern den gespeicherten Vorgang nicht und werden in der Oberfläche als Warnung angezeigt.
 
 ## Aktualisierung
 

@@ -11,9 +11,9 @@ function databaseConfigurationError(): ?string
         $tables = db()->query(
             "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN
              ('organizations','units','users','user_units','sessions','login_history','password_resets','incidents','incident_units',
-              'divera_imports','members','member_units','qualifications','member_qualifications','reports','report_crew')"
+              'divera_imports','members','member_units','qualifications','member_qualifications','vehicles','reports','report_transitions','report_crew')"
         )->fetchColumn();
-        if ((int)$tables !== 16) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
+        if ((int)$tables !== 18) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
         $reportColumns = db()->query(
             "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='reports'
              AND column_name IN ('report_year','running_number','damaged_party','damaging_party','incident_command')"
@@ -38,13 +38,15 @@ function sendPasswordEmail(array $user, string $token, bool $invitation = false)
     return sendEmail($settings, $user['email'], $subject, $message);
 }
 
-function sendWorkflowNotification(string $event, int $incidentId, array $unitIds, array $actor): ?string
+function sendWorkflowNotification(string $event, int $incidentId, array $unitIds, array $actor, ?int $recipientId = null, string $comment = ''): ?string
 {
     $events = [
         'incident_created' => ['subject' => 'Neuer Einsatz', 'label' => 'Einsatz wurde manuell angelegt', 'role' => 'einheitsleitung'],
         'incident_imported' => ['subject' => 'Neuer DIVERA-Einsatz', 'label' => 'DIVERA-Einsatz wurde erstmals importiert', 'role' => 'einheitsleitung'],
-        'report_created' => ['subject' => 'Neuer Einsatzbericht', 'label' => 'Führungskraft hat einen Einsatzbericht erstellt', 'role' => 'einheitsleitung'],
-        'report_released' => ['subject' => 'Einsatzbericht freigegeben', 'label' => 'Einheitsführung hat einen Einsatzbericht freigegeben', 'role' => 'wehrleitung'],
+        'report_submitted_unit' => ['subject' => 'Einsatzbericht eingereicht', 'label' => 'Führungskraft hat einen Einsatzbericht zur Prüfung eingereicht', 'role' => 'einheitsleitung'],
+        'report_returned_author' => ['subject' => 'Einsatzbericht zurückgegeben', 'label' => 'Einheitsführung hat einen Einsatzbericht zur Überarbeitung zurückgegeben', 'role' => 'author'],
+        'report_submitted_command' => ['subject' => 'Einsatzbericht geprüft', 'label' => 'Einheitsführung hat einen Einsatzbericht an die Wehrführung gesendet', 'role' => 'wehrleitung'],
+        'report_returned_unit' => ['subject' => 'Einsatzbericht zurückgegeben', 'label' => 'Wehrführung hat einen Einsatzbericht zur Überarbeitung zurückgegeben', 'role' => 'einheitsleitung'],
     ];
     if (!isset($events[$event])) throw new LogicException('Unbekanntes Benachrichtigungsereignis');
 
@@ -57,7 +59,12 @@ function sendWorkflowNotification(string $event, int $incidentId, array $unitIds
             array_merge([$actor['organization_id']], $unitIds)
         )->fetchAll(PDO::FETCH_COLUMN);
         $eventDetails = $events[$event];
-        if ($eventDetails['role'] === 'einheitsleitung') {
+        if ($recipientId !== null) {
+            $recipients = query(
+                'SELECT id,name,email FROM users WHERE id=? AND organization_id=?',
+                [$recipientId, $actor['organization_id']]
+            )->fetchAll();
+        } elseif ($eventDetails['role'] === 'einheitsleitung') {
             $recipients = query(
                 "SELECT u.id,u.name,u.email,GROUP_CONCAT(DISTINCT un.name ORDER BY un.name SEPARATOR ', ') unit_names
                  FROM users u JOIN user_units uu ON uu.user_id=u.id JOIN units un ON un.id=uu.unit_id
@@ -91,6 +98,7 @@ function sendWorkflowNotification(string $event, int $incidentId, array $unitIds
                 . "Datum und Uhrzeit: $when Uhr (Europe/Berlin)\n"
                 . "Ereignis: {$eventDetails['label']}\n"
                 . "Ausgelöst durch: {$actor['name']}\n"
+                . ($comment !== '' ? "Kommentar: $comment\n" : '')
                 . "Link: {$settings['url']}/?incident=$incidentId";
             try {
                 if (sendEmail($settings, $recipient['email'], $eventDetails['subject'], $message)) continue;
@@ -185,7 +193,10 @@ function membershipIds(array $data, int $organizationId): array
 {
     $source = is_array($data['unitIds'] ?? null) ? $data['unitIds'] : (isset($data['unitId']) ? [$data['unitId']] : []);
     $ids = array_values(array_unique(array_map('intval', $source)));
-    if (($data['role'] ?? '') !== 'wehrleitung' && !$ids) throw new ApiError(400, 'Für diese Rolle ist mindestens eine Einheit erforderlich');
+    $role = $data['role'] ?? '';
+    if ($role === 'wehrleitung') return [];
+    if ($role === 'einheitsleitung' && count($ids) !== 1) throw new ApiError(400, 'Für die Einheitsführung ist genau eine Einheit erforderlich');
+    if ($role === 'fuehrungskraft' && !$ids) throw new ApiError(400, 'Für diese Rolle ist mindestens eine Einheit erforderlich');
     foreach ($ids as $id) if ($id < 1 || !unit($id, $organizationId)) throw new ApiError(404, 'Einheit nicht gefunden');
     return $ids;
 }
@@ -194,6 +205,125 @@ function replaceMemberships(int $userId, array $unitIds): void
 {
     query('DELETE FROM user_units WHERE user_id=?', [$userId]);
     foreach ($unitIds as $unitId) query('INSERT INTO user_units(user_id,unit_id) VALUES(?,?)', [$userId, $unitId]);
+}
+
+function unitMembers(int $unitId, int $organizationId): array
+{
+    $rows = query(
+        "SELECT m.id,m.name,m.divera_id,
+         COALESCE(GROUP_CONCAT(DISTINCT COALESCE(NULLIF(q.shortname,''),q.name) ORDER BY q.name SEPARATOR ', '),'') qualifications
+         FROM members m JOIN member_units mu ON mu.member_id=m.id
+         LEFT JOIN member_qualifications mq ON mq.member_id=m.id
+         LEFT JOIN qualifications q ON q.id=mq.qualification_id AND q.unit_id=mu.unit_id
+         WHERE mu.unit_id=? AND m.organization_id=? GROUP BY m.id,m.name,m.divera_id ORDER BY m.name",
+        [$unitId, $organizationId]
+    )->fetchAll();
+    foreach ($rows as &$row) $row['id'] = (int)$row['id'];
+    return $rows;
+}
+
+function reportStatusForRole(string $role): string
+{
+    return match ($role) {
+        'wehrleitung' => 'wehr_review',
+        'einheitsleitung' => 'unit_review',
+        default => 'author_draft',
+    };
+}
+
+function canEditReport(array $report, array $user): bool
+{
+    if ($report['status'] === 'author_draft') {
+        return $user['role'] === 'fuehrungskraft'
+            && (int)$report['author_id'] === (int)$user['id']
+            && in_array((int)$report['unit_id'], $user['unitIds'], true);
+    }
+    return $report['status'] === 'unit_review'
+        && $user['role'] === 'einheitsleitung'
+        && in_array((int)$report['unit_id'], $user['unitIds'], true);
+}
+
+function reportVisibilitySql(array $user, string $alias = 'r'): array
+{
+    if ($user['role'] === 'wehrleitung') {
+        return ["EXISTS(SELECT 1 FROM report_transitions rt WHERE rt.report_id=$alias.id AND rt.to_status='wehr_review')", []];
+    }
+    if ($user['role'] === 'einheitsleitung') {
+        return [
+            "EXISTS(SELECT 1 FROM user_units uu WHERE uu.user_id=? AND uu.unit_id=$alias.unit_id)
+             AND EXISTS(SELECT 1 FROM report_transitions rt WHERE rt.report_id=$alias.id AND rt.to_status='unit_review')",
+            [$user['id']]
+        ];
+    }
+    return [
+        "$alias.author_id=? AND EXISTS(SELECT 1 FROM user_units uu WHERE uu.user_id=? AND uu.unit_id=$alias.unit_id)",
+        [$user['id'], $user['id']]
+    ];
+}
+
+function transitionReport(int $reportId, string $action, array $user, string $comment): array
+{
+    $rules = [
+        'submit-to-unit' => ['author_draft', 'unit_review', 'fuehrungskraft', 'report_submitted_unit'],
+        'return-to-author' => ['unit_review', 'author_draft', 'einheitsleitung', 'report_returned_author'],
+        'submit-to-command' => ['unit_review', 'wehr_review', 'einheitsleitung', 'report_submitted_command'],
+        'return-to-unit' => ['wehr_review', 'unit_review', 'wehrleitung', 'report_returned_unit'],
+    ];
+    if (!isset($rules[$action])) throw new ApiError(404, 'Statusübergang nicht gefunden');
+    [$from, $to, $role, $event] = $rules[$action];
+    assertRole($user, $role);
+    $comment = str_starts_with($action, 'return-') ? required($comment, 'Kommentar', 2000) : '';
+
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $reference = one(
+            'SELECT r.incident_id,i.organization_id FROM reports r JOIN incidents i ON i.id=r.incident_id WHERE r.id=?',
+            [$reportId]
+        );
+        if (!$reference || (int)$reference['organization_id'] !== (int)$user['organization_id']) throw new ApiError(404, 'Bericht nicht gefunden');
+        query('SELECT id FROM incidents WHERE id=? FOR UPDATE', [$reference['incident_id']]);
+        $report = one(
+            'SELECT r.*,i.organization_id,i.title incident_title FROM reports r JOIN incidents i ON i.id=r.incident_id WHERE r.id=? FOR UPDATE',
+            [$reportId]
+        );
+        if (!$report || (int)$report['organization_id'] !== (int)$user['organization_id']) throw new ApiError(404, 'Bericht nicht gefunden');
+        if ($report['status'] !== $from) throw new ApiError(409, 'Der Bericht wurde bereits geändert. Bitte Ansicht neu laden.');
+        if ($action === 'submit-to-unit') {
+            if ((int)$report['author_id'] !== (int)$user['id'] || !in_array((int)$report['unit_id'], $user['unitIds'], true)) {
+                throw new ApiError(403, 'Keine Berechtigung');
+            }
+        } elseif ($user['role'] === 'einheitsleitung' && !in_array((int)$report['unit_id'], $user['unitIds'], true)) {
+            throw new ApiError(403, 'Keine Berechtigung');
+        }
+        if ($action === 'return-to-author') {
+            $assigned = query(
+                "SELECT COUNT(*) FROM users u JOIN user_units uu ON uu.user_id=u.id
+                 WHERE u.id=? AND u.role='fuehrungskraft' AND uu.unit_id=?",
+                [$report['author_id'], $report['unit_id']]
+            )->fetchColumn();
+            if (!(int)$assigned) throw new ApiError(409, 'Der ursprüngliche Autor ist dieser Einheit nicht mehr zugeordnet.');
+        }
+
+        $released = $to === 'wehr_review' ? ',released_at=COALESCE(released_at,UTC_TIMESTAMP())' : '';
+        $updated = query("UPDATE reports SET status=?$released WHERE id=? AND status=?", [$to, $reportId, $from]);
+        if ($updated->rowCount() !== 1) throw new ApiError(409, 'Der Bericht wurde bereits geändert. Bitte Ansicht neu laden.');
+        query(
+            'INSERT INTO report_transitions(report_id,from_status,to_status,actor_id,actor_name,actor_role,comment,created_at) VALUES(?,?,?,?,?,?,?,UTC_TIMESTAMP())',
+            [$reportId, $from, $to, $user['id'], $user['name'], $user['role'], $comment]
+        );
+        if ($action === 'return-to-unit') query('UPDATE incidents SET consolidated_at=NULL WHERE id=?', [$report['incident_id']]);
+        $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $error;
+    }
+
+    $recipientId = $action === 'return-to-author' ? (int)$report['author_id'] : null;
+    return [
+        'ok' => true,
+        'warning' => sendWorkflowNotification($event, (int)$report['incident_id'], [(int)$report['unit_id']], $user, $recipientId, $comment)
+    ];
 }
 
 function vehicleSnapshots(mixed $value): array
@@ -315,14 +445,33 @@ function diveraGet(string $url, string $error): array
     }
 }
 
-function diveraData(array $unit, bool $includeVehicles = true): array
+function diveraUrl(string $path, string $key): string
 {
-    $key = rawurlencode($unit['divera_access_key']);
-    $alarmsRaw = diveraGet("https://app.divera247.com/api/v2/alarms?accesskey=$key", 'DIVERA-Abfrage fehlgeschlagen');
+    $base = rtrim((string)(config()['divera_api_base_url'] ?? 'https://app.divera247.com'), '/');
+    if (!preg_match('#^https?://[^/]+(?::\d+)?$#', $base)) throw new ApiError(503, 'DIVERA-Basisadresse ist ungültig');
+    return "$base$path?accesskey=" . rawurlencode($key);
+}
+
+function diveraCluster(array $unit): array
+{
+    $raw = diveraGet(diveraUrl('/api/v2/pull/all', $unit['divera_access_key']), 'DIVERA-Stammdatenabfrage fehlgeschlagen');
+    $cluster = $raw['data']['cluster'] ?? null;
+    if (!is_array($cluster)
+        || !is_array($cluster['vehicle'] ?? null)
+        || !is_array($cluster['qualification'] ?? null)
+        || !is_array($cluster['consumer'] ?? null)) {
+        throw new ApiError(502, 'DIVERA-Stammdaten sind unvollständig');
+    }
+    return $cluster;
+}
+
+function diveraData(array $unit, bool $includeVehicles = true, ?array $cluster = null): array
+{
+    $alarmsRaw = diveraGet(diveraUrl('/api/v2/alarms', $unit['divera_access_key']), 'DIVERA-Abfrage fehlgeschlagen');
     $ownVehicles = [];
     if ($includeVehicles) {
-        $unitRaw = diveraGet("https://app.divera247.com/api/v2/pull/all?accesskey=$key", 'DIVERA-Abfrage fehlgeschlagen');
-        foreach (($unitRaw['data']['cluster']['vehicle'] ?? []) as $id => $vehicle) {
+        $cluster ??= diveraCluster($unit);
+        foreach (($cluster['vehicle'] ?? []) as $id => $vehicle) {
             $ownVehicles[(string)($vehicle['id'] ?? $id)] = $vehicle;
         }
     }
@@ -361,6 +510,158 @@ function diveraData(array $unit, bool $includeVehicles = true): array
     return compact('alarms', 'vehicles');
 }
 
+function diveraText(mixed $value, string $name, int $maximum, bool $required = false): string
+{
+    if ($value !== null && !is_scalar($value)) throw new ApiError(502, "DIVERA-$name ist ungültig");
+    $text = trim((string)$value);
+    if (($required && $text === '') || textLength($text) > $maximum) throw new ApiError(502, "DIVERA-$name ist ungültig");
+    return $text;
+}
+
+function syncDiveraVehicles(array $cluster, int $unitId): int
+{
+    $vehicles = [];
+    foreach ($cluster['vehicle'] as $externalId => $vehicle) {
+        if (!is_array($vehicle)) throw new ApiError(502, 'DIVERA-Fahrzeugdaten sind ungültig');
+        $diveraId = diveraText($vehicle['id'] ?? $externalId, 'Fahrzeug-ID', 200, true);
+        $name = diveraText($vehicle['name'] ?? $vehicle['shortname'] ?? $diveraId, 'Fahrzeugname', 200, true);
+        $vehicles[] = [
+            $unitId, $diveraId, $name,
+            diveraText($vehicle['shortname'] ?? '', 'Fahrzeugtyp', 100),
+            diveraText($vehicle['fullname'] ?? '', 'Fahrzeugtyp', 200)
+        ];
+    }
+    query('DELETE FROM vehicles WHERE unit_id=?', [$unitId]);
+    foreach ($vehicles as $vehicle) {
+        query(
+            'INSERT INTO vehicles(unit_id,divera_id,name,shortname,fullname) VALUES(?,?,?,?,?)',
+            $vehicle
+        );
+    }
+    return count($vehicles);
+}
+
+function syncDiveraMembers(array $cluster, int $unitId, int $organizationId): array
+{
+    $qualificationRows = [];
+    foreach ($cluster['qualification'] as $externalId => $qualification) {
+        if (!is_array($qualification)) throw new ApiError(502, 'DIVERA-Qualifikationsdaten sind ungültig');
+        $diveraId = diveraText($qualification['id'] ?? $externalId, 'Qualifikations-ID', 200, true);
+        $qualificationRows[$diveraId] = [
+            diveraText($qualification['name'] ?? null, 'Qualifikation', 200, true),
+            diveraText($qualification['shortname'] ?? '', 'Qualifikationskürzel', 100)
+        ];
+    }
+    $consumerRows = [];
+    foreach ($cluster['consumer'] as $externalId => $consumer) {
+        if (!is_array($consumer) || !is_array($consumer['qualifications'] ?? null)) throw new ApiError(502, 'DIVERA-Mitgliedsdaten sind ungültig');
+        $diveraId = diveraText($consumer['id'] ?? $externalId, 'Mitglieds-ID', 200, true);
+        $fallbackName = diveraText($consumer['firstname'] ?? '', 'Vorname', 200) . ' ' . diveraText($consumer['lastname'] ?? '', 'Nachname', 200);
+        $name = diveraText($consumer['stdformat_name'] ?? trim($fallbackName), 'Mitgliedsname', 200, true);
+        $qualificationIds = [];
+        foreach ($consumer['qualifications'] as $qualificationId) {
+            $qualificationId = diveraText($qualificationId, 'Qualifikations-ID', 200, true);
+            if (!isset($qualificationRows[$qualificationId])) throw new ApiError(502, 'DIVERA-Mitgliedsdaten enthalten eine unbekannte Qualifikation');
+            $qualificationIds[] = $qualificationId;
+        }
+        $consumerRows[] = [$diveraId, $name, array_unique($qualificationIds)];
+    }
+
+    query(
+        'DELETE mq FROM member_qualifications mq JOIN qualifications q ON q.id=mq.qualification_id WHERE q.unit_id=?',
+        [$unitId]
+    );
+    query('DELETE FROM member_units WHERE unit_id=?', [$unitId]);
+    $qualifications = [];
+    foreach ($qualificationRows as $diveraId => [$name, $shortname]) {
+        query(
+            'INSERT INTO qualifications(unit_id,divera_id,name,shortname) VALUES(?,?,?,?)
+             ON DUPLICATE KEY UPDATE name=VALUES(name),shortname=VALUES(shortname),id=LAST_INSERT_ID(id)',
+            [$unitId, $diveraId, $name, $shortname]
+        );
+        $qualifications[$diveraId] = (int)db()->lastInsertId();
+    }
+
+    $members = 0;
+    foreach ($consumerRows as [$diveraId, $name, $qualificationIds]) {
+        query(
+            'INSERT INTO members(organization_id,divera_id,name) VALUES(?,?,?)
+             ON DUPLICATE KEY UPDATE name=VALUES(name),id=LAST_INSERT_ID(id)',
+            [$organizationId, $diveraId, $name]
+        );
+        $memberId = (int)db()->lastInsertId();
+        query('INSERT INTO member_units(member_id,unit_id) VALUES(?,?)', [$memberId, $unitId]);
+        foreach ($qualificationIds as $qualificationId) {
+            query(
+                'INSERT IGNORE INTO member_qualifications(member_id,qualification_id) VALUES(?,?)',
+                [$memberId, $qualifications[$qualificationId]]
+            );
+        }
+
+        $members++;
+    }
+
+    if ($qualifications) {
+        $placeholders = implode(',', array_fill(0, count($qualifications), '?'));
+        query(
+            "DELETE FROM qualifications WHERE unit_id=? AND divera_id NOT IN ($placeholders)",
+            array_merge([$unitId], array_keys($qualifications))
+        );
+    } else {
+        query('DELETE FROM qualifications WHERE unit_id=?', [$unitId]);
+    }
+    query(
+        'DELETE m FROM members m WHERE m.organization_id=?
+         AND NOT EXISTS(SELECT 1 FROM member_units mu WHERE mu.member_id=m.id)
+         AND NOT EXISTS(SELECT 1 FROM report_crew rc WHERE rc.member_id=m.id)',
+        [$organizationId]
+    );
+    return ['members' => $members, 'qualifications' => count($qualifications)];
+}
+
+function persistDiveraAlarm(array $alarm, int $unitId, array $user): array
+{
+    $diveraId = required($alarm['id'] ?? null, 'DIVERA-ID', 200);
+    $saved = query(
+        'INSERT INTO incidents(organization_id,divera_id,foreign_id,divera_date,title,started_at,message,address,lat,lng,remark,patient,caller,consolidated_text)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)',
+        [$user['organization_id'], $diveraId, optional($alarm['foreignId'] ?? '', 'Einsatznummer', 200),
+         finiteNumber($alarm['date'] ?? null, 'Alarmierungszeit'), required($alarm['title'] ?? null, 'Stichwort', 300),
+         required($alarm['startedAt'] ?? null, 'Zeitpunkt', 100), optional($alarm['text'] ?? '', 'Meldung'),
+         optional($alarm['address'] ?? '', 'Adresse', 500), finiteNumber($alarm['lat'] ?? null, 'Breitengrad'),
+         finiteNumber($alarm['lng'] ?? null, 'Längengrad'), optional($alarm['remark'] ?? '', 'Bemerkung'),
+         optional($alarm['patient'] ?? '', 'Patient'), optional($alarm['caller'] ?? '', 'Meldende Person'), '']
+    );
+    $incidentId = (int)db()->lastInsertId();
+    $newIncident = $saved->rowCount() === 1;
+    if (!$newIncident) query(
+        'UPDATE incidents SET foreign_id=?,divera_date=?,title=?,started_at=?,message=?,address=?,lat=?,lng=?,remark=?,patient=?,caller=? WHERE id=?',
+        [optional($alarm['foreignId'] ?? '', 'Einsatznummer', 200), finiteNumber($alarm['date'] ?? null, 'Alarmierungszeit'),
+         required($alarm['title'] ?? null, 'Stichwort', 300), required($alarm['startedAt'] ?? null, 'Zeitpunkt', 100),
+         optional($alarm['text'] ?? '', 'Meldung'), optional($alarm['address'] ?? '', 'Adresse', 500),
+         finiteNumber($alarm['lat'] ?? null, 'Breitengrad'), finiteNumber($alarm['lng'] ?? null, 'Längengrad'),
+         optional($alarm['remark'] ?? '', 'Bemerkung'), optional($alarm['patient'] ?? '', 'Patient'),
+         optional($alarm['caller'] ?? '', 'Meldende Person'), $incidentId]
+    );
+    $vehicles = json_encode(vehicleSnapshots($alarm['vehicles'] ?? []), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    $assignment = query(
+        'INSERT IGNORE INTO incident_units(incident_id,unit_id,vehicles) VALUES(?,?,?)',
+        [$incidentId, $unitId, $vehicles]
+    );
+    $newAssignment = $assignment->rowCount() === 1;
+    if ($newAssignment) query('UPDATE incidents SET consolidated_at=NULL WHERE id=?', [$incidentId]);
+    if (!$newAssignment) query(
+        'UPDATE incident_units SET vehicles=? WHERE incident_id=? AND unit_id=?',
+        [$vehicles, $incidentId, $unitId]
+    );
+    query(
+        'INSERT INTO divera_imports(unit_id,incident_id,imported_by,imported_at) VALUES(?,?,?,UTC_TIMESTAMP())',
+        [$unitId, $incidentId, $user['id']]
+    );
+    return ['id' => $incidentId, 'newIncident' => $newIncident, 'newAssignment' => $newAssignment];
+}
+
 try {
     $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
     assertRequestOrigin($method);
@@ -391,9 +692,8 @@ try {
             $unitId = (int)db()->lastInsertId();
             query(
                 "INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) VALUES(?,?,?,?,?,'wehrleitung')",
-                [$org, $unitId, required($data['name'] ?? null, 'Name', 200), $email, password_hash($password, PASSWORD_DEFAULT)]
+                [$org, null, required($data['name'] ?? null, 'Name', 200), $email, password_hash($password, PASSWORD_DEFAULT)]
             );
-            replaceMemberships((int)db()->lastInsertId(), [$unitId]);
         });
         respond(201, ['ok' => true]);
     }
@@ -573,16 +873,19 @@ try {
         $unitId = (int)$match[1];
         assertOwnUnit($user, $unitId);
         if (!unit($unitId, $user['organization_id'])) throw new ApiError(404, 'Einheit nicht gefunden');
-        $rows = query(
-            "SELECT m.id,m.name,m.divera_id,COALESCE(GROUP_CONCAT(DISTINCT q.name ORDER BY q.name SEPARATOR ', '),'') qualifications
-             FROM members m JOIN member_units mu ON mu.member_id=m.id
-             LEFT JOIN member_qualifications mq ON mq.member_id=m.id
-             LEFT JOIN qualifications q ON q.id=mq.qualification_id AND q.unit_id=mu.unit_id
-             WHERE mu.unit_id=? AND m.organization_id=? GROUP BY m.id,m.name,m.divera_id ORDER BY m.name",
-            [$unitId, $user['organization_id']]
+        respond(200, unitMembers($unitId, (int)$user['organization_id']));
+    }
+
+    if ($method === 'GET' && preg_match('#^/api/units/(\d+)/resources$#', $path, $match)) {
+        $unitId = (int)$match[1];
+        assertOwnUnit($user, $unitId);
+        if (!unit($unitId, $user['organization_id'])) throw new ApiError(404, 'Einheit nicht gefunden');
+        $vehicles = query(
+            'SELECT id,divera_id,name,shortname,fullname FROM vehicles WHERE unit_id=? ORDER BY name',
+            [$unitId]
         )->fetchAll();
-        foreach ($rows as &$row) $row['id'] = (int)$row['id'];
-        respond(200, $rows);
+        foreach ($vehicles as &$vehicle) $vehicle['id'] = (int)$vehicle['id'];
+        respond(200, ['members' => unitMembers($unitId, (int)$user['organization_id']), 'vehicles' => $vehicles]);
     }
 
     if ($method === 'GET' && $path === '/api/users') {
@@ -727,15 +1030,9 @@ try {
     if ($method === 'GET' && preg_match('#^/api/incidents/(\d+)/reports$#', $path, $match)) {
         $incident = incident((int)$match[1], $user['organization_id']);
         if (!$incident) throw new ApiError(404, 'Einsatz nicht gefunden');
-        $where = '';
-        $params = [(int)$match[1]];
-        if ($user['role'] === 'einheitsleitung') {
-            $where = ' AND EXISTS(SELECT 1 FROM user_units uu WHERE uu.user_id=? AND uu.unit_id=r.unit_id)';
-            $params[] = $user['id'];
-        } elseif ($user['role'] !== 'wehrleitung') {
-            $where = ' AND r.author_id=?';
-            $params[] = $user['id'];
-        }
+        [$visibility, $visibilityParams] = reportVisibilitySql($user);
+        $where = " AND $visibility";
+        $params = array_merge([(int)$match[1]], $visibilityParams);
         $rows = query(
             "SELECT r.*,u.name author_name,un.name unit_name FROM reports r
              JOIN users u ON u.id=r.author_id JOIN units un ON un.id=r.unit_id
@@ -754,9 +1051,26 @@ try {
             $person['memberId'] = (int)$person['memberId'];
             $crew[$reportId][] = $person;
         }
+        $history = [];
+        if ($rows) {
+            $ids = array_map(fn($row) => (int)$row['id'], $rows);
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            foreach (query(
+                "SELECT report_id,from_status,to_status,actor_name,actor_role,comment,
+                 DATE_FORMAT(created_at,'%Y-%m-%dT%H:%i:%sZ') created_at
+                 FROM report_transitions WHERE report_id IN ($placeholders) ORDER BY created_at,id",
+                $ids
+            )->fetchAll() as $transition) {
+                $history[(int)$transition['report_id']][] = $transition;
+            }
+        }
         foreach ($rows as &$row) {
             $row['crew'] = json_encode($crew[(int)$row['id']] ?? [], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
-            $row['duration_minutes'] = (int)round((strtotime($row['ended_at']) - strtotime($row['alarmed_at'])) / 60);
+            $row['history'] = $history[(int)$row['id']] ?? [];
+            $row['editable'] = canEditReport($row, $user);
+            $row['duration_minutes'] = $row['ended_at'] && $row['alarmed_at']
+                ? (int)round((strtotime($row['ended_at']) - strtotime($row['alarmed_at'])) / 60)
+                : null;
             foreach (['id', 'incident_id', 'unit_id', 'author_id', 'report_year'] as $key) if ($row[$key] !== null) $row[$key] = (int)$row[$key];
         }
         respond(200, $rows);
@@ -773,38 +1087,36 @@ try {
         if (one('SELECT id FROM reports WHERE incident_id=? AND unit_id=?', [$incidentId, $unitId])) throw new ApiError(409, 'Für diese Einheit existiert bereits ein Einsatzbericht');
         $id = transaction(function () use ($data, $foundIncident, $incidentId, $unitId, $user) {
             $details = reportDetails($data, $foundIncident);
+            $status = reportStatusForRole($user['role']);
             query(
-                'INSERT INTO reports(incident_id,unit_id,author_id,report_year,running_number,damaged_party,damaging_party,incident_command,narrative,alarmed_at,departed_at,arrived_at,ended_at,incident_type,classification,vehicles,personnel)
-                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                'INSERT INTO reports(incident_id,unit_id,author_id,report_year,running_number,damaged_party,damaging_party,incident_command,narrative,alarmed_at,departed_at,arrived_at,ended_at,incident_type,classification,vehicles,personnel,status,released_at)
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                 [$incidentId, $unitId, $user['id'], $details['reportYear'], $details['runningNumber'],
                  $details['damagedParty'], $details['damagingParty'], $details['incidentCommand'], required($data['narrative'] ?? null, 'Bericht'),
                  $details['alarmedAt'], $details['departedAt'], $details['arrivedAt'], $details['endedAt'],
-                 $details['incidentType'], $details['classification'], '', '']
+                 $details['incidentType'], $details['classification'], '', '', $status,
+                 $status === 'wehr_review' ? gmdate('Y-m-d H:i:s') : null]
             );
             $id = (int)db()->lastInsertId();
             $summary = replaceCrew($id, $incidentId, $unitId, $data['crew'] ?? [], $user['organization_id']);
             query('UPDATE reports SET vehicles=?,personnel=? WHERE id=?', [$summary['vehicles'], $summary['personnel'], $id]);
+            query(
+                'INSERT INTO report_transitions(report_id,from_status,to_status,actor_id,actor_name,actor_role,created_at) VALUES(?,NULL,?,?,?,?,UTC_TIMESTAMP())',
+                [$id, $status, $user['id'], $user['name'], $user['role']]
+            );
             return $id;
         });
-        $warning = $user['role'] === 'fuehrungskraft'
-            ? sendWorkflowNotification('report_created', $incidentId, [$unitId], $user)
-            : null;
-        respond(201, ['id' => $id] + ($warning ? ['warning' => $warning] : []));
+        respond(201, ['id' => $id]);
     }
 
     if ($method === 'PUT' && preg_match('#^/api/reports/(\d+)$#', $path, $match)) {
         $foundReport = report((int)$match[1], $user['organization_id']);
         if (!$foundReport) throw new ApiError(404, 'Bericht nicht gefunden');
-        $mayEdit = $foundReport['status'] === 'draft' &&
-            ((int)$foundReport['author_id'] === $user['id'] || ($user['role'] === 'einheitsleitung' && in_array((int)$foundReport['unit_id'], $user['unitIds'], true)));
-        if (!$mayEdit) throw new ApiError(403, 'Der Bericht kann nicht bearbeitet werden');
+        if (!canEditReport($foundReport, $user)) throw new ApiError(403, 'Der Bericht kann nicht bearbeitet werden');
         $data = input();
         transaction(function () use ($data, $foundReport, $user) {
-            // Locking closes the race between editing and releasing the same report.
             $lockedReport = one('SELECT * FROM reports WHERE id=? FOR UPDATE', [$foundReport['id']]);
-            if (!$lockedReport || $lockedReport['status'] !== 'draft') {
-                throw new ApiError(409, 'Der Bericht wurde bereits freigegeben');
-            }
+            if (!$lockedReport || !canEditReport($lockedReport, $user)) throw new ApiError(409, 'Der Bericht wurde bereits geändert');
             $foundIncident = incident((int)$lockedReport['incident_id'], $user['organization_id']);
             $details = reportDetails($data, $foundIncident);
             $summary = replaceCrew((int)$lockedReport['id'], (int)$lockedReport['incident_id'], (int)$lockedReport['unit_id'], $data['crew'] ?? [], $user['organization_id']);
@@ -819,24 +1131,31 @@ try {
         respond(200, ['ok' => true]);
     }
 
-    if ($method === 'POST' && preg_match('#^/api/reports/(\d+)/release$#', $path, $match)) {
-        assertRole($user, 'einheitsleitung', 'wehrleitung');
-        $foundReport = report((int)$match[1], $user['organization_id']);
-        if (!$foundReport) throw new ApiError(404, 'Bericht nicht gefunden');
-        assertOwnUnit($user, (int)$foundReport['unit_id']);
-        $released = query("UPDATE reports SET status='released',released_at=UTC_TIMESTAMP() WHERE id=? AND status='draft'", [$foundReport['id']]);
-        if ($released->rowCount() !== 1) throw new ApiError(409, 'Der Bericht wurde bereits freigegeben');
-        $warning = $user['role'] === 'einheitsleitung'
-            ? sendWorkflowNotification('report_released', (int)$foundReport['incident_id'], [(int)$foundReport['unit_id']], $user)
-            : null;
-        respond(200, ['ok' => true] + ($warning ? ['warning' => $warning] : []));
+    if ($method === 'POST' && preg_match('#^/api/reports/(\d+)/(submit-to-unit|return-to-author|submit-to-command|return-to-unit)$#', $path, $match)) {
+        $data = input();
+        $result = transitionReport((int)$match[1], $match[2], $user, (string)($data['comment'] ?? ''));
+        respond(200, array_filter($result, fn($value) => $value !== null));
     }
 
     if ($method === 'PUT' && preg_match('#^/api/incidents/(\d+)/consolidation$#', $path, $match)) {
         assertRole($user, 'wehrleitung');
-        if (!incident((int)$match[1], $user['organization_id'])) throw new ApiError(404, 'Einsatz nicht gefunden');
+        $incidentId = (int)$match[1];
         $data = input();
-        query('UPDATE incidents SET consolidated_text=?,consolidated_at=UTC_TIMESTAMP() WHERE id=?', [required($data['text'] ?? null, 'Gesamtbericht'), (int)$match[1]]);
+        transaction(function () use ($incidentId, $data, $user) {
+            $foundIncident = one('SELECT id FROM incidents WHERE id=? AND organization_id=? FOR UPDATE', [$incidentId, $user['organization_id']]);
+            if (!$foundIncident) throw new ApiError(404, 'Einsatz nicht gefunden');
+            $reports = query(
+                'SELECT iu.unit_id,r.status FROM incident_units iu LEFT JOIN reports r ON r.incident_id=iu.incident_id AND r.unit_id=iu.unit_id WHERE iu.incident_id=? FOR UPDATE',
+                [$incidentId]
+            )->fetchAll();
+            if (!$reports || array_filter($reports, fn($report) => $report['status'] !== 'wehr_review')) {
+                throw new ApiError(409, 'Alle Einheitsberichte müssen bei der Wehrführung vorliegen.');
+            }
+            query(
+                'UPDATE incidents SET consolidated_text=?,consolidated_at=UTC_TIMESTAMP() WHERE id=?',
+                [required($data['text'] ?? null, 'Gesamtbericht'), $incidentId]
+            );
+        });
         respond(200, ['ok' => true]);
     }
 
@@ -851,7 +1170,7 @@ try {
     }
 
     if ($method === 'GET' && preg_match('#^/api/units/(\d+)/divera$#', $path, $match)) {
-        assertRole($user, 'wehrleitung', 'einheitsleitung');
+        assertRole($user, 'wehrleitung', 'einheitsleitung', 'fuehrungskraft');
         $unitId = (int)$match[1];
         assertOwnUnit($user, $unitId);
         $foundUnit = unit($unitId, $user['organization_id']);
@@ -865,52 +1184,58 @@ try {
         assertOwnUnit($user, $unitId);
         $foundUnit = unit($unitId, $user['organization_id']);
         if (!$foundUnit || !$foundUnit['divera_access_key']) throw new ApiError(400, 'DIVERA ist nicht konfiguriert');
-        $raw = diveraGet('https://app.divera247.com/api/v2/pull/all?accesskey=' . rawurlencode($foundUnit['divera_access_key']), 'DIVERA-Mitgliederabgleich fehlgeschlagen');
-        $cluster = $raw['data']['cluster'] ?? [];
-        $count = transaction(function () use ($cluster, $unitId, $user) {
-            $qualifications = [];
-            foreach (($cluster['qualification'] ?? []) as $externalId => $qualification) {
-                $diveraId = (string)($qualification['id'] ?? $externalId);
-                // LAST_INSERT_ID(id) also returns the id of an existing upserted row.
-                query(
-                    'INSERT INTO qualifications(unit_id,divera_id,name,shortname) VALUES(?,?,?,?)
-                     ON DUPLICATE KEY UPDATE name=VALUES(name),shortname=VALUES(shortname),id=LAST_INSERT_ID(id)',
-                    [$unitId, $diveraId, required($qualification['name'] ?? null, 'Qualifikation', 200),
-                     optional($qualification['shortname'] ?? '', 'Qualifikationskürzel', 100)]
-                );
-                $qualifications[$diveraId] = (int)db()->lastInsertId();
-            }
-            $count = 0;
-            foreach (($cluster['consumer'] ?? []) as $externalId => $consumer) {
-                $diveraId = trim((string)($consumer['id'] ?? $externalId));
-                $name = trim((string)($consumer['stdformat_name'] ?? trim(($consumer['firstname'] ?? '') . ' ' . ($consumer['lastname'] ?? ''))));
-                if (!$diveraId || !$name) continue;
-                query(
-                    'INSERT INTO members(organization_id,divera_id,name) VALUES(?,?,?)
-                     ON DUPLICATE KEY UPDATE name=VALUES(name),id=LAST_INSERT_ID(id)',
-                    [$user['organization_id'], $diveraId, $name]
-                );
-                $memberId = (int)db()->lastInsertId();
-                query('INSERT IGNORE INTO member_units(member_id,unit_id) VALUES(?,?)', [$memberId, $unitId]);
-                query(
-                    'DELETE mq FROM member_qualifications mq JOIN qualifications q ON q.id=mq.qualification_id WHERE mq.member_id=? AND q.unit_id=?',
-                    [$memberId, $unitId]
-                );
-                foreach (($consumer['qualifications'] ?? []) as $qualificationId) {
-                    if (isset($qualifications[(string)$qualificationId])) query(
-                        'INSERT IGNORE INTO member_qualifications(member_id,qualification_id) VALUES(?,?)',
-                        [$memberId, $qualifications[(string)$qualificationId]]
-                    );
+        $cluster = diveraCluster($foundUnit);
+        $result = transaction(fn() => syncDiveraMembers($cluster, $unitId, (int)$user['organization_id']));
+        respond(200, $result + ['count' => $result['members']]);
+    }
+
+    if ($method === 'POST' && preg_match('#^/api/units/(\d+)/divera/vehicles/sync$#', $path, $match)) {
+        assertRole($user, 'wehrleitung', 'einheitsleitung');
+        $unitId = (int)$match[1];
+        assertOwnUnit($user, $unitId);
+        $foundUnit = unit($unitId, $user['organization_id']);
+        if (!$foundUnit || !$foundUnit['divera_access_key']) throw new ApiError(400, 'DIVERA ist nicht konfiguriert');
+        $cluster = diveraCluster($foundUnit);
+        $count = transaction(fn() => syncDiveraVehicles($cluster, $unitId));
+        respond(200, ['vehicles' => $count, 'count' => $count]);
+    }
+
+    if ($method === 'POST' && preg_match('#^/api/units/(\d+)/divera/sync$#', $path, $match)) {
+        assertRole($user, 'wehrleitung', 'einheitsleitung');
+        $unitId = (int)$match[1];
+        assertOwnUnit($user, $unitId);
+        $foundUnit = unit($unitId, $user['organization_id']);
+        if (!$foundUnit || !$foundUnit['divera_access_key']) throw new ApiError(400, 'DIVERA ist nicht konfiguriert');
+        $cluster = diveraCluster($foundUnit);
+        $data = diveraData($foundUnit, true, $cluster);
+        $result = transaction(function () use ($cluster, $data, $unitId, $user) {
+            $counts = syncDiveraMembers($cluster, $unitId, (int)$user['organization_id']);
+            $counts['vehicles'] = syncDiveraVehicles($cluster, $unitId);
+            $counts['incidentsCreated'] = 0;
+            $counts['incidentsUpdated'] = 0;
+            $counts['assignmentsCreated'] = 0;
+            $counts['notifications'] = [];
+            foreach ($data['alarms'] as $alarm) {
+                $import = persistDiveraAlarm($alarm, $unitId, $user);
+                $counts[$import['newIncident'] ? 'incidentsCreated' : 'incidentsUpdated']++;
+                if ($import['newAssignment']) {
+                    $counts['assignmentsCreated']++;
+                    $counts['notifications'][] = $import['id'];
                 }
-                $count++;
             }
-            return $count;
+            return $counts;
         });
-        respond(200, ['count' => $count]);
+        $warnings = 0;
+        foreach ($result['notifications'] as $incidentId) {
+            if (sendWorkflowNotification('incident_imported', $incidentId, [$unitId], $user)) $warnings++;
+        }
+        unset($result['notifications']);
+        if ($warnings) $result['warning'] = 'Die Synchronisation wurde gespeichert, aber nicht alle Benachrichtigungs-E-Mails konnten versendet werden.';
+        respond(200, $result);
     }
 
     if ($method === 'POST' && preg_match('#^/api/units/(\d+)/divera/import$#', $path, $match)) {
-        assertRole($user, 'wehrleitung', 'einheitsleitung');
+        assertRole($user, 'wehrleitung', 'einheitsleitung', 'fuehrungskraft');
         $unitId = (int)$match[1];
         assertOwnUnit($user, $unitId);
         $foundUnit = unit($unitId, $user['organization_id']);
@@ -923,37 +1248,11 @@ try {
             if ($alarm['id'] === $requestedId) { $verified = $alarm; break; }
         }
         if (!$verified) throw new ApiError(404, 'DIVERA-Einsatz nicht gefunden');
-        [$id, $newAssignment] = transaction(function () use ($verified, $unitId, $user) {
-            query(
-                'INSERT INTO incidents(organization_id,divera_id,foreign_id,divera_date,title,started_at,message,address,lat,lng,remark,patient,caller,consolidated_text)
-                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                 ON DUPLICATE KEY UPDATE foreign_id=VALUES(foreign_id),divera_date=VALUES(divera_date),title=VALUES(title),
-                 started_at=VALUES(started_at),message=VALUES(message),address=VALUES(address),lat=VALUES(lat),lng=VALUES(lng),
-                 remark=VALUES(remark),patient=VALUES(patient),caller=VALUES(caller),id=LAST_INSERT_ID(id)',
-                [$user['organization_id'], required($verified['id'], 'DIVERA-ID', 200),
-                 optional($verified['foreignId'], 'Einsatznummer', 200), finiteNumber($verified['date'], 'Alarmierungszeit'),
-                 required($verified['title'], 'Stichwort', 300), required($verified['startedAt'], 'Zeitpunkt', 100),
-                 optional($verified['text'], 'Meldung'), optional($verified['address'], 'Adresse', 500),
-                 finiteNumber($verified['lat'], 'Breitengrad'), finiteNumber($verified['lng'], 'Längengrad'),
-                 optional($verified['remark'], 'Bemerkung'), optional($verified['patient'], 'Patient'),
-                 optional($verified['caller'], 'Meldende Person'), '']
-            );
-            $incidentId = (int)db()->lastInsertId();
-            $assignment = query(
-                'INSERT INTO incident_units(incident_id,unit_id,vehicles) VALUES(?,?,?)
-                 ON DUPLICATE KEY UPDATE vehicles=VALUES(vehicles)',
-                [$incidentId, $unitId, json_encode(vehicleSnapshots($verified['vehicles']), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)]
-            );
-            query(
-                'INSERT INTO divera_imports(unit_id,incident_id,imported_by,imported_at) VALUES(?,?,?,UTC_TIMESTAMP())',
-                [$unitId, $incidentId, $user['id']]
-            );
-            return [$incidentId, $assignment->rowCount() === 1];
-        });
-        $warning = $newAssignment
-            ? sendWorkflowNotification('incident_imported', $id, [$unitId], $user)
+        $import = transaction(fn() => persistDiveraAlarm($verified, $unitId, $user));
+        $warning = $import['newAssignment']
+            ? sendWorkflowNotification('incident_imported', $import['id'], [$unitId], $user)
             : null;
-        respond(201, ['id' => $id] + ($warning ? ['warning' => $warning] : []));
+        respond(201, ['id' => $import['id']] + ($warning ? ['warning' => $warning] : []));
     }
 
     respond(404, ['error' => 'Nicht gefunden']);

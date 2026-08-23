@@ -43,6 +43,7 @@ services:
       SETUP_TOKEN: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
       APP_URL: https://localhost:8443
       MAIL_FROM: einsatzberichte@localhost.test
+      DIVERA_API_BASE_URL: ${DIVERA_API_BASE_URL:-https://app.divera247.com}
     ports:
       - 127.0.0.1:${HTTP_PORT:-8080}:80
       - 127.0.0.1:${HTTPS_PORT:-8443}:443
@@ -70,7 +71,27 @@ services:
       SETUP_TOKEN: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
       TEST_BASE_URL: https://web
       TEST_DB_HOST: db
+      DIVERA_API_BASE_URL: ${DIVERA_API_BASE_URL:-https://app.divera247.com}
+    volumes:
+      - divera-test-data:/tmp/divera
     command: [bash, test/smoke.sh]
+
+  divera:
+    profiles: [test]
+    image: php:8.5-cli
+    working_dir: /app
+    environment:
+      DIVERA_REQUEST_LOG: /tmp/divera/requests.log
+    volumes:
+      - ./test:/app/test:ro
+      - divera-test-data:/tmp/divera
+    command: [php, -S, 0.0.0.0:8090, test/fake-divera.php]
+    healthcheck:
+      test: [CMD, php, -r, "exit(@file_get_contents('http://localhost:8090/api/v2/alarms?accesskey=test')===false);"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
 
 volumes:
   mysql-data:
+  divera-test-data:

@@ -1,5 +1,13 @@
 # Security Review
 
+## Rollen-, Berichts- und DIVERA-Grenzen
+
+Die API erzwingt die Einheitenanzahl je Rolle: keine Zuordnung für Wehrführungen, exakt eine für Einheitsführungen und mindestens eine für Führungskräfte. Führungskräfte dürfen DIVERA-Einsätze ihrer Einheiten lesen und einzeln importieren, erhalten aber keinen Zugriff auf Access-Key-Konfiguration oder Stammdatensynchronisation. Alle Wege prüfen weiterhin Mandant und aktuelle Einheitszuordnung serverseitig.
+
+Berichtsübergänge sperren den Datensatz, prüfen Rolle, Einheit und erwarteten Ausgangsstatus erneut und schreiben Status sowie Historie in derselben Transaktion. Rückgaben verlangen einen längenbegrenzten Kommentar; eine Rückgabe an einen nicht mehr zuständigen Autor wird abgelehnt. Die Wehrführung kann fremde Einheitsberichte nicht bearbeiten, und eine Rückgabe macht eine bestehende Konsolidierung sichtbar ungültig, ohne den Arbeitsstand zu löschen.
+
+DIVERA bleibt ausschließlich lesend angebunden. Einzel- und Gesamtimport verwenden nur `GET`; der Browser liefert beim Einzelimport lediglich die Alarm-ID, die serverseitig erneut verifiziert wird. Die optionale Basisadresse ist eine serverseitige Testkonfiguration und wird nie aus Requests übernommen. Der Fake-DIVERA-Test protokolliert die Methoden und weist schreibende externe Aufrufe zurück.
+
 ## Workflow-Benachrichtigungen vom 23. August 2026
 
 Empfänger werden ausschließlich serverseitig über `organization_id`, Rolle
@@ -26,7 +34,7 @@ Geschädigte und Schädiger werden als optionale strukturierte Angaben im jeweil
 
 ## API-Hardening vom 23. August 2026
 
-Die im vollständigen API-Review priorisierten Befunde zu Transport, Sitzungen und Zustandsinvarianten wurden umgesetzt. Apache erzwingt HTTPS und sendet HSTS. Der zufällige Sitzungstoken bleibt ausschließlich im `Secure`-Cookie; MySQL speichert nur seinen SHA-256-Hash. Rollenänderungen werden pro Organisation serialisiert und dürfen die letzte Wehrführung nicht entfernen. Berichtsfreigaben aktualisieren ausschließlich Entwürfe und überschreiben einen vorhandenen Freigabezeitpunkt nicht. Manuelle Einsatzzeitpunkte werden strikt validiert; DIVERA-Importe ohne Alarmzeit werden abgelehnt, statt die Serverzeit einzusetzen.
+Die im vollständigen API-Review priorisierten Befunde zu Transport, Sitzungen und Zustandsinvarianten wurden umgesetzt. Apache erzwingt HTTPS und sendet HSTS. Der zufällige Sitzungstoken bleibt ausschließlich im `Secure`-Cookie; MySQL speichert nur seinen SHA-256-Hash. Rollenänderungen werden pro Organisation serialisiert und dürfen die letzte Wehrführung nicht entfernen. Berichtsübergänge aktualisieren ausschließlich den jeweils erwarteten Zustand und bewahren den ersten Übergabezeitpunkt an die Wehrführung. Manuelle Einsatzzeitpunkte werden strikt validiert; DIVERA-Importe ohne Alarmzeit werden abgelehnt, statt die Serverzeit einzusetzen.
 
 ## Systemübersicht vom 23. August 2026
 
@@ -61,7 +69,7 @@ Secrets, HTTPS und externe DIVERA-Aufrufe.
 | Mittel | Eine Passwortänderung ließ bereits bestehende Sitzungen aktiv. | Bei einer Passwortänderung werden alle Sitzungen des Benutzers innerhalb derselben Transaktion gelöscht. |
 | Mittel | Der Einsatzimport vertraute den vom Browser gesendeten Einsatzdetails und konnte gemeinsame Einsatzdaten überschreiben. | Der Browser sendet nur die DIVERA-ID. Das Backend lädt den Einsatz mit dem serverseitigen Schlüssel erneut per `GET` und speichert ausschließlich diese verifizierten Daten. |
 | Mittel | `SameSite=Strict` allein schützte auf Shared Hosting nicht vor schreibenden Anfragen einer fremden Subdomain derselben Site. | Alle schreibenden Anfragen erfordern `application/json`; vorhandene `Origin`-Header müssen exakt der Anwendungsorigin einschließlich des tatsächlich verwendeten Schemas entsprechen. |
-| Mittel | Eine parallele Bearbeitung konnte zwischen Statusprüfung und Freigabe noch einen bereits freigegebenen Bericht verändern. | Die Bearbeitung sperrt den Berichtsdatensatz mit `SELECT ... FOR UPDATE` und prüft den Entwurfsstatus innerhalb derselben Transaktion erneut. |
+| Mittel | Eine parallele Bearbeitung konnte zwischen Statusprüfung und Übergabe noch einen bereits weitergeleiteten Bericht verändern. | Bearbeitung und Übergang sperren den Berichtsdatensatz mit `SELECT ... FOR UPDATE` und prüfen Status sowie Berechtigung innerhalb derselben Transaktion erneut. |
 
 ## Ohne offenen Befund
 
@@ -73,9 +81,7 @@ Secrets, HTTPS und externe DIVERA-Aufrufe.
   nicht gefunden.
 - `SameSite=Strict`, verpflichtendes JSON, Origin-Prüfung und das Fehlen
   zustandsändernder GET-Routen schützen die geprüften CSRF-Szenarien.
-- Externe Ziele sind feste HTTPS-Adressen von DIVERA. Alle DIVERA-Aufrufe
-  verwenden ausschließlich `GET`; ein SSRF- oder Schreibpfad wurde nicht
-  gefunden.
+- Das produktive externe Ziel ist die feste HTTPS-Adresse von DIVERA; nur Tests dürfen sie serverseitig überschreiben. Alle DIVERA-Aufrufe verwenden ausschließlich `GET`; ein durch Benutzer steuerbarer SSRF- oder Schreibpfad wurde nicht gefunden.
 - Passwort-Hashes, Sitzungswerte, Datenbankzugangsdaten und DIVERA-Schlüssel
   werden nicht über die API ausgegeben.
 - Patienten- und Anruferdaten bleiben an authentifizierte,

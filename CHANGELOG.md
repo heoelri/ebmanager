@@ -6,6 +6,8 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Added
 
+- Ein dreistufiger Workflow führt Einheitsberichte vom Autorenentwurf über die Einheitsführung zur Wehrführung, protokolliert alle Übergänge unveränderlich und unterstützt kommentierte Rückgaben mit E-Mail-Benachrichtigung.
+- DIVERA-Fahrzeuge werden als aktueller Einheitsstamm synchronisiert; „Alles synchronisieren“ gleicht Mitglieder, Qualifikationen, Fahrzeuge und alle gelieferten Einsätze mit je einem lesenden Abruf pro Quelle ab.
 - Konfigurierbare Dienstgrade aus `constants.php` stehen in beiden Feldern der Einsatzleitung als Drop-down mit Abkürzung und vollständiger Bezeichnung bereit.
 - Einheitsführungen werden über neue Einsätze ihrer Einheiten und durch Führungskräfte erstellte Berichte informiert; Wehrführungen erhalten nach Freigaben durch Einheitsführungen eine E-Mail mit Einsatzdetails und direktem Link.
 - Berichtsformulare zeigen die DIVERA-Einsatznummer unveränderlich an, trennen Gesamt- und Einheitseinsatzleitung in feste Zeilen und bieten native einklappbare Bereiche.
@@ -13,11 +15,17 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Changed
 
+- Wehrführungen benötigen keine Einheitszuordnung, Einheitsführungen gehören exakt einer Einheit an und Führungskräfte dürfen DIVERA-Einsätze ihrer zugeordneten Einheiten selbst erkennen und importieren.
+- Nicht mehr von DIVERA gelieferte Stammdatenzuordnungen werden einheitsspezifisch entfernt; historische Einsatz- und Besatzungssnapshots bleiben erhalten.
 - Fehlgeschlagene Workflow-Benachrichtigungen rollen den gespeicherten Vorgang nicht zurück und werden als sichtbare Warnung sowie datenschutzarm im Serverlog gemeldet.
 - Direkte Links mit `?incident=<ID>` öffnen den berechtigten Einsatz auch nach einer erforderlichen Anmeldung.
 - Bearbeitungsdialoge halten den Fokus während asynchroner Aktualisierungen stabil und geben ihn beim Schließen kontrolliert zurück; die Zeitwerte der Einzelberichte stehen für bessere Lesbarkeit untereinander.
 - Aktivierung und Passwort-Wiederherstellung stellen Passwortmanagern die zum Einmallink gehörende E-Mail-Adresse als Benutzernamen bereit.
 - Besatzungswechsel und Wiederholungsversuche bewahren den Tastaturfokus; fehlende Einsatzzeiten erzeugen keine falsche Dauer.
+
+### Breaking Changes
+
+- Bestehende Installationen müssen vor dem neuen Anwendungscode `migrations/001-report-workflow-and-vehicles.sql` importieren. Die Migration ersetzt `draft`/`released` durch die drei Workflowstatus, legt die Übergangshistorie sowie den Fahrzeugstamm an und erzeugt für jeden Bestandsbericht einen initialen Historieneintrag.
 
 ## 2026-08-23
 
