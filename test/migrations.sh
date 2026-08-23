@@ -3,7 +3,8 @@ set -euo pipefail
 
 project="migrationcheck-$$"
 compose=(docker compose -p "$project")
-migration_file=migrations/999-test.sql
+migration_name="999-test-$project.sql"
+migration_file="migrations/$migration_name"
 trap 'rm -f "$migration_file"; "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true' EXIT
 
 printf 'CREATE TABLE migration_test (id INT PRIMARY KEY);\n' > "$migration_file"
@@ -15,7 +16,7 @@ until "${compose[@]}" exec -T db mysqladmin --user=root -ptest-password ping --s
 
 result="$("${compose[@]}" exec -T db mysql --user=root -ptest-password --batch --skip-column-names einsatzberichte --execute="
   SELECT CONCAT(
-    (SELECT COUNT(*) FROM schema_migrations WHERE name='999-test.sql'),'|',
+    (SELECT COUNT(*) FROM schema_migrations WHERE name='$migration_name'),'|',
     (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='migration_test')
   )")"
 test "$result" = '1|1'
