@@ -6,7 +6,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Added
 
-- Die Einsatzübersicht zeigt rollenbezogen fehlende, zu prüfende, zur Konsolidierung bereite und abgeschlossene Einsatzberichte.
+- Die Einsatzübersicht zeigt und filtert rollenbezogen fehlende, zu prüfende, zur Konsolidierung bereite und abgeschlossene Einsatzberichte.
 - Ein dreistufiger Workflow führt Einheitsberichte vom Autorenentwurf über die Einheitsführung zur Wehrführung, protokolliert alle Übergänge unveränderlich und unterstützt kommentierte Rückgaben mit E-Mail-Benachrichtigung.
 - DIVERA-Fahrzeuge werden als aktueller Einheitsstamm synchronisiert; „Alles synchronisieren“ gleicht Mitglieder, Qualifikationen, Fahrzeuge und alle gelieferten Einsätze mit je einem lesenden Abruf pro Quelle ab.
 - Der DIVERA-Test-Fake verweist auf die offiziellen OpenAPI-Dokumente; ein monatlicher GitHub-Workflow prüft die verwendeten Pfade und dokumentierten Felder auf Abweichungen.

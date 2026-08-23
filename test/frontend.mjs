@@ -48,6 +48,35 @@ for (const label of ['Bericht erforderlich', 'Prüfung erforderlich', 'Bereit zu
 }
 assert.match(css, /\.incident-status\s*\{[\s\S]*?border-inline-start:\s*4px solid/);
 
+const filterOptionsSource = html.match(/function incidentFilterOptions[^\n]+/)?.[0];
+assert(filterOptionsSource, 'incidentFilterOptions fehlt');
+const incidentFilterOptions = new Function('esc', `${filterOptionsSource}; return incidentFilterOptions;`)(value => String(value));
+assert.equal(incidentFilterOptions([
+  {reportStatus: {key: 'report_required', label: 'Bericht erforderlich: Löschzug'}},
+  {reportStatus: {key: 'submitted', label: 'Bericht abgegeben'}},
+  {reportStatus: {key: 'report_required', label: 'Bericht erforderlich: Löschgruppe'}}
+]), '<option value="report_required">Bericht erforderlich</option><option value="submitted">Bericht abgegeben</option>');
+
+const filterSource = html.match(/function filterIncidents[^\n]+/)?.[0];
+assert(filterSource, 'filterIncidents fehlt');
+const cards = [
+  {dataset: {incidentStatus: 'report_required'}, hidden: false},
+  {dataset: {incidentStatus: 'submitted'}, hidden: false}
+];
+const noFilteredIncidents = {hidden: true};
+const filterIncidents = new Function('document', `${filterSource}; return filterIncidents;`)({
+  querySelectorAll: () => cards,
+  querySelector: () => noFilteredIncidents
+});
+filterIncidents('submitted');
+assert.deepEqual(cards.map(card => card.hidden), [true, false]);
+assert.equal(noFilteredIncidents.hidden, true);
+filterIncidents('ready');
+assert.equal(noFilteredIncidents.hidden, false);
+filterIncidents('');
+assert.deepEqual(cards.map(card => card.hidden), [false, false]);
+assert.match(html, /<label>Status filtern<select id="incidentStatusFilter"/);
+
 const reportFieldsSource = html.match(/function contactFields[\s\S]*?(?=\nfunction bindDuration)/)?.[0];
 assert(reportFieldsSource, 'Berichtsdetails fehlen');
 const {reportDetailsFields} = new Function(
