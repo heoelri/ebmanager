@@ -120,6 +120,7 @@
 - Verwende die vorhandenen PHP-, MySQL- und Shell-Checks ohne zusätzliches Testframework.
 - Ergänze für nicht triviale Änderungen einen fokussierten Check in `test/smoke.sh`, insbesondere für Mandantentrennung, Rollen, Zustandsübergänge, Import-Idempotenz und externe Nur-Lese-Grenzen.
 - `test/migrations.sh` prüft, dass spätere Migrationen in Dev-Volumes genau einmal ausgeführt werden.
+- `test/fake-divera.php` verweist auf die offiziellen OpenAPI-Dokumente. Halte seine GET-Antworten damit konsistent; `.github/workflows/divera-api-contract.yml` prüft Pfade und dokumentierte Felder monatlich, während undokumentierte Antwortdetails vor Änderungen manuell mit einer separaten DIVERA-Testeinheit geprüft werden müssen.
 - GitHub Actions prüft PHP- und JavaScript-Syntax, Shellskripte, `schema.sql`, den HTTP-End-to-End-Fluss sowie Docker Compose gegen Apache/HTTPS und MySQL.
 - Pull Requests erhalten keinen Zugriff auf Deployment-Secrets.
 - Nach erfolgreichen Tests eines Pushs auf `main` lädt der Workflow nur `.htaccess`, `api.php`, `constants.php`, `support.php`, `public/index.html` und `public/styles.css` per SFTP mit geprüftem Host-Key hoch. Lokale Konfiguration, Schema und Migrationen werden nie automatisch deployt.

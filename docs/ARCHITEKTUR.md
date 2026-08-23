@@ -88,6 +88,8 @@ Die Integration verwendet im Produktivbetrieb die feste HTTPS-Basisadresse von D
 
 Der Gesamtabgleich lädt `pull/all` und `alarms` jeweils einmal, ersetzt den aktuellen Mitglieds-, Qualifikations- und Fahrzeugstamm der Einheit und upsertet alle gelieferten Einsätze. Historische Fahrzeugdaten bleiben als Snapshot in `incident_units.vehicles`; historisch in Berichten eingesetzte Mitglieder werden nicht gelöscht. Fügt der Import einem bereits konsolidierten Einsatz eine weitere Einheit hinzu, wird die Konsolidierung als veraltet markiert.
 
+`test/fake-divera.php` bildet ausschließlich die beiden verwendeten GET-Antworten ab und nennt die offiziellen OpenAPI-Quellen direkt im Dateikopf. Der monatliche Workflow `.github/workflows/divera-api-contract.yml` prüft Pfade und dokumentierte Felder ohne Access-Key oder Zugriff auf Echtdaten. Da die offizielle Alarm-Spezifikation den vom Projekt ausgewerteten Fahrzeugbezug nicht eindeutig beschreibt, bleibt dafür vor Schemaänderungen ein manueller Abgleich mit einer separaten DIVERA-Testeinheit erforderlich.
+
 ## Betrieb
 
 Produktiv läuft die Anwendung auf PHP-/Apache-Webspace mit MySQL und wird nach

@@ -1,6 +1,19 @@
 <?php
 declare(strict_types=1);
 
+/*
+ * Official reference: https://api.divera247.com/ (Swagger UI)
+ * Alarm schema: https://api.divera247.com/docs/api_v2_alarm.yaml
+ * Pull schema: https://api.divera247.com/docs/api_v2_pull.yaml
+ * Last manually compared with OpenAPI 4.1.0 on 2026-08-23.
+ * .github/workflows/divera-api-contract.yml checks the documented paths and fields monthly.
+ *
+ * Only the two GET responses consumed by this application are emulated. Write endpoints are
+ * intentionally absent. The alarm "vehicles" fixture reflects the assignment data consumed by
+ * the application; DIVERA's published alarm-result schema currently documents this only broadly
+ * as "units", so this detail must also be verified against a real test unit before changing it.
+ */
+
 $query = [];
 parse_str(parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY) ?: '', $query);
 $reduced = ($query['accesskey'] ?? '') === 'reduced';
@@ -38,8 +51,8 @@ if (parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) === '/api/v2/pull/all') {
 
 if (parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) === '/api/v2/alarms') {
     echo json_encode(['data' => ['items' => [
-        ['id' => 'alarm-1', 'foreign_id' => 'D-1', 'date' => 1787421600, 'title' => 'Brand', 'address' => 'Testweg 1', 'lat' => 50.9, 'lng' => 8.0, 'vehicles' => ['v1', 'external-1']],
-        ['id' => 'alarm-2', 'foreign_id' => 'D-2', 'date' => 1787425200, 'title' => 'Hilfeleistung', 'address' => 'Testweg 2', 'lat' => 50.8, 'lng' => 8.1, 'vehicles' => ['v2']]
+        'alarm-1' => ['id' => 'alarm-1', 'foreign_id' => 'D-1', 'date' => 1787421600, 'title' => 'Brand', 'text' => 'Rauchentwicklung', 'address' => 'Testweg 1', 'lat' => 50.9, 'lng' => 8.0, 'remark' => '', 'patient' => '', 'caller' => 'Leitstelle', 'vehicles' => ['v1', 'external-1']],
+        'alarm-2' => ['id' => 'alarm-2', 'foreign_id' => 'D-2', 'date' => 1787425200, 'title' => 'Hilfeleistung', 'text' => 'Baum auf Straße', 'address' => 'Testweg 2', 'lat' => 50.8, 'lng' => 8.1, 'remark' => '', 'patient' => '', 'caller' => 'Leitstelle', 'vehicles' => ['v2']]
     ]]], JSON_UNESCAPED_UNICODE);
     return;
 }

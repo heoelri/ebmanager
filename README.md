@@ -145,6 +145,8 @@ Die vollständige Erstinstallation mit Hosting-Voraussetzungen, Datenbank, Konfi
 
 DIVERA wird je Einheit unter **DIVERA** mit dem Access-Key aus **Verwaltung → Einstellungen → Schnittstellen → API** verbunden. Die Anbindung liest ausschließlich Einsätze, Mitglieder, Qualifikationen und Fahrzeugstammdaten per HTTPS `GET`; lokale Importe verändern keine Daten in DIVERA. Führungskräfte können Einsätze ihrer Einheiten abrufen und importieren, während Konfiguration und Stammdatensynchronisation der Einheits- und Wehrführung vorbehalten bleiben.
 
+Der lokale Fake in `test/fake-divera.php` verweist direkt auf die offiziellen OpenAPI-Dokumente. `.github/workflows/divera-api-contract.yml` vergleicht die verwendeten Endpunkte und dokumentierten Felder monatlich sowie bei manueller Auslösung mit [DIVERA Swagger](https://api.divera247.com/). Der nicht eindeutig dokumentierte Fahrzeugbezug eines Einsatzes muss bei Änderungen zusätzlich mit einer separaten DIVERA-Testeinheit geprüft werden.
+
 ## Benachrichtigungen
 
 Einheitsführungen werden über neue Einsätze ihrer Einheiten und eingereichte Berichte informiert. Rückgaben informieren den ursprünglichen Autor beziehungsweise die zuständige Einheitsführung einschließlich Kommentar; Übergaben an die Wehrführung informieren alle Wehrführungen der Organisation. Die Nachrichten enthalten die Eckdaten und einen direkten, aus `APP_URL` gebildeten Link zum Einsatz. Versandfehler ändern den gespeicherten Vorgang nicht und werden in der Oberfläche als Warnung angezeigt.
