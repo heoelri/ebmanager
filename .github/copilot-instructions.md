@@ -107,7 +107,7 @@
 
 - Verwende die vorhandenen PHP-, MySQL- und Shell-Checks ohne zusätzliches Testframework.
 - Ergänze für nicht triviale Änderungen einen fokussierten Check in `test/smoke.sh`, insbesondere für Mandantentrennung, Rollen, Zustandsübergänge, Import-Idempotenz und externe Nur-Lese-Grenzen.
-- `test/dev-migrations.sh` prüft Upgrades bestehender Dev-Volumes und die idempotente Wiederholung.
+- `test/migrations.sh` prüft, dass spätere Migrationen in Dev-Volumes genau einmal ausgeführt werden.
 - GitHub Actions prüft PHP-Syntax, Shellskripte, `schema.sql`, den HTTP-End-to-End-Fluss sowie Docker Compose gegen Apache/HTTPS und MySQL.
 - Pull Requests erhalten keinen Zugriff auf Deployment-Secrets.
 - Nach erfolgreichen Tests eines Pushs auf `main` lädt der Workflow nur `.htaccess`, `api.php`, `constants.php`, `support.php` und `public/index.html` per SFTP mit geprüftem Host-Key hoch. Lokale Konfiguration, Schema und Migrationen werden nie automatisch deployt.

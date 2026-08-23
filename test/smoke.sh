@@ -85,17 +85,6 @@ curl --insecure --silent --fail \
   --data "{\"organization\":\"Testwehr\",\"unit\":\"Löschzug\",\"name\":\"Admin\",\"email\":\"admin@example.test\",\"password\":\"geheimes-passwort\",\"setupToken\":\"$SETUP_TOKEN\"}" \
   "$base_url/api/setup" | grep --quiet '"ok":true'
 
-# Die Session-Migration hasht vorhandene Klartext-Tokens, ohne gültige Sitzungen zu verlieren.
-migration_token='eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
-MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
-  --execute="INSERT INTO sessions(token,user_id,expires_at) SELECT '$migration_token',id,UTC_TIMESTAMP()+INTERVAL 1 HOUR FROM users WHERE email='admin@example.test'"
-MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
-  <migrations/002-hash-session-tokens.sql
-curl --insecure --silent --fail --cookie "$session_cookie=$migration_token" \
-  "$base_url/api/me" | grep --quiet '"role":"wehrleitung"'
-MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
-  --execute="DELETE FROM sessions WHERE token=SHA2('$migration_token',256)"
-
 # Der Login erzeugt eine nutzbare Sitzung und speichert ausschließlich deren SHA-256-Hash.
 curl --insecure --silent --fail --cookie-jar cookies.txt \
   --header 'Content-Type: application/json' \
@@ -151,11 +140,11 @@ printf '%s' "$system_json" | php -r '
 
 # Ein fehlender Schemateil wird als unvollständige Datenbank erkannt.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
-  --execute="DROP TABLE divera_imports"
+  --execute="RENAME TABLE divera_imports TO divera_imports_missing"
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/system" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(str_contains($data["database"]["status"],"unvollständig"));'
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
-  <migrations/005-divera-imports.sql
+  --execute="RENAME TABLE divera_imports_missing TO divera_imports"
 
 # Führungskräfte ohne Wehrleitungsrolle dürfen die Systemübersicht nicht aufrufen.
 regular_token='dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'

@@ -184,10 +184,3 @@ CREATE TABLE schema_migrations (
   name VARCHAR(255) PRIMARY KEY,
   applied_at DATETIME NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-INSERT INTO schema_migrations(name,applied_at) VALUES
-  ('001-password-resets.sql',UTC_TIMESTAMP()),
-  ('002-hash-session-tokens.sql',UTC_TIMESTAMP()),
-  ('003-report-details.sql',UTC_TIMESTAMP()),
-  ('004-login-history.sql',UTC_TIMESTAMP()),
-  ('005-divera-imports.sql',UTC_TIMESTAMP());
