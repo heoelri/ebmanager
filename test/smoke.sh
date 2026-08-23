@@ -21,6 +21,13 @@ fi
 DB_DSN='' REQUEST_METHOD=GET REQUEST_URI=/api/bootstrap php api.php | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
 DB_DSN='' php -r '$_SERVER["REQUEST_METHOD"]="GET"; $_SERVER["REQUEST_URI"]="/ebmanager/api/bootstrap"; $_SERVER["SCRIPT_NAME"]="/ebmanager/api.php"; require "api.php";' | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
 DB_DSN='' php -r '$_COOKIE["session"]=str_repeat("a",64); $_SERVER["REQUEST_METHOD"]="GET"; $_SERVER["REQUEST_URI"]="/api/me"; require "api.php";' | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
+php -r '
+  $html=file_get_contents("public/index.html");
+  foreach (["viewport-fit=cover","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","min-height:44px",":focus-visible","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:"] as $required) {
+    if (!str_contains($html,$required)) exit(1);
+  }
+  if (preg_match("/<select[^>]+multiple/i",$html)) exit(1);
+'
 
 if [[ -z "${TEST_BASE_URL:-}" ]]; then
   openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost -addext subjectAltName=DNS:localhost \
@@ -86,6 +93,15 @@ test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-characte
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" \
   "$base_url/api/me" | grep --quiet '"role":"wehrleitung"'
 
+curl --insecure --silent --fail --cookie-jar second-login-cookies.txt \
+  --header 'Content-Type: application/json' \
+  --header "Origin: $base_url" \
+  --data '{"email":"admin@example.test","password":"geheimes-passwort"}' \
+  "$base_url/api/login" | grep --quiet '"ok":true'
+users_json=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/users")
+printf '%s' "$users_json" | php -r '$users=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($users[0]["loginHistory"])===2); assert($users[0]["loginHistory"][0]>=$users[0]["loginHistory"][1]);'
+rm -f second-login-cookies.txt
+
 system_json=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/system")
 printf '%s' "$system_json" | php -r '
   $data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
@@ -122,15 +138,39 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --request POST \
   "$base_url/api/logout")" = 403
 
+second_unit_id=$(curl --insecure --silent --fail \
+  --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' \
+  --data '{"name":"Löschgruppe"}' \
+  "$base_url/api/units" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' \
+  --data '{"name":"löschgruppe"}' \
+  "$base_url/api/units")" = 409
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT COUNT(*) FROM units WHERE organization_id=1 AND name='Löschgruppe'")" = 1
 invite_status=$(curl --insecure --silent --output invite.json --write-out '%{http_code}' \
   --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
-  --data '{"name":"Eingeladene Person","email":"invite@example.test","role":"fuehrungskraft","unitIds":[1]}' \
+  --data "{\"name\":\"Eingeladene Person\",\"email\":\"invite@example.test\",\"role\":\"fuehrungskraft\",\"unitIds\":[1,$second_unit_id]}" \
   "$base_url/api/users")
 case "$invite_status" in
   201)
     test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
       einsatzberichte --execute="SELECT COUNT(*) FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE u.email='invite@example.test'")" = 1
+    invited_user_id=$(php -r '$data=json_decode(file_get_contents("invite.json"),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
+    test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+      einsatzberichte --execute="SELECT COUNT(*) FROM user_units WHERE user_id=$invited_user_id")" = 2
+    curl --insecure --silent --fail \
+      --cookie "$session_cookie=$session_token" \
+      --header 'Content-Type: application/json' \
+      --request PUT \
+      --data "{\"name\":\"Eingeladene Person\",\"email\":\"invite@example.test\",\"role\":\"fuehrungskraft\",\"unitIds\":[$second_unit_id]}" \
+      "$base_url/api/users/$invited_user_id" | grep --quiet '"ok":true'
+    test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+      einsatzberichte --execute="SELECT GROUP_CONCAT(unit_id ORDER BY unit_id) FROM user_units WHERE user_id=$invited_user_id")" = "$second_unit_id"
     MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
       --execute="DELETE FROM users WHERE email='invite@example.test'"
     ;;
@@ -147,14 +187,23 @@ if [[ -z "${TEST_BASE_URL:-}" ]]; then
 fi
 rm -f invite.json
 
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' \
+  --data '{"title":"Ungültiger Einsatz","startedAt":"morgen","address":"","unitIds":[1]}' \
+  "$base_url/api/incidents")" = 400
 incident_id=$(curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
   --data '{"title":"Testeinsatz","startedAt":"2026-08-22T18:00:00.000Z","address":"","unitIds":[1]}' \
   "$base_url/api/incidents" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="INSERT INTO divera_imports(unit_id,incident_id,imported_by,imported_at) VALUES(1,$incident_id,1,'2026-08-23 09:00:00')"
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/units" |
+  php -r '$units=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $unit=array_values(array_filter($units,fn($item)=>$item["id"]===1))[0]; assert($unit["last_divera_import_at"]==="2026-08-23T09:00:00.000Z");'
 
-report_payload='{"unitId":1,"narrative":"Ursprünglich","departedAt":"2026-08-22T18:05:00.000Z","arrivedAt":"2026-08-22T18:10:00.000Z","endedAt":"2026-08-22T19:00:00.000Z","incidentType":"Technische Hilfe","classification":{"site":[],"cause":[],"technical":[]},"crew":[]}'
+report_payload='{"unitId":1,"runningNumber":"69/2026","damagedParty":{"name":"Max Mustermann","phone":"02733 123","address":"Musterweg 1"},"damagingParty":{"name":"Erika Beispiel","phone":"","address":"Beispielweg 2"},"incidentCommand":{"rank":"BOI","name":"D. Gerlach","additionalRank":"BI","additionalName":"A. Busch"},"narrative":"Ursprünglich","departedAt":"2026-08-22T18:05:00.000Z","arrivedAt":"2026-08-22T18:10:00.000Z","endedAt":"2026-08-22T19:00:00.000Z","incidentType":"Technische Hilfe","classification":{"site":[],"cause":[],"technical":[]},"crew":[]}'
 report_id=$(curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
@@ -166,6 +215,20 @@ report_id=$(curl --insecure --silent --fail \
   exit 1
 }
 report_id_int=$((report_id))
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT CONCAT(report_year,'|',running_number,'|',JSON_UNQUOTE(JSON_EXTRACT(damaged_party,'$.name')),'|',JSON_UNQUOTE(JSON_EXTRACT(damaging_party,'$.name')),'|',JSON_UNQUOTE(JSON_EXTRACT(incident_command,'$.name'))) FROM reports WHERE id=$report_id_int")" = '2026|69/2026|Max Mustermann|Erika Beispiel|D. Gerlach'
+
+duplicate_incident_id=$(curl --insecure --silent --fail \
+  --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' \
+  --data '{"title":"Zweiter Testeinsatz","startedAt":"2026-08-22T18:00:00.000Z","address":"","unitIds":[1]}' \
+  "$base_url/api/incidents" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' \
+  --data "$report_payload" \
+  "$base_url/api/incidents/$duplicate_incident_id/reports")" = 409
 
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="START TRANSACTION; UPDATE reports SET status='released' WHERE id=$report_id_int; DO SLEEP(2); COMMIT;" &

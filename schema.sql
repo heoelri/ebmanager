@@ -43,6 +43,14 @@ CREATE TABLE sessions (
   CONSTRAINT sessions_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE login_history (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT UNSIGNED NOT NULL,
+  logged_in_at DATETIME NOT NULL,
+  KEY login_history_user_time (user_id, logged_in_at),
+  CONSTRAINT login_history_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE password_resets (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   user_id BIGINT UNSIGNED NOT NULL,
@@ -85,6 +93,18 @@ CREATE TABLE incident_units (
   CONSTRAINT incident_units_unit_fk FOREIGN KEY (unit_id) REFERENCES units(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE divera_imports (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  unit_id BIGINT UNSIGNED NOT NULL,
+  incident_id BIGINT UNSIGNED NOT NULL,
+  imported_by BIGINT UNSIGNED,
+  imported_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY divera_imports_unit_time (unit_id, imported_at),
+  CONSTRAINT divera_imports_unit_fk FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE,
+  CONSTRAINT divera_imports_incident_fk FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE CASCADE,
+  CONSTRAINT divera_imports_user_fk FOREIGN KEY (imported_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE members (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   organization_id BIGINT UNSIGNED NOT NULL,
@@ -125,6 +145,11 @@ CREATE TABLE reports (
   incident_id BIGINT UNSIGNED NOT NULL,
   unit_id BIGINT UNSIGNED NOT NULL,
   author_id BIGINT UNSIGNED NOT NULL,
+  report_year SMALLINT UNSIGNED,
+  running_number VARCHAR(50),
+  damaged_party JSON,
+  damaging_party JSON,
+  incident_command JSON,
   narrative TEXT NOT NULL,
   vehicles TEXT NOT NULL,
   personnel TEXT NOT NULL,
@@ -139,6 +164,7 @@ CREATE TABLE reports (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   released_at DATETIME,
   UNIQUE KEY reports_incident_unit (incident_id, unit_id),
+  UNIQUE KEY reports_unit_year_number (unit_id, report_year, running_number),
   CONSTRAINT reports_incident_fk FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE CASCADE,
   CONSTRAINT reports_unit_fk FOREIGN KEY (unit_id) REFERENCES units(id),
   CONSTRAINT reports_author_fk FOREIGN KEY (author_id) REFERENCES users(id)
@@ -153,3 +179,15 @@ CREATE TABLE report_crew (
   CONSTRAINT report_crew_report_fk FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE,
   CONSTRAINT report_crew_member_fk FOREIGN KEY (member_id) REFERENCES members(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE schema_migrations (
+  name VARCHAR(255) PRIMARY KEY,
+  applied_at DATETIME NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO schema_migrations(name,applied_at) VALUES
+  ('001-password-resets.sql',UTC_TIMESTAMP()),
+  ('002-hash-session-tokens.sql',UTC_TIMESTAMP()),
+  ('003-report-details.sql',UTC_TIMESTAMP()),
+  ('004-login-history.sql',UTC_TIMESTAMP()),
+  ('005-divera-imports.sql',UTC_TIMESTAMP());

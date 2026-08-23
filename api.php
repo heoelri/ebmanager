@@ -37,10 +37,15 @@ function databaseConfigurationError(): ?string
     try {
         $tables = db()->query(
             "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN
-             ('organizations','units','users','user_units','sessions','password_resets','incidents','incident_units',
-              'members','member_units','qualifications','member_qualifications','reports','report_crew')"
+             ('organizations','units','users','user_units','sessions','login_history','password_resets','incidents','incident_units',
+              'divera_imports','members','member_units','qualifications','member_qualifications','reports','report_crew')"
         )->fetchColumn();
-        if ((int)$tables !== 14) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
+        if ((int)$tables !== 16) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
+        $reportColumns = db()->query(
+            "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='reports'
+             AND column_name IN ('report_year','running_number','damaged_party','damaging_party','incident_command')"
+        )->fetchColumn();
+        if ((int)$reportColumns !== 5) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
     } catch (PDOException $error) {
         error_log((string)$error);
         return 'Datenbankverbindung fehlgeschlagen. Prüfen Sie DSN, Benutzername, Passwort und Erreichbarkeit.';
@@ -65,14 +70,27 @@ function sendPasswordEmail(array $user, string $token, bool $invitation = false)
 
 function isoDate(mixed $value): string
 {
+    if ($value === null || $value === '') throw new ApiError(502, 'DIVERA-Zeitpunkt fehlt');
     try {
-        if ($value === null || $value === '') $date = new DateTimeImmutable();
-        elseif (is_numeric($value)) $date = (new DateTimeImmutable('@' . (int)$value));
+        if (is_numeric($value)) $date = new DateTimeImmutable('@' . (int)$value);
         else $date = new DateTimeImmutable((string)$value);
         return $date->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.v\Z');
     } catch (Throwable) {
         throw new ApiError(502, 'DIVERA-Zeitpunkt ist ungültig');
     }
+}
+
+function requestDate(mixed $value, string $name): DateTimeImmutable
+{
+    $text = required($value, $name, 100);
+    $date = DateTimeImmutable::createFromFormat('!Y-m-d\TH:i:s.v\Z', $text, new DateTimeZone('UTC'));
+    if (!$date || DateTimeImmutable::getLastErrors() !== false) throw new ApiError(400, "$name ist ungültig");
+    return $date;
+}
+
+function utcString(DateTimeImmutable $date): string
+{
+    return $date->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.v\Z');
 }
 
 function unit(int $id, int $organizationId): ?array
@@ -154,18 +172,12 @@ function vehicleSnapshots(mixed $value): array
 function reportDetails(array $data, array $incident): array
 {
     if (!in_array($data['incidentType'] ?? null, INCIDENT_TYPES, true)) throw new ApiError(400, 'Einsatzart ist ungültig');
-    try {
-        $times = [
-            'alarmedAt' => new DateTimeImmutable($incident['started_at']),
-            'departedAt' => new DateTimeImmutable(required($data['departedAt'] ?? null, 'Ausgerückt um', 100)),
-            'arrivedAt' => new DateTimeImmutable(required($data['arrivedAt'] ?? null, 'Eingetroffen um', 100)),
-            'endedAt' => new DateTimeImmutable(required($data['endedAt'] ?? null, 'Einsatz beendet um', 100))
-        ];
-    } catch (ApiError $error) {
-        throw $error;
-    } catch (Throwable) {
-        throw new ApiError(400, 'Einsatzzeiten müssen vollständig und chronologisch sein');
-    }
+    $times = [
+        'alarmedAt' => requestDate($incident['started_at'], 'Alarmiert um'),
+        'departedAt' => requestDate($data['departedAt'] ?? null, 'Ausgerückt um'),
+        'arrivedAt' => requestDate($data['arrivedAt'] ?? null, 'Eingetroffen um'),
+        'endedAt' => requestDate($data['endedAt'] ?? null, 'Einsatz beendet um')
+    ];
     if ($times['departedAt'] < $times['alarmedAt'] || $times['arrivedAt'] < $times['departedAt'] || $times['endedAt'] < $times['arrivedAt']) {
         throw new ApiError(400, 'Einsatzzeiten müssen vollständig und chronologisch sein');
     }
@@ -177,10 +189,23 @@ function reportDetails(array $data, array $incident): array
         foreach ($values as $value) if (!in_array($value, $allowed, true)) throw new ApiError(400, 'Aufgliederung ist ungültig');
         $classification[$group] = $values;
     }
-    $format = fn(DateTimeImmutable $date) => $date->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.v\Z');
+    $structured = [];
+    foreach ([
+        'damagedParty' => ['name' => 'Geschädigte Person', 'phone' => 'Telefon', 'address' => 'Adresse'],
+        'damagingParty' => ['name' => 'Schädiger', 'phone' => 'Telefon', 'address' => 'Adresse'],
+        'incidentCommand' => ['rank' => 'Dienstgrad', 'name' => 'Einsatzleitung', 'additionalRank' => 'Weiterer Dienstgrad', 'additionalName' => 'Weitere Führungskraft']
+    ] as $group => $fields) {
+        $source = is_array($data[$group] ?? null) ? $data[$group] : [];
+        foreach ($fields as $field => $label) $structured[$group][$field] = optional($source[$field] ?? null, $label, $field === 'address' ? 500 : 200);
+    }
     return [
-        'alarmedAt' => $format($times['alarmedAt']), 'departedAt' => $format($times['departedAt']),
-        'arrivedAt' => $format($times['arrivedAt']), 'endedAt' => $format($times['endedAt']),
+        'alarmedAt' => utcString($times['alarmedAt']), 'departedAt' => utcString($times['departedAt']),
+        'arrivedAt' => utcString($times['arrivedAt']), 'endedAt' => utcString($times['endedAt']),
+        'reportYear' => (int)$times['alarmedAt']->setTimezone(new DateTimeZone('Europe/Berlin'))->format('Y'),
+        'runningNumber' => required($data['runningNumber'] ?? null, 'Laufende Nummer', 50),
+        'damagedParty' => json_encode($structured['damagedParty'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+        'damagingParty' => json_encode($structured['damagingParty'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+        'incidentCommand' => json_encode($structured['incidentCommand'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
         'incidentType' => $data['incidentType'],
         'classification' => json_encode($classification, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)
     ];
@@ -193,6 +218,12 @@ function replaceCrew(int $reportId, int $incidentId, int $unitId, mixed $crew, i
     $snapshots = json_decode($assignment['vehicles'] ?? '[]', true) ?: [];
     $vehicles = array_map(fn($vehicle) => is_string($vehicle) ? $vehicle : $vehicle['name'],
         array_values(array_filter($snapshots, fn($vehicle) => is_string($vehicle) || ($vehicle['own'] ?? true) !== false)));
+    $members = [];
+    foreach (query(
+        'SELECT m.id,m.name FROM members m JOIN member_units mu ON mu.member_id=m.id
+         WHERE m.organization_id=? AND mu.unit_id=?',
+        [$organizationId, $unitId]
+    )->fetchAll() as $member) $members[(int)$member['id']] = $member['name'];
     $seen = $occupied = $rows = [];
     foreach ($crew as $item) {
         if (!is_array($item)) throw new ApiError(400, 'Besatzung ist ungültig');
@@ -201,19 +232,14 @@ function replaceCrew(int $reportId, int $incidentId, int $unitId, mixed $crew, i
         $role = (string)($item['role'] ?? 'besatzung');
         // Driver and unit leader are unique per vehicle; crew members are not.
         $slot = $vehicle && $role !== 'besatzung' ? "$vehicle:$role" : '';
-        $member = one(
-            'SELECT m.name FROM members m JOIN member_units mu ON mu.member_id=m.id
-             WHERE m.id=? AND m.organization_id=? AND mu.unit_id=?',
-            [$memberId, $organizationId, $unitId]
-        );
-        if (!$memberId || isset($seen[$memberId]) || !$member || ($vehicle && !in_array($vehicle, $vehicles, true))
+        if (!$memberId || isset($seen[$memberId]) || !isset($members[$memberId]) || ($vehicle && !in_array($vehicle, $vehicles, true))
             || !in_array($role, ['maschinist', 'einheitsfuehrer', 'besatzung'], true)
             || (!$vehicle && $role !== 'besatzung') || ($slot && isset($occupied[$slot]))) {
             throw new ApiError(400, 'Besatzung ist ungültig');
         }
         $seen[$memberId] = true;
         if ($slot) $occupied[$slot] = true;
-        $rows[] = compact('memberId', 'vehicle', 'role') + ['name' => $member['name']];
+        $rows[] = compact('memberId', 'vehicle', 'role') + ['name' => $members[$memberId]];
     }
     query('DELETE FROM report_crew WHERE report_id=?', [$reportId]);
     foreach ($rows as $row) query(
@@ -245,19 +271,16 @@ function diveraGet(string $url, string $error): array
     }
 }
 
-function listValue(mixed $value): array
-{
-    return is_array($value) ? array_values($value) : [];
-}
-
-function diveraData(array $unit): array
+function diveraData(array $unit, bool $includeVehicles = true): array
 {
     $key = rawurlencode($unit['divera_access_key']);
     $alarmsRaw = diveraGet("https://app.divera247.com/api/v2/alarms?accesskey=$key", 'DIVERA-Abfrage fehlgeschlagen');
-    $unitRaw = diveraGet("https://app.divera247.com/api/v2/pull/all?accesskey=$key", 'DIVERA-Abfrage fehlgeschlagen');
     $ownVehicles = [];
-    foreach (($unitRaw['data']['cluster']['vehicle'] ?? []) as $id => $vehicle) {
-        $ownVehicles[(string)($vehicle['id'] ?? $id)] = $vehicle;
+    if ($includeVehicles) {
+        $unitRaw = diveraGet("https://app.divera247.com/api/v2/pull/all?accesskey=$key", 'DIVERA-Abfrage fehlgeschlagen');
+        foreach (($unitRaw['data']['cluster']['vehicle'] ?? []) as $id => $vehicle) {
+            $ownVehicles[(string)($vehicle['id'] ?? $id)] = $vehicle;
+        }
     }
     $vehicles = [];
     foreach ($ownVehicles as $id => $vehicle) $vehicles[] = [
@@ -266,7 +289,7 @@ function diveraData(array $unit): array
     ];
     $source = $alarmsRaw['data']['items'] ?? $alarmsRaw['data'] ?? $alarmsRaw['items'] ?? $alarmsRaw;
     $alarms = [];
-    foreach (listValue($source) as $alarm) {
+    foreach (is_array($source) ? array_values($source) : [] as $alarm) {
         $assigned = $alarm['vehicles'] ?? $alarm['vehicle_ids'] ?? $alarm['vehicle'] ?? [];
         $ids = is_array($assigned) ? (array_is_list($assigned) ? $assigned : array_keys($assigned)) : explode(',', (string)$assigned);
         $alarmVehicles = [];
@@ -343,6 +366,7 @@ try {
             query('DELETE FROM sessions WHERE expires_at<=UTC_TIMESTAMP()');
             if (preg_match('/^[a-f0-9]{64}$/', $_COOKIE[$cookieName] ?? '')) query('DELETE FROM sessions WHERE token=?', [hash('sha256', $_COOKIE[$cookieName])]);
             query('INSERT INTO sessions(token,user_id,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 12 HOUR)', [hash('sha256', $token), $login['id']]);
+            query('INSERT INTO login_history(user_id,logged_in_at) VALUES(?,UTC_TIMESTAMP())', [$login['id']]);
         });
         setcookie($cookieName, $token, [
             'expires' => time() + 43200, 'path' => '/', 'secure' => requestIsHttps(),
@@ -411,12 +435,11 @@ try {
     if ($method === 'GET' && $path === '/api/system') {
         assertRole($user, 'wehrleitung');
         $settings = config();
-        $databaseError = databaseConfigurationError();
-        $database = ['status' => $databaseError ?? 'Bereit'];
-        if ($databaseError === null) {
-            $database['name'] = (string)db()->query('SELECT DATABASE()')->fetchColumn();
-            $database['serverVersion'] = (string)db()->getAttribute(PDO::ATTR_SERVER_VERSION);
-        }
+        $database = [
+            'status' => 'Bereit',
+            'name' => (string)db()->query('SELECT DATABASE()')->fetchColumn(),
+            'serverVersion' => (string)db()->getAttribute(PDO::ATTR_SERVER_VERSION)
+        ];
         $email = [
             'configured' => false,
             'transport' => empty($settings['smtp_host']) ? 'PHP mail()' : 'SMTP mit STARTTLS',
@@ -463,7 +486,10 @@ try {
 
     if ($method === 'GET' && $path === '/api/units') {
         $rows = query(
-            'SELECT id,name,(divera_access_key IS NOT NULL) divera_configured FROM units WHERE organization_id=? ORDER BY name',
+            "SELECT u.id,u.name,(u.divera_access_key IS NOT NULL) divera_configured,
+             DATE_FORMAT(MAX(di.imported_at),'%Y-%m-%dT%H:%i:%s.000Z') last_divera_import_at
+             FROM units u LEFT JOIN divera_imports di ON di.unit_id=u.id
+             WHERE u.organization_id=? GROUP BY u.id,u.name,u.divera_access_key ORDER BY u.name",
             [$user['organization_id']]
         )->fetchAll();
         foreach ($rows as &$row) { $row['id'] = (int)$row['id']; $row['divera_configured'] = (int)$row['divera_configured']; }
@@ -502,7 +528,19 @@ try {
              FROM users u WHERE u.organization_id=? ORDER BY u.name",
             [$user['organization_id']]
         )->fetchAll();
-        foreach ($rows as &$row) $row['id'] = (int)$row['id'];
+        $history = query(
+            "SELECT user_id,DATE_FORMAT(logged_in_at,'%Y-%m-%dT%H:%i:%sZ') logged_in_at FROM
+             (SELECT h.*,ROW_NUMBER() OVER(PARTITION BY h.user_id ORDER BY h.logged_in_at DESC,h.id DESC) history_position
+              FROM login_history h JOIN users u ON u.id=h.user_id WHERE u.organization_id=?) recent
+             WHERE history_position<=5 ORDER BY user_id,history_position",
+            [$user['organization_id']]
+        )->fetchAll();
+        $historyByUser = [];
+        foreach ($history as $login) $historyByUser[(int)$login['user_id']][] = $login['logged_in_at'];
+        foreach ($rows as &$row) {
+            $row['id'] = (int)$row['id'];
+            $row['loginHistory'] = $historyByUser[$row['id']] ?? [];
+        }
         respond(200, $rows);
     }
 
@@ -570,17 +608,15 @@ try {
         $params = $user['role'] === 'wehrleitung' ? [$user['organization_id']] : [$user['organization_id'], $user['id']];
         $rows = query(
             "SELECT i.*,
-             (SELECT GROUP_CONCAT(u.name ORDER BY u.name SEPARATOR ', ') FROM incident_units x JOIN units u ON u.id=x.unit_id WHERE x.incident_id=i.id) units
+             (SELECT GROUP_CONCAT(u.name ORDER BY u.name SEPARATOR ', ') FROM incident_units x JOIN units u ON u.id=x.unit_id WHERE x.incident_id=i.id) units,
+             COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT(
+               'unitId',iu.unit_id,'vehicles',CAST(iu.vehicles AS CHAR),
+               'hasReport',EXISTS(SELECT 1 FROM reports r WHERE r.incident_id=iu.incident_id AND r.unit_id=iu.unit_id)
+             )) FROM incident_units iu WHERE iu.incident_id=i.id),JSON_ARRAY()) assignments
              FROM incidents i WHERE $where ORDER BY i.started_at DESC",
             $params
         )->fetchAll();
         foreach ($rows as &$row) {
-            $assignments = query(
-                'SELECT iu.unit_id unitId,iu.vehicles,EXISTS(SELECT 1 FROM reports r WHERE r.incident_id=iu.incident_id AND r.unit_id=iu.unit_id) hasReport FROM incident_units iu WHERE iu.incident_id=? ORDER BY iu.unit_id',
-                [$row['id']]
-            )->fetchAll();
-            foreach ($assignments as &$assignment) { $assignment['unitId'] = (int)$assignment['unitId']; $assignment['hasReport'] = (int)$assignment['hasReport']; }
-            $row['assignments'] = json_encode($assignments, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
             foreach (['id', 'organization_id', 'divera_date'] as $key) if ($row[$key] !== null) $row[$key] = (int)$row[$key];
             foreach (['lat', 'lng'] as $key) if ($row[$key] !== null) $row[$key] = (float)$row[$key];
         }
@@ -597,10 +633,11 @@ try {
             assertOwnUnit($user, $unitId);
         }
         $id = transaction(function () use ($data, $unitIds, $user) {
+            $startedAt = utcString(requestDate($data['startedAt'] ?? null, 'Zeitpunkt'));
             query(
                 'INSERT INTO incidents(organization_id,title,started_at,address,message,remark,patient,caller,consolidated_text) VALUES(?,?,?,?,?,?,?,?,?)',
                 [$user['organization_id'], required($data['title'] ?? null, 'Stichwort', 300),
-                 required($data['startedAt'] ?? null, 'Zeitpunkt', 50), trim((string)($data['address'] ?? '')), '', '', '', '', '']
+                 $startedAt, optional($data['address'] ?? null, 'Adresse', 500), '', '', '', '', '']
             );
             $id = (int)db()->lastInsertId();
             foreach ($unitIds as $unitId) query('INSERT INTO incident_units(incident_id,unit_id,vehicles) VALUES(?,?,?)', [$id, $unitId, '[]']);
@@ -622,20 +659,18 @@ try {
             $params[] = $user['id'];
         }
         $rows = query(
-            "SELECT r.*,u.name author_name,un.name unit_name FROM reports r
+            "SELECT r.*,u.name author_name,un.name unit_name,
+             COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT(
+               'memberId',rc.member_id,'name',m.name,'vehicle',rc.vehicle,'role',rc.role
+             )) FROM report_crew rc JOIN members m ON m.id=rc.member_id WHERE rc.report_id=r.id),JSON_ARRAY()) crew
+             FROM reports r
              JOIN users u ON u.id=r.author_id JOIN units un ON un.id=r.unit_id
              WHERE r.incident_id=?$where ORDER BY r.created_at",
             $params
         )->fetchAll();
         foreach ($rows as &$row) {
-            $crew = query(
-                'SELECT rc.member_id memberId,m.name,rc.vehicle,rc.role FROM report_crew rc JOIN members m ON m.id=rc.member_id WHERE rc.report_id=? ORDER BY rc.member_id',
-                [$row['id']]
-            )->fetchAll();
-            foreach ($crew as &$person) $person['memberId'] = (int)$person['memberId'];
-            $row['crew'] = json_encode($crew, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
             $row['duration_minutes'] = (int)round((strtotime($row['ended_at']) - strtotime($row['alarmed_at'])) / 60);
-            foreach (['id', 'incident_id', 'unit_id', 'author_id'] as $key) $row[$key] = (int)$row[$key];
+            foreach (['id', 'incident_id', 'unit_id', 'author_id', 'report_year'] as $key) if ($row[$key] !== null) $row[$key] = (int)$row[$key];
         }
         respond(200, $rows);
     }
@@ -652,9 +687,10 @@ try {
         $id = transaction(function () use ($data, $foundIncident, $incidentId, $unitId, $user) {
             $details = reportDetails($data, $foundIncident);
             query(
-                'INSERT INTO reports(incident_id,unit_id,author_id,narrative,alarmed_at,departed_at,arrived_at,ended_at,incident_type,classification,vehicles,personnel)
-                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
-                [$incidentId, $unitId, $user['id'], required($data['narrative'] ?? null, 'Bericht'),
+                'INSERT INTO reports(incident_id,unit_id,author_id,report_year,running_number,damaged_party,damaging_party,incident_command,narrative,alarmed_at,departed_at,arrived_at,ended_at,incident_type,classification,vehicles,personnel)
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                [$incidentId, $unitId, $user['id'], $details['reportYear'], $details['runningNumber'],
+                 $details['damagedParty'], $details['damagingParty'], $details['incidentCommand'], required($data['narrative'] ?? null, 'Bericht'),
                  $details['alarmedAt'], $details['departedAt'], $details['arrivedAt'], $details['endedAt'],
                  $details['incidentType'], $details['classification'], '', '']
             );
@@ -683,8 +719,9 @@ try {
             $details = reportDetails($data, $foundIncident);
             $summary = replaceCrew((int)$lockedReport['id'], (int)$lockedReport['incident_id'], (int)$lockedReport['unit_id'], $data['crew'] ?? [], $user['organization_id']);
             query(
-                'UPDATE reports SET narrative=?,vehicles=?,personnel=?,alarmed_at=?,departed_at=?,arrived_at=?,ended_at=?,incident_type=?,classification=? WHERE id=?',
-                [required($data['narrative'] ?? null, 'Bericht'), $summary['vehicles'], $summary['personnel'],
+                'UPDATE reports SET report_year=?,running_number=?,damaged_party=?,damaging_party=?,incident_command=?,narrative=?,vehicles=?,personnel=?,alarmed_at=?,departed_at=?,arrived_at=?,ended_at=?,incident_type=?,classification=? WHERE id=?',
+                [$details['reportYear'], $details['runningNumber'], $details['damagedParty'], $details['damagingParty'], $details['incidentCommand'],
+                 required($data['narrative'] ?? null, 'Bericht'), $summary['vehicles'], $summary['personnel'],
                  $details['alarmedAt'], $details['departedAt'], $details['arrivedAt'], $details['endedAt'],
                  $details['incidentType'], $details['classification'], $lockedReport['id']]
             );
@@ -726,7 +763,7 @@ try {
         assertOwnUnit($user, $unitId);
         $foundUnit = unit($unitId, $user['organization_id']);
         if (!$foundUnit || !$foundUnit['divera_access_key']) throw new ApiError(400, 'DIVERA ist nicht konfiguriert');
-        respond(200, diveraData($foundUnit));
+        respond(200, diveraData($foundUnit, ($_GET['summary'] ?? '') !== '1'));
     }
 
     if ($method === 'POST' && preg_match('#^/api/units/(\d+)/divera/members/sync$#', $path, $match)) {
@@ -814,6 +851,10 @@ try {
                  ON DUPLICATE KEY UPDATE vehicles=VALUES(vehicles)',
                 [$incidentId, $unitId, json_encode(vehicleSnapshots($verified['vehicles']), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)]
             );
+            query(
+                'INSERT INTO divera_imports(unit_id,incident_id,imported_by,imported_at) VALUES(?,?,?,UTC_TIMESTAMP())',
+                [$unitId, $incidentId, $user['id']]
+            );
             return $incidentId;
         });
         respond(201, ['id' => $id]);
@@ -824,7 +865,8 @@ try {
     respond($error->status, ['error' => $error->getMessage()]);
 } catch (PDOException $error) {
     error_log((string)$error);
-    respond($error->getCode() === '23000' ? 409 : 500, ['error' => $error->getCode() === '23000' ? 'Datensatz existiert bereits' : 'Interner Fehler']);
+    $duplicate = (int)($error->errorInfo[1] ?? 0) === 1062;
+    respond($duplicate ? 409 : 500, ['error' => $duplicate ? 'Datensatz existiert bereits' : 'Interner Fehler']);
 } catch (Throwable $error) {
     error_log((string)$error);
     respond(500, ['error' => 'Interner Fehler']);

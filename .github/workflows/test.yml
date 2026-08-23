@@ -36,7 +36,7 @@ jobs:
       - name: PHP-Syntax prüfen
         run: find . -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Testskripte prüfen
-        run: bash -n test/smoke.sh
+        run: bash -n test/smoke.sh test/dev-migrations.sh docker/migrate.sh
       - name: Schema und API prüfen
         env:
           MYSQL_PWD: test-password
@@ -52,6 +52,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Compose-Konfiguration prüfen
         run: docker compose config --quiet
+      - name: Upgrade eines bestehenden Dev-Volumes prüfen
+        run: bash test/dev-migrations.sh
       - name: Images bauen und End-to-End-Test ausführen
         run: docker compose --profile test up --build --abort-on-container-exit --exit-code-from test
       - name: Container und Volumes entfernen

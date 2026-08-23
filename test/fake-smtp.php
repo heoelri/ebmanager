@@ -31,7 +31,7 @@ expectCommand($client, '/^RCPT TO:<invite@example\.test>$/', "250 Recipient acce
 expectCommand($client, '/^DATA$/', "354 End with a dot\r\n");
 $message = '';
 while (($line = fgets($client)) !== false && $line !== ".\r\n") $message .= $line;
-if (!str_contains($message, 'Subject: Konto aktivieren') || !str_contains($message, '?invite=')) exit(1);
+if (!preg_match('/^Date: .+ \+0000\r?$/m', $message) || !str_contains($message, 'Subject: Konto aktivieren') || !str_contains($message, '?invite=')) exit(1);
 fwrite($client, "250 Queued\r\n");
 expectCommand($client, '/^QUIT$/', "221 Bye\r\n");
 fclose($client);

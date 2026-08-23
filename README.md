@@ -7,8 +7,9 @@ veröffentlichen diese Einzelberichte; die Wehrführung sieht alle Berichte und
 erstellt daraus den konsolidierten Gesamtbericht.
 
 Die Anwendung ist für klassischen Webspace ausgelegt: PHP und Apache liefern
-eine responsive Oberfläche ohne Frontend-Framework, PDO speichert die Daten in
-MySQL. DIVERA 24/7 wird pro Einheit ausschließlich lesend angebunden.
+eine responsive, tastatur- und touchbedienbare Oberfläche ohne
+Frontend-Framework, PDO speichert die Daten in MySQL. DIVERA 24/7 wird pro
+Einheit ausschließlich lesend angebunden.
 
 ## Open Source und Self-Hosting
 
@@ -30,11 +31,14 @@ allgemein freigegeben.
 
 - mehrere Wehren als strikt getrennte Mandanten
 - mehrere Einheiten und Mehrfachzuordnung von Führungskräften
+- Login-Historie mit den fünf neuesten erfolgreichen Anmeldungen in der Benutzerverwaltung
 - ein Einheitsbericht pro Einsatz und Einheit
+- manuelle laufende Nummern je Einheit und Jahr sowie strukturierte Angaben zu Geschädigten, Schädigern und Einsatzleitung
 - Entwurf, Bearbeitung, Freigabe und Konsolidierung
 - strukturierte Fahrzeugbesatzung mit Drag-and-Drop
 - Mitglieder und Qualifikationen aus DIVERA
 - idempotenter, serverseitig verifizierter DIVERA-Einsatzimport
+- Hinweis, Direktimport und letzter Importzeitpunkt für neue DIVERA-Einsätze in der Einsatzübersicht
 - lokale Docker-Umgebung, GitHub-Tests und SFTP-Deployment
 
 ## Rollen
@@ -79,14 +83,20 @@ Danach ist die nur an `127.0.0.1` gebundene Anwendung unter
 selbstsigniert und muss im Browser einmalig bestätigt werden. Für die
 Ersteinrichtung gilt ausschließlich lokal dieses Token:
 
+Falls die Standardports belegt sind, können sie vor dem Start beispielsweise
+mit `HTTP_PORT=18080` und `HTTPS_PORT=18443` überschrieben werden.
+
 ```text
 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
 Die Anwendungsdateien sind schreibgeschützt in den Webcontainer eingebunden;
 Änderungen an PHP, HTML und `.htaccess` sind ohne neuen Image-Build verfügbar.
-Lokale Konfiguration und Repository-Metadaten werden nicht eingebunden. Ein
-kompletter lokaler Datenbankreset erfolgt mit:
+Lokale Konfiguration und Repository-Metadaten werden nicht eingebunden. Beim
+Start führt der einmalige Dienst `migrate` alle noch nicht vermerkten Dateien
+aus `migrations/` vor dem Webcontainer aus. Beim ersten Upgrade eines älteren
+Dev-Volumes werden bestehende lokale Sitzungen verworfen; fachliche Daten
+bleiben erhalten. Ein kompletter lokaler Datenbankreset erfolgt mit:
 
 ```powershell
 docker compose down --volumes

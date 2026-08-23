@@ -15,6 +15,7 @@ flowchart LR
     Apache[Apache<br>.htaccess]
     API[PHP API<br>api.php]
     Support[Infrastruktur<br>support.php]
+    Migrate[Compose-Migrationen<br>docker/migrate.sh]
     DB[(MySQL 8)]
     Divera[DIVERA 24/7]
 
@@ -22,6 +23,7 @@ flowchart LR
     Apache --> API
     API --> Support
     API -->|PDO, vorbereitete Statements| DB
+    Migrate -->|ausstehende SQL-Dateien| DB
     API -->|HTTPS GET| Divera
 ```
 
@@ -33,6 +35,8 @@ flowchart LR
 - `support.php` enthält die wiederverwendbaren HTTP-, Datenbank-, Validierungs- und Mailfunktionen und ist nicht direkt öffentlich abrufbar.
 - `GET /api/system` liefert ausschließlich der Wehrleitung eine kuratierte, read-only Systemübersicht ohne Zugangsdaten oder Schlüssel.
 - `schema.sql` ist die maßgebliche Definition des MySQL-Schemas.
+- `docker/migrate.sh` führt in der lokalen Compose-Umgebung vor dem Webstart
+  ausstehende Dateien aus `migrations/` genau einmal aus.
 
 ## Authentifizierung und Autorisierung
 
