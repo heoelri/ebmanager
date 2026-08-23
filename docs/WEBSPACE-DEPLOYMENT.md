@@ -89,7 +89,7 @@ public/
   index.html
 ```
 
-1. Das gewählte Zielverzeichnis anlegen und `.htaccess`, `api.php`, `config.local.php` sowie `public/index.html` per SFTP oder verschlüsseltem FTPS dorthin hochladen.
+1. Das gewählte Zielverzeichnis anlegen und `.htaccess`, `api.php`, `config.local.php` sowie `public/index.html` per SFTP dorthin hochladen.
 2. Prüfen, dass `.htaccess` tatsächlich vorhanden ist; einige FTP-Programme blenden versteckte Dateien aus.
 3. Für Verzeichnisse Berechtigungen wie `755` und für öffentliche Dateien `644` verwenden, sofern der Hoster keine anderen Vorgaben macht.
 4. `config.local.php` so restriktiv wie vom Hoster unterstützt auf `600` oder `640` setzen.
