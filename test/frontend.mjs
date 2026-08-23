@@ -29,11 +29,14 @@ const source = html.match(/function rankOptions[\s\S]*?(?=\nfunction reportDetai
 assert(source, 'rankOptions fehlt');
 
 const rankOptions = new Function('ranks', 'esc', `${source}; return rankOptions;`)(
-  {BM: 'Brandmeister'},
+  {BM: 'Brandmeister', GBI: 'Gemeindebrandinspektor', SBI: 'Stadtbrandinspektor'},
   value => String(value)
 );
 
 assert.match(rankOptions('BM'), /value="BM" selected>BM – Brandmeister/);
+assert.match(rankOptions('GBI'), /value="GBI" selected>GBI – Gemeindebrandinspektor/);
+assert.match(rankOptions('SBI'), /value="SBI" selected>SBI – Stadtbrandinspektor/);
+assert.match(rankOptions(''), /^<option value="">Keine Angabe<\/option>/);
 assert.match(rankOptions('ALT'), /value="ALT" selected>ALT/);
 assert.equal((rankOptions('ALT').match(/value="ALT"/g) ?? []).length, 1);
 

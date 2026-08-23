@@ -56,13 +56,9 @@ Die Wehrführung kann einen Gesamtbericht erst speichern, wenn für jede dem Ein
 
 ## Fachliche Anpassung
 
-`constants.php` ist die zentrale Quelle für fachlich anpassbare Listen. Dort
-können `RANKS`, `INCIDENT_TYPES`, `CLASSIFICATIONS` und die zugehörigen
-`CLASSIFICATION_LABELS` geändert oder um eigene Einträge und Gruppen ergänzt
-werden. Dienstgrade ordnen ihre gespeicherte Abkürzung der vollständigen
-Bezeichnung zu, beispielsweise `'BM' => 'Brandmeister'`. Backend und
-Oberfläche lesen dieselben Werte; eine doppelte Anpassung im JavaScript ist
-nicht erforderlich.
+`constants.php` ist die zentrale Quelle für fachlich anpassbare Listen. Dort können `RANKS`, `INCIDENT_TYPES`, `CLASSIFICATIONS` und die zugehörigen `CLASSIFICATION_LABELS` geändert oder um eigene Einträge und Gruppen ergänzt werden. Dienstgrade ordnen ihre gespeicherte Abkürzung der vollständigen Bezeichnung zu, beispielsweise `'BM' => 'Brandmeister'`. Backend und Oberfläche lesen dieselben Werte; eine doppelte Anpassung im JavaScript ist nicht erforderlich.
+
+Die Dienstgradliste entspricht § 14 und Anlage 1 der [VOFF Nordrhein-Westfalen](https://recht.nrw.de/lrgv/rechtsverordnung/27052017-verordnung-ueber-das-ehrenamt-den-freiwilligen-feuerwehren-im-land), geprüft am 23. August 2026. Gemeinde- und Stadtbrandinspektor werden in der Anwendung getrennt als `GBI` und `SBI` geführt. Beide Einsatzleitungsfelder dürfen mit „Keine Angabe“ leer bleiben.
 
 Die Schlüssel in `CLASSIFICATIONS` und `CLASSIFICATION_LABELS` müssen
 übereinstimmen und dauerhaft stabil bleiben, weil Berichte sie im
@@ -71,8 +67,7 @@ bleiben in bestehenden Berichten lesbar, können beim nächsten Bearbeiten aber
 nicht erneut ausgewählt werden. `ROLES` liegt ebenfalls in `constants.php`,
 ist jedoch mit Datenbankschema und Berechtigungslogik gekoppelt und darf nicht
 ohne entsprechende Code- und Schemaänderung angepasst werden.
-Bereits gespeicherte Dienstgradwerte bleiben beim Bearbeiten auswählbar, auch
-wenn sie später aus `RANKS` entfernt werden.
+Bereits gespeicherte Dienstgradwerte bleiben beim Bearbeiten auswählbar, auch wenn sie später aus `RANKS` entfernt werden.
 
 ## Dokumentation
 
