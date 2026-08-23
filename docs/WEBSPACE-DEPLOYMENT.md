@@ -6,7 +6,7 @@ Diese Anleitung ist die maßgebliche Betriebsdokumentation für die Erstinstalla
 
 Der Webhoster muss folgende Funktionen bereitstellen:
 
-- PHP 8.2 oder neuer mit `pdo_mysql`
+- PHP 8.2 oder neuer mit `pdo_mysql` und für SMTP mit `openssl`
 - MySQL 8.0 oder neuer
 - Apache mit `mod_rewrite` und erlaubten `.htaccess`-Dateien
 - eine Domain oder Subdomain mit dauerhaft aktiviertem HTTPS
@@ -77,6 +77,30 @@ return [
 
 `app_url` muss die vollständige öffentliche HTTPS-Adresse der Anwendung ohne abschließenden `/` enthalten, beispielsweise `https://berichte.example.org` für den Dokumentenstamm oder `https://www.example.org/ebmanager` für ein Unterverzeichnis. `mail_from` muss eine beim Hoster zulässige Absenderadresse sein. Alternativ können `DB_DSN`, `DB_USER`, `DB_PASSWORD`, `SETUP_TOKEN`, `APP_URL` und `MAIL_FROM` als Umgebungsvariablen gesetzt werden.
 
+### E-Mail-Versand konfigurieren
+
+Die Anwendung versendet Einladungen und Links für vergessene Passwörter standardmäßig mit der PHP-Standardfunktion `mail()`. Ist `mail()` beim Hoster nicht verfügbar oder unzuverlässig, kann alternativ authentifiziertes SMTP mit verpflichtendem STARTTLS konfiguriert werden.
+
+1. Beim Hoster eine Absenderadresse unter der eigenen Domain anlegen oder eine dafür freigegebene Adresse auswählen, beispielsweise `ebmanager@feuerwehr-dahlbruch.com`.
+2. Diese vollständige Adresse als `mail_from` beziehungsweise `MAIL_FROM` konfigurieren. Eine fremde oder nicht freigegebene Absenderdomain wird von vielen Hostern abgewiesen.
+3. `app_url` beziehungsweise `APP_URL` auf die von außen erreichbare HTTPS-Adresse setzen. Dieser Wert erzeugt die Links in den E-Mails und muss bei einer Unterverzeichnisinstallation den Pfad enthalten.
+4. In der PHP-Konfiguration oder im Hosting-Kontrollzentrum prüfen, dass `mail()` nicht deaktiviert ist. Falls der Hoster einen festen Envelope-Sender verlangt, muss dieser dort serverseitig eingerichtet werden.
+5. SPF, DKIM und gegebenenfalls DMARC für die Absenderdomain im DNS nach den Vorgaben des Mailhosters konfigurieren, damit die Nachrichten nicht unnötig als Spam bewertet werden.
+6. Nach der Installation einen Benutzer einladen und zusätzlich „Passwort vergessen“ testen. Spamordner und Mailprotokoll des Hosters prüfen; ein erfolgreicher Aufruf von `mail()` bestätigt nur die Übergabe an das Mailsystem, nicht die spätere Zustellung.
+
+Für STRATO oder vergleichbare Hoster kann `config.local.php` um folgende Werte ergänzt werden:
+
+```php
+'smtp_host' => 'smtp.strato.de',
+'smtp_port' => 587,
+'smtp_username' => 'ebmanager@feuerwehr-dahlbruch.com',
+'smtp_password' => 'passwort-des-email-postfachs',
+```
+
+`smtp_username` ist bei STRATO die vollständige E-Mail-Adresse; `smtp_password` ist das Passwort dieses Postfachs. Sobald `smtp_host` gesetzt ist, verwendet die Anwendung SMTP statt `mail()`. Alle SMTP-Werte müssen dann vollständig sein. Die entsprechenden Umgebungsvariablen heißen `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME` und `SMTP_PASSWORD`. Das optionale `SMTP_CA_FILE` ist nur für Server mit einer privaten Zertifizierungsstelle vorgesehen; öffentliche Hoster wie STRATO benötigen es nicht.
+
+Kann weder PHP `mail()` noch der konfigurierte SMTP-Server eine Nachricht annehmen, wird ein neu angelegter Benutzer wieder entfernt und die Oberfläche meldet den Versandfehler. Die Passwort-Wiederherstellung bleibt ebenfalls nicht verfügbar.
+
 ## 6. Dateien hochladen
 
 Folgende Struktur muss im gewählten Zielverzeichnis entstehen:
@@ -137,7 +161,7 @@ Die Ersteinrichtung ist nach dem ersten Benutzer dauerhaft geschlossen.
 ## 8. Funktionen nach der Installation prüfen
 
 1. Anmelden und wieder abmelden.
-2. In der Verwaltung eine Testeinheit oder einen Testbenutzer anlegen, falls dies fachlich sinnvoll ist.
+2. In der Verwaltung einen Testbenutzer anlegen und prüfen, dass die Einladung ankommt, der Link die Anwendung öffnet und der Benutzer sein Passwort selbst setzen kann.
 3. Einen manuellen Einsatz und einen Bericht anlegen.
 4. Über „Passwort vergessen“ prüfen, dass der Webhoster E-Mails mit dem korrekten HTTPS-Link versendet.
 5. Optional pro Einheit einen DIVERA-Access-Key hinterlegen und einen lesenden Abruf durchführen.

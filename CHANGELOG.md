@@ -6,6 +6,8 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Added
 
+- Optionaler SMTP-Versand mit Authentifizierung und STARTTLS unterstützt Hoster, bei denen PHP `mail()` nicht verfügbar oder unzuverlässig ist.
+- Neue Benutzer erhalten eine Einladungs-E-Mail und aktivieren ihr Konto über einen einmaligen Link, statt ein von der Wehrführung vergebenes Startpasswort zu verwenden.
 - Benutzer können über einen per E-Mail versendeten Einmallink ein vergessenes Passwort zurücksetzen.
 - Passwort-Reset-Tokens werden nur als SHA-256-Hash gespeichert, laufen nach 30 Minuten ab und widerrufen nach Verwendung alle Sitzungen.
 - Die Startseite prüft Datenbankkonfiguration, Verbindung und Schema und zeigt bei Problemen eine konkrete Betriebsseite statt eines allgemeinen internen Fehlers.
@@ -13,6 +15,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Changed
 
+- Die Webspace-Anleitung beschreibt die Konfiguration und betrieblichen Voraussetzungen des E-Mail-Versands über PHP `mail()`.
 - Die Anwendung kann unverändert im Dokumentenstamm oder in einem Unterverzeichnis betrieben werden; Frontend und Backend leiten den jeweiligen Basispfad automatisch aus der aufgerufenen Adresse ab.
 - Die Webspace-Anleitung dokumentiert den manuellen SFTP-Upload mit Passwort, die verpflichtende Host-Key-Prüfung und die Abgrenzung zum derzeit FTPS-basierten GitHub-Workflow.
 - Origin-Prüfung und Sitzungscookie richten sich vorübergehend nach dem tatsächlich verwendeten HTTP- oder HTTPS-Schema; HTTPS verwendet weiterhin ein `Secure`-Cookie mit `__Host-`-Präfix.

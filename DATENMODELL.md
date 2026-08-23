@@ -82,7 +82,7 @@ Anmeldebenutzer sind von den in Einsätzen verwendeten Mitgliedern getrennt.
 | `unit_id` | BIGINT UNSIGNED, FK, NULL | Kompatible Primärzuordnung; maßgeblich ist `user_units` |
 | `name` | VARCHAR(200), NOT NULL | Anzeigename |
 | `email` | VARCHAR(320), NOT NULL, UNIQUE | Syntaktisch validierte E-Mail-Adresse; Groß-/Kleinschreibung wird ignoriert |
-| `password_hash` | VARCHAR(255), NOT NULL | Durch `password_hash` erzeugter Hash |
+| `password_hash` | VARCHAR(255), NOT NULL | Durch `password_hash` erzeugter Hash; bis zur Annahme einer Einladung ist ein unbekannter Zufallswert gespeichert |
 | `role` | ENUM, NOT NULL | `wehrleitung`, `einheitsleitung` oder `fuehrungskraft` |
 
 Nur die Wehrleitung darf ohne Einheitszuordnung existieren.
@@ -109,6 +109,9 @@ Beide Fremdschlüssel werden beim Löschen ihres Elternsatzes kaskadiert.
 Sitzungen werden beim Löschen des Benutzers mitgelöscht.
 
 ### `password_resets`
+
+Die Tabelle wird sowohl für Passwort-Wiederherstellungen als auch für Einladungen neuer Benutzer verwendet. In beiden Fällen setzt der Benutzer über denselben einmaligen Token selbst ein Passwort.
+Die zugehörigen Links werden standardmäßig über PHP `mail()` oder bei vorhandener SMTP-Konfiguration authentifiziert und TLS-geschützt versendet; SMTP-Zugangsdaten werden nicht in der Datenbank gespeichert.
 
 | Spalte | Typ | Bedeutung |
 |---|---|---|

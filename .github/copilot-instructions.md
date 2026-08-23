@@ -68,7 +68,9 @@
   Feld `users.unit_id` bleibt nur als kompatible Primärzuordnung bestehen.
 - Benutzer können durch die Wehrleitung bearbeitet werden. Ein neues Passwort
   ist dabei optional.
+- Neue Benutzer werden ohne Startpasswort angelegt und erhalten per E-Mail einen einmaligen Link, über den sie ihr Konto aktivieren und selbst ein Passwort setzen.
 - Vergessene Passwörter werden über einen per E-Mail versendeten, nur als SHA-256-Hash gespeicherten Einmal-Token zurückgesetzt. Der Token gilt 30 Minuten, Anforderungen sind pro Benutzer fünf Minuten gesperrt und ein erfolgreicher Reset widerruft alle Sitzungen.
+- E-Mails werden standardmäßig mit PHP `mail()` oder optional über authentifiziertes SMTP mit STARTTLS versendet. SMTP-Zugangsdaten bleiben ausschließlich in Umgebungsvariablen oder `config.local.php`.
 - Freigegebene Berichte sind unveränderlich.
 - Sitzungen liegen in einem `HttpOnly`- und `SameSite=Strict`-Cookie und laufen
   nach zwölf Stunden ab.

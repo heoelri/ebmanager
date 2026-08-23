@@ -49,7 +49,12 @@ function config(): array
     if ($config !== null) return $config;
     $local = __DIR__ . DIRECTORY_SEPARATOR . 'config.local.php';
     $config = is_file($local) ? require $local : [];
-    foreach (['DB_DSN' => 'dsn', 'DB_USER' => 'user', 'DB_PASSWORD' => 'password', 'SETUP_TOKEN' => 'setup_token', 'APP_URL' => 'app_url', 'MAIL_FROM' => 'mail_from'] as $environment => $key) {
+    foreach ([
+        'DB_DSN' => 'dsn', 'DB_USER' => 'user', 'DB_PASSWORD' => 'password', 'SETUP_TOKEN' => 'setup_token',
+        'APP_URL' => 'app_url', 'MAIL_FROM' => 'mail_from', 'SMTP_HOST' => 'smtp_host',
+        'SMTP_PORT' => 'smtp_port', 'SMTP_USERNAME' => 'smtp_username', 'SMTP_PASSWORD' => 'smtp_password',
+        'SMTP_CA_FILE' => 'smtp_ca_file'
+    ] as $environment => $key) {
         $value = getenv($environment);
         if ($value !== false) $config[$key] = $value;
     }
@@ -192,23 +197,100 @@ function emailAddress(mixed $value): string
     return $email;
 }
 
-function passwordResetSettings(): array
+function mailSettings(): array
 {
     $settings = config();
     $url = rtrim((string)($settings['app_url'] ?? ''), '/');
     $from = (string)($settings['mail_from'] ?? '');
     if (!filter_var($url, FILTER_VALIDATE_URL) || !str_starts_with($url, 'https://') || !filter_var($from, FILTER_VALIDATE_EMAIL)) {
-        throw new ApiError(503, 'Passwort-Wiederherstellung ist nicht konfiguriert');
+        throw new ApiError(503, 'E-Mail-Versand ist nicht konfiguriert');
     }
-    return compact('url', 'from');
+    $smtpHost = trim((string)($settings['smtp_host'] ?? ''));
+    $smtpPort = (int)($settings['smtp_port'] ?? 587);
+    $smtpUsername = (string)($settings['smtp_username'] ?? '');
+    $smtpPassword = (string)($settings['smtp_password'] ?? '');
+    $smtpCaFile = (string)($settings['smtp_ca_file'] ?? '');
+    if ($smtpHost !== '' && (
+        !preg_match('/^[A-Za-z0-9.-]+$/', $smtpHost) || $smtpPort < 1 || $smtpPort > 65535 ||
+        $smtpUsername === '' || $smtpPassword === '' || ($smtpCaFile !== '' && !is_file($smtpCaFile))
+    )) throw new ApiError(503, 'SMTP ist nicht vollständig konfiguriert');
+    return compact('url', 'from', 'smtpHost', 'smtpPort', 'smtpUsername', 'smtpPassword', 'smtpCaFile');
 }
 
-function sendPasswordReset(array $user, string $token): bool
+function smtpWrite($socket, string $data): bool
 {
-    ['url' => $url, 'from' => $from] = passwordResetSettings();
-    $link = "$url/?reset=$token";
-    $message = "Hallo {$user['name']},\n\nüber diesen Link können Sie innerhalb von 30 Minuten ein neues Passwort vergeben:\n$link\n\nFalls Sie dies nicht angefordert haben, ignorieren Sie diese Nachricht.";
-    return mail($user['email'], 'Passwort zuruecksetzen', $message, "From: $from\r\nContent-Type: text/plain; charset=UTF-8");
+    while ($data !== '') {
+        $written = fwrite($socket, $data);
+        if ($written === false || $written === 0) return false;
+        $data = substr($data, $written);
+    }
+    return true;
+}
+
+function smtpReply($socket, int $expected): bool
+{
+    for ($lines = 0; $lines < 100; $lines++) {
+        $line = fgets($socket, 4096);
+        if ($line === false || !preg_match('/^(\d{3})([ -])/', $line, $match)) return false;
+        if ($match[2] === ' ') return (int)$match[1] === $expected;
+    }
+    return false;
+}
+
+function smtpCommand($socket, string $command, int $expected): bool
+{
+    return smtpWrite($socket, "$command\r\n") && smtpReply($socket, $expected);
+}
+
+function smtpSend(array $settings, string $to, string $subject, string $message): bool
+{
+    $ssl = ['verify_peer' => true, 'verify_peer_name' => true, 'peer_name' => $settings['smtpHost']];
+    if ($settings['smtpCaFile'] !== '') $ssl['cafile'] = $settings['smtpCaFile'];
+    $context = stream_context_create(['ssl' => $ssl]);
+    $socket = stream_socket_client(
+        "tcp://{$settings['smtpHost']}:{$settings['smtpPort']}",
+        $errorCode,
+        $errorMessage,
+        10,
+        STREAM_CLIENT_CONNECT,
+        $context
+    );
+    if ($socket === false) return false;
+    stream_set_timeout($socket, 10);
+    $ok = smtpReply($socket, 220)
+        && smtpCommand($socket, 'EHLO localhost', 250)
+        && smtpCommand($socket, 'STARTTLS', 220)
+        && stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT) === true
+        && smtpCommand($socket, 'EHLO localhost', 250)
+        && smtpCommand($socket, 'AUTH LOGIN', 334)
+        && smtpCommand($socket, base64_encode($settings['smtpUsername']), 334)
+        && smtpCommand($socket, base64_encode($settings['smtpPassword']), 235)
+        && smtpCommand($socket, "MAIL FROM:<{$settings['from']}>", 250)
+        && smtpCommand($socket, "RCPT TO:<$to>", 250)
+        && smtpCommand($socket, 'DATA', 354);
+    if ($ok) {
+        $body = str_replace(["\r\n", "\r"], "\n", $message);
+        $body = str_replace("\n", "\r\n", preg_replace('/^\./m', '..', $body));
+        $headers = "From: {$settings['from']}\r\nTo: $to\r\nSubject: $subject\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n";
+        $ok = smtpWrite($socket, "$headers\r\n$body\r\n.\r\n") && smtpReply($socket, 250);
+    }
+    if ($ok) smtpCommand($socket, 'QUIT', 221);
+    fclose($socket);
+    return $ok;
+}
+
+function sendPasswordEmail(array $user, string $token, bool $invitation = false): bool
+{
+    $settings = mailSettings();
+    ['url' => $url, 'from' => $from] = $settings;
+    $link = "$url/?" . ($invitation ? 'invite' : 'reset') . "=$token";
+    $subject = $invitation ? 'Konto aktivieren' : 'Passwort zuruecksetzen';
+    $message = $invitation
+        ? "Hallo {$user['name']},\n\nüber diesen Link können Sie innerhalb von 30 Minuten Ihr Konto aktivieren und ein Passwort vergeben:\n$link\n\nNach Ablauf können Sie über „Passwort vergessen“ einen neuen Link anfordern."
+        : "Hallo {$user['name']},\n\nüber diesen Link können Sie innerhalb von 30 Minuten ein neues Passwort vergeben:\n$link\n\nFalls Sie dies nicht angefordert haben, ignorieren Sie diese Nachricht.";
+    return $settings['smtpHost'] !== ''
+        ? smtpSend($settings, $user['email'], $subject, $message)
+        : mail($user['email'], $subject, $message, "From: $from\r\nContent-Type: text/plain; charset=UTF-8");
 }
 
 function finiteNumber(mixed $value, string $name): int|float|null
@@ -505,7 +587,7 @@ try {
     if ($method === 'POST' && $path === '/api/password-reset/request') {
         $data = input();
         $email = emailAddress($data['email'] ?? null);
-        passwordResetSettings();
+        mailSettings();
         $user = one('SELECT id,name,email FROM users WHERE email=?', [$email]);
         if ($user) {
             $recent = one('SELECT id FROM password_resets WHERE user_id=? AND requested_at>UTC_TIMESTAMP()-INTERVAL 5 MINUTE', [$user['id']]);
@@ -515,7 +597,7 @@ try {
                     query('DELETE FROM password_resets WHERE expires_at<=UTC_TIMESTAMP() OR user_id=?', [$user['id']]);
                     query('INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 30 MINUTE)', [$user['id'], hash('sha256', $token)]);
                 });
-                if (!sendPasswordReset($user, $token)) {
+                if (!sendPasswordEmail($user, $token)) {
                     query('DELETE FROM password_resets WHERE user_id=?', [$user['id']]);
                     error_log('Passwort-Wiederherstellungs-E-Mail konnte nicht versendet werden');
                 }
@@ -607,19 +689,27 @@ try {
         assertRole($user, 'wehrleitung');
         $data = input();
         if (!in_array($data['role'] ?? null, ROLES, true)) throw new ApiError(400, 'Rolle ist ungültig');
-        $password = required($data['password'] ?? null, 'Passwort', 200);
-        if (textLength($password) < 10) throw new ApiError(400, 'Passwort muss mindestens 10 Zeichen haben');
         $unitIds = membershipIds($data, $user['organization_id']);
-        $id = transaction(function () use ($data, $password, $unitIds, $user) {
+        $name = required($data['name'] ?? null, 'Name', 200);
+        $email = emailAddress($data['email'] ?? null);
+        mailSettings();
+        $token = bin2hex(random_bytes(32));
+        $id = transaction(function () use ($data, $name, $email, $token, $unitIds, $user) {
             query(
                 'INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) VALUES(?,?,?,?,?,?)',
-                [$user['organization_id'], $unitIds[0] ?? null, required($data['name'] ?? null, 'Name', 200),
-                 emailAddress($data['email'] ?? null), password_hash($password, PASSWORD_DEFAULT), $data['role']]
+                [$user['organization_id'], $unitIds[0] ?? null, $name, $email,
+                 password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT), $data['role']]
             );
             $id = (int)db()->lastInsertId();
             replaceMemberships($id, $unitIds);
+            query('INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 30 MINUTE)', [$id, hash('sha256', $token)]);
             return $id;
         });
+        if (!sendPasswordEmail(['name' => $name, 'email' => $email], $token, true)) {
+            query('DELETE FROM users WHERE id=?', [$id]);
+            error_log('Einladungs-E-Mail konnte nicht versendet werden');
+            throw new ApiError(503, 'Einladungs-E-Mail konnte nicht versendet werden');
+        }
         respond(201, ['id' => $id]);
     }
 

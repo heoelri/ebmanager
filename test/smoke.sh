@@ -5,6 +5,8 @@ export DB_DSN="${DB_DSN:-mysql:host=127.0.0.1;port=3306;dbname=einsatzberichte;c
 export DB_USER="${DB_USER:-root}"
 export DB_PASSWORD="${DB_PASSWORD:-test-password}"
 export SETUP_TOKEN="${SETUP_TOKEN:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+export APP_URL="${APP_URL:-https://localhost}"
+export MAIL_FROM="${MAIL_FROM:-einsatzberichte@localhost.test}"
 base_url="${TEST_BASE_URL:-http://127.0.0.1:8080}"
 session_cookie='session'
 [[ "$base_url" == https://* ]] && session_cookie='__Host-session'
@@ -21,9 +23,14 @@ DB_DSN='' php -r '$_SERVER["REQUEST_METHOD"]="GET"; $_SERVER["REQUEST_URI"]="/eb
 DB_DSN='' php -r '$_COOKIE["session"]=str_repeat("a",64); $_SERVER["REQUEST_METHOD"]="GET"; $_SERVER["REQUEST_URI"]="/api/me"; require "api.php";' | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
 
 if [[ -z "${TEST_BASE_URL:-}" ]]; then
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost -addext subjectAltName=DNS:localhost \
+    -keyout smtp-key.pem -out smtp-cert.pem >/dev/null 2>&1
+  php test/fake-smtp.php smtp-cert.pem smtp-key.pem >smtp-server.log 2>&1 &
+  smtp_pid=$!
+  export SMTP_HOST=localhost SMTP_PORT=2525 SMTP_USERNAME=test SMTP_PASSWORD=test SMTP_CA_FILE="$PWD/smtp-cert.pem"
   php -S 127.0.0.1:8080 api.php >php-server.log 2>&1 &
   server_pid=$!
-  trap 'kill "$server_pid"; cat php-server.log' EXIT
+  trap 'kill "$server_pid" "${smtp_pid:-}" 2>/dev/null || true; rm -f smtp-cert.pem smtp-key.pem; cat php-server.log smtp-server.log' EXIT
 fi
 
 for _ in {1..20}; do
@@ -67,6 +74,31 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --header 'Origin: https://angreifer.example.test' \
   --request POST \
   "$base_url/api/logout")" = 403
+
+invite_status=$(curl --insecure --silent --output invite.json --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' \
+  --data '{"name":"Eingeladene Person","email":"invite@example.test","role":"fuehrungskraft","unitIds":[1]}' \
+  "$base_url/api/users")
+case "$invite_status" in
+  201)
+    test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+      einsatzberichte --execute="SELECT COUNT(*) FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE u.email='invite@example.test'")" = 1
+    MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+      --execute="DELETE FROM users WHERE email='invite@example.test'"
+    ;;
+  503)
+    test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+      einsatzberichte --execute="SELECT COUNT(*) FROM users WHERE email='invite@example.test'")" = 0
+    ;;
+  *) cat invite.json >&2; exit 1 ;;
+esac
+if [[ -z "${TEST_BASE_URL:-}" ]]; then
+  test "$invite_status" = 201
+  wait "$smtp_pid"
+  smtp_pid=''
+fi
+rm -f invite.json
 
 incident_id=$(curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" \
