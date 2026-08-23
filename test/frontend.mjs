@@ -18,6 +18,9 @@ assert(resetPasswordSource, 'resetPassword fehlt');
 assert.match(resetPasswordSource, /password-reset\/context.*method:'POST'.*JSON\.stringify\(\{token\}\)/);
 assert(resetPasswordSource.indexOf('autocomplete="username"') < resetPasswordSource.indexOf('autocomplete="new-password"'));
 assert.match(resetPasswordSource, /name="username" type="email" autocomplete="username"[^>]+readonly/);
+assert.match(resetPasswordSource, /catch\(error\)\{history\.replaceState\(\{\},'',location\.pathname\)/);
+assert.match(resetPasswordSource, /Link nicht mehr gültig/);
+assert.match(resetPasswordSource, /onclick="forgotPassword\(\)">Neuen Link anfordern/);
 assert.match(html, /fragment\.get\('invite'\)/);
 assert.match(html, /fragment\.get\('reset'\)/);
 
