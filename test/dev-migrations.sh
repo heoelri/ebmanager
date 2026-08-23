@@ -6,6 +6,10 @@ compose=(docker compose -p "$project")
 trap '"${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true' EXIT
 
 "${compose[@]}" up --detach --wait db
+# The healthcheck can briefly report "healthy" while MySQL's entrypoint is
+# still restarting from its temporary init server to the final one, so wait
+# until the socket-based client actually connects before issuing commands.
+until "${compose[@]}" exec -T db mysqladmin --user=root --password=test-password ping --silent; do sleep 1; done
 "${compose[@]}" exec -T db mysql --user=root --password=test-password einsatzberichte <<'SQL'
 DROP TABLE schema_migrations, divera_imports, login_history, password_resets;
 ALTER TABLE reports

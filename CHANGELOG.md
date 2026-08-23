@@ -17,6 +17,10 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 - Die Startseite prüft Datenbankkonfiguration, Verbindung und Schema und zeigt bei Problemen eine konkrete Betriebsseite statt eines allgemeinen internen Fehlers.
 - Eine zentrale Schritt-für-Schritt-Anleitung dokumentiert Erstinstallation, manuelles und automatisches Deployment, Updates, Rollback und Fehlerbehebung auf Webspace.
 
+### Fixed
+
+- Der Dev-Migrations-Test wartet nach dem Healthcheck zusätzlich auf die endgültige MySQL-Instanz, da der Healthcheck kurzzeitig während des internen Neustarts als „healthy“ gilt und Folgebefehle sonst zufällig mit einem Socket-Verbindungsfehler abbrachen.
+
 ### Changed
 
 - Die Einsatzübersicht weist Wehr- und Einheitsleitungen auf neuere, noch nicht importierte DIVERA-Einsätze hin und bietet dort den direkten Import an.
