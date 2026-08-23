@@ -9,4 +9,9 @@ return [
     'setup_token' => '',
     'app_url' => 'https://einsatzberichte.example.org',
     'mail_from' => 'einsatzberichte@example.org',
+    // Optional SMTP fallback for hosts where PHP mail() is unavailable or unreliable.
+    // 'smtp_host' => 'smtp.strato.de',
+    // 'smtp_port' => 587,
+    // 'smtp_username' => 'einsatzberichte@example.org',
+    // 'smtp_password' => 'email-password',
 ];

@@ -6,7 +6,7 @@ Diese Anleitung ist die maßgebliche Betriebsdokumentation für die Erstinstalla
 
 Der Webhoster muss folgende Funktionen bereitstellen:
 
-- PHP 8.2 oder neuer mit `pdo_mysql`
+- PHP 8.2 oder neuer mit `pdo_mysql` und für SMTP mit `openssl`
 - MySQL 8.0 oder neuer
 - Apache mit `mod_rewrite` und erlaubten `.htaccess`-Dateien
 - eine Domain oder Subdomain mit dauerhaft aktiviertem HTTPS
@@ -77,6 +77,30 @@ return [
 
 `app_url` muss die vollständige öffentliche HTTPS-Adresse der Anwendung ohne abschließenden `/` enthalten, beispielsweise `https://berichte.example.org` für den Dokumentenstamm oder `https://www.example.org/ebmanager` für ein Unterverzeichnis. `mail_from` muss eine beim Hoster zulässige Absenderadresse sein. Alternativ können `DB_DSN`, `DB_USER`, `DB_PASSWORD`, `SETUP_TOKEN`, `APP_URL` und `MAIL_FROM` als Umgebungsvariablen gesetzt werden.
 
+### E-Mail-Versand konfigurieren
+
+Die Anwendung versendet Einladungen und Links für vergessene Passwörter standardmäßig mit der PHP-Standardfunktion `mail()`. Ist `mail()` beim Hoster nicht verfügbar oder unzuverlässig, kann alternativ authentifiziertes SMTP mit verpflichtendem STARTTLS konfiguriert werden.
+
+1. Beim Hoster eine Absenderadresse unter der eigenen Domain anlegen oder eine dafür freigegebene Adresse auswählen, beispielsweise `ebmanager@feuerwehr-dahlbruch.com`.
+2. Diese vollständige Adresse als `mail_from` beziehungsweise `MAIL_FROM` konfigurieren. Eine fremde oder nicht freigegebene Absenderdomain wird von vielen Hostern abgewiesen.
+3. `app_url` beziehungsweise `APP_URL` auf die von außen erreichbare HTTPS-Adresse setzen. Dieser Wert erzeugt die Links in den E-Mails und muss bei einer Unterverzeichnisinstallation den Pfad enthalten.
+4. In der PHP-Konfiguration oder im Hosting-Kontrollzentrum prüfen, dass `mail()` nicht deaktiviert ist. Falls der Hoster einen festen Envelope-Sender verlangt, muss dieser dort serverseitig eingerichtet werden.
+5. SPF, DKIM und gegebenenfalls DMARC für die Absenderdomain im DNS nach den Vorgaben des Mailhosters konfigurieren, damit die Nachrichten nicht unnötig als Spam bewertet werden.
+6. Nach der Installation einen Benutzer einladen und zusätzlich „Passwort vergessen“ testen. Spamordner und Mailprotokoll des Hosters prüfen; ein erfolgreicher Aufruf von `mail()` bestätigt nur die Übergabe an das Mailsystem, nicht die spätere Zustellung.
+
+Für STRATO oder vergleichbare Hoster kann `config.local.php` um folgende Werte ergänzt werden:
+
+```php
+'smtp_host' => 'smtp.strato.de',
+'smtp_port' => 587,
+'smtp_username' => 'ebmanager@feuerwehr-dahlbruch.com',
+'smtp_password' => 'passwort-des-email-postfachs',
+```
+
+`smtp_username` ist bei STRATO die vollständige E-Mail-Adresse; `smtp_password` ist das Passwort dieses Postfachs. Sobald `smtp_host` gesetzt ist, verwendet die Anwendung SMTP statt `mail()`. Alle SMTP-Werte müssen dann vollständig sein. Die entsprechenden Umgebungsvariablen heißen `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME` und `SMTP_PASSWORD`. Das optionale `SMTP_CA_FILE` ist nur für Server mit einer privaten Zertifizierungsstelle vorgesehen; öffentliche Hoster wie STRATO benötigen es nicht.
+
+Kann weder PHP `mail()` noch der konfigurierte SMTP-Server eine Nachricht annehmen, wird ein neu angelegter Benutzer wieder entfernt und die Oberfläche meldet den Versandfehler. Die Passwort-Wiederherstellung bleibt ebenfalls nicht verfügbar.
+
 ## 6. Dateien hochladen
 
 Folgende Struktur muss im gewählten Zielverzeichnis entstehen:
@@ -84,12 +108,13 @@ Folgende Struktur muss im gewählten Zielverzeichnis entstehen:
 ```text
 .htaccess
 api.php
+support.php
 config.local.php
 public/
   index.html
 ```
 
-1. Das gewählte Zielverzeichnis anlegen und `.htaccess`, `api.php`, `config.local.php` sowie `public/index.html` per SFTP dorthin hochladen.
+1. Das gewählte Zielverzeichnis anlegen und `.htaccess`, `api.php`, `support.php`, `config.local.php` sowie `public/index.html` per SFTP dorthin hochladen.
 2. Prüfen, dass `.htaccess` tatsächlich vorhanden ist; einige Dateiübertragungsprogramme blenden versteckte Dateien aus.
 3. Für Verzeichnisse Berechtigungen wie `755` und für öffentliche Dateien `644` verwenden, sofern der Hoster keine anderen Vorgaben macht.
 4. `config.local.php` so restriktiv wie vom Hoster unterstützt auf `600` oder `640` setzen.
@@ -116,6 +141,7 @@ sftp> mkdir ebmanager
 sftp> cd ebmanager
 sftp> put .htaccess
 sftp> put api.php
+sftp> put support.php
 sftp> put config.local.php
 sftp> mkdir public
 sftp> put public/index.html public/index.html
@@ -137,17 +163,18 @@ Die Ersteinrichtung ist nach dem ersten Benutzer dauerhaft geschlossen.
 ## 8. Funktionen nach der Installation prüfen
 
 1. Anmelden und wieder abmelden.
-2. In der Verwaltung eine Testeinheit oder einen Testbenutzer anlegen, falls dies fachlich sinnvoll ist.
-3. Einen manuellen Einsatz und einen Bericht anlegen.
-4. Über „Passwort vergessen“ prüfen, dass der Webhoster E-Mails mit dem korrekten HTTPS-Link versendet.
-5. Optional pro Einheit einen DIVERA-Access-Key hinterlegen und einen lesenden Abruf durchführen.
-6. Serverprotokolle auf PHP-, Apache- oder Mailfehler prüfen, ohne Zugangsdaten oder DIVERA-Schlüssel weiterzugeben.
+2. Auf der Seite „System“ Datenbank- und E-Mail-Status prüfen; dort dürfen keine Kennwörter oder Schlüssel erscheinen.
+3. In der Verwaltung einen Testbenutzer anlegen und prüfen, dass die Einladung ankommt, der Link die Anwendung öffnet und der Benutzer sein Passwort selbst setzen kann.
+4. Einen manuellen Einsatz und einen Bericht anlegen.
+5. Über „Passwort vergessen“ prüfen, dass der Webhoster E-Mails mit dem korrekten HTTPS-Link versendet.
+6. Optional pro Einheit einen DIVERA-Access-Key hinterlegen und einen lesenden Abruf durchführen.
+7. Serverprotokolle auf PHP-, Apache- oder Mailfehler prüfen, ohne Zugangsdaten oder DIVERA-Schlüssel weiterzugeben.
 
 ## 9. Automatisches Deployment mit GitHub Actions einrichten
 
 Das Repository deployt nach erfolgreichen Tests eines Pushs auf `main` den exakt getesteten Commit. Der Workflow verwendet das GitHub-Environment `hiba`.
 
-Der derzeitige GitHub-Workflow unterstützt explizites FTPS. Bietet der Webspace ausschließlich SFTP an, müssen bis zu einer entsprechenden Workflow-Umstellung die Schritte unter „Upload per SFTP mit Passwort“ verwendet werden.
+Der GitHub-Workflow unterstützt SFTP wahlweise mit privatem Schlüssel oder Passwort und prüft den Host-Key verpflichtend.
 
 1. Im GitHub-Repository unter **Settings → Environments** das Environment `hiba` anlegen.
 2. Gewünschte Schutzregeln wie erforderliche Freigaben konfigurieren.
@@ -166,7 +193,7 @@ Der derzeitige GitHub-Workflow unterstützt explizites FTPS. Bietet der Webspace
 4. Prüfen, dass der Server SFTP über SSH anbietet und der ermittelte Host-Key mit der Angabe des Hosters übereinstimmt.
 5. Einen Push auf `main` durchführen und zuerst den Workflow `Tests`, danach den Workflow `Deployment` beobachten.
 
-Der Workflow lädt ausschließlich `.htaccess`, `api.php` und `public/index.html` hoch. `config.local.php`, Datenbankzugangsdaten, `schema.sql` und Migrationen werden absichtlich nicht automatisiert übertragen.
+Der Workflow lädt ausschließlich `.htaccess`, `api.php`, `support.php` und `public/index.html` hoch. `config.local.php`, Datenbankzugangsdaten, `schema.sql` und Migrationen werden absichtlich nicht automatisiert übertragen.
 
 Weitere Ziele wie `devpreview` benötigen ein eigenes GitHub-Environment, eigene Secrets, eigene Schutzregeln und eine eigene Concurrency-Gruppe. Zugangsdaten aus `hiba` dürfen nicht wiederverwendet werden.
 
@@ -185,7 +212,7 @@ Wenn das automatische Deployment verwendet wird, müssen erforderliche Migration
 ## 11. Rollback
 
 1. Vor jeder Aktualisierung eine Datenbanksicherung und eine Kopie der bisherigen Anwendungsdateien erstellen.
-2. Bei einem reinen Anwendungsfehler die vorherigen Versionen von `.htaccess`, `api.php` und `public/index.html` wiederherstellen.
+2. Bei einem reinen Anwendungsfehler die vorherigen Versionen von `.htaccess`, `api.php`, `support.php` und `public/index.html` wiederherstellen.
 3. Bei einer inkompatiblen Datenbankänderung die zum Release dokumentierten Rollback-Schritte verwenden oder die vorherige Datenbanksicherung einspielen.
 4. Nach einem Rollback Anmeldung und zentrale Funktionen erneut prüfen.
 

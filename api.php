@@ -1,10 +1,7 @@
 <?php
 declare(strict_types=1);
 
-final class ApiError extends RuntimeException
-{
-    public function __construct(public int $status, string $message) { parent::__construct($message); }
-}
+require __DIR__ . '/support.php';
 
 const ROLES = ['wehrleitung', 'einheitsleitung', 'fuehrungskraft'];
 const INCIDENT_TYPES = [
@@ -34,43 +31,6 @@ const CLASSIFICATIONS = [
     ]
 ];
 
-function respond(int $status, mixed $value): never
-{
-    http_response_code($status);
-    header('Content-Type: application/json; charset=utf-8');
-    header('Cache-Control: no-store');
-    echo json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-    exit;
-}
-
-function config(): array
-{
-    static $config;
-    if ($config !== null) return $config;
-    $local = __DIR__ . DIRECTORY_SEPARATOR . 'config.local.php';
-    $config = is_file($local) ? require $local : [];
-    foreach (['DB_DSN' => 'dsn', 'DB_USER' => 'user', 'DB_PASSWORD' => 'password', 'SETUP_TOKEN' => 'setup_token', 'APP_URL' => 'app_url', 'MAIL_FROM' => 'mail_from'] as $environment => $key) {
-        $value = getenv($environment);
-        if ($value !== false) $config[$key] = $value;
-    }
-    return $config;
-}
-
-function db(): PDO
-{
-    static $pdo;
-    if ($pdo) return $pdo;
-    $config = config();
-    if (empty($config['dsn'])) throw new ApiError(503, 'Datenbankzugang ist nicht konfiguriert. Prüfen Sie DB_DSN oder config.local.php.');
-    $pdo = new PDO($config['dsn'], $config['user'] ?? '', $config['password'] ?? '', [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false
-    ]);
-    $pdo->exec('SET NAMES utf8mb4');
-    return $pdo;
-}
-
 function databaseConfigurationError(): ?string
 {
     if (empty(config()['dsn'])) return 'Datenbankzugang ist nicht konfiguriert. Prüfen Sie DB_DSN oder config.local.php.';
@@ -88,134 +48,19 @@ function databaseConfigurationError(): ?string
     return null;
 }
 
-function query(string $sql, array $params = []): PDOStatement
+function sendPasswordEmail(array $user, string $token, bool $invitation = false): bool
 {
-    $statement = db()->prepare($sql);
-    $statement->execute($params);
-    return $statement;
-}
-
-function one(string $sql, array $params = []): ?array
-{
-    $row = query($sql, $params)->fetch();
-    return $row === false ? null : $row;
-}
-
-function transaction(callable $work): mixed
-{
-    db()->beginTransaction();
-    try {
-        $result = $work();
-        db()->commit();
-        return $result;
-    } catch (Throwable $error) {
-        if (db()->inTransaction()) db()->rollBack();
-        throw $error;
-    }
-}
-
-function input(): array
-{
-    $length = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
-    if ($length > 1_000_000) throw new ApiError(413, 'Anfrage zu groß');
-    $raw = file_get_contents('php://input', false, null, 0, 1_000_001);
-    if ($raw === false || strlen($raw) > 1_000_000) throw new ApiError(413, 'Anfrage zu groß');
-    try {
-        $data = json_decode($raw ?: '{}', true, 512, JSON_THROW_ON_ERROR);
-    } catch (JsonException) {
-        throw new ApiError(400, 'Ungültiges JSON');
-    }
-
-    if (!is_array($data)) throw new ApiError(400, 'Ungültiges JSON');
-    return $data;
-}
-
-function requestIsHttps(): bool
-{
-    return strtolower((string)($_SERVER['HTTPS'] ?? '')) === 'on';
-}
-
-function sessionCookieName(): string
-{
-    return requestIsHttps() ? '__Host-session' : 'session';
-}
-
-function requestPath(): string
-{
-    $path = parse_url($_SERVER['REQUEST_URI'] ?? '/api', PHP_URL_PATH);
-    $path = is_string($path) ? $path : '/api';
-    $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
-    if (basename($script) === 'api.php') {
-        $base = rtrim(str_replace('\\', '/', dirname($script)), '/.');
-        if ($base !== '' && str_starts_with($path, "$base/")) $path = substr($path, strlen($base));
-    }
-    return rawurldecode($path);
-}
-
-function assertRequestOrigin(string $method): void
-{
-    if (in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)) return;
-    $contentType = strtolower(trim(explode(';', (string)($_SERVER['CONTENT_TYPE'] ?? ''))[0]));
-    if ($contentType !== 'application/json') throw new ApiError(415, 'Content-Type muss application/json sein');
-    $origin = rtrim((string)($_SERVER['HTTP_ORIGIN'] ?? ''), '/');
-    if ($origin === '') return;
-    $host = (string)($_SERVER['HTTP_HOST'] ?? '');
-    $scheme = requestIsHttps() ? 'https' : 'http';
-    if (!preg_match('/^[A-Za-z0-9.-]+(?::[0-9]+)?$/', $host) || !hash_equals("$scheme://$host", $origin)) {
-        throw new ApiError(403, 'Anfrageursprung ist ungültig');
-    }
-}
-
-function textLength(string $value): int
-{
-    return function_exists('mb_strlen') ? mb_strlen($value, 'UTF-8') : strlen($value);
-}
-
-function required(mixed $value, string $name, int $max = 10_000): string
-{
-    $text = trim(is_scalar($value) ? (string)$value : '');
-    if ($text === '' || textLength($text) > $max) throw new ApiError(400, "$name ist ungültig");
-    return $text;
-}
-
-function optional(mixed $value, string $name, int $max = 10_000): string
-{
-    $text = trim(is_scalar($value ?? '') ? (string)($value ?? '') : '');
-    if (textLength($text) > $max) throw new ApiError(400, "$name ist zu lang");
-    return $text;
-}
-
-function emailAddress(mixed $value): string
-{
-    $email = required($value, 'E-Mail', 320);
-    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) throw new ApiError(400, 'E-Mail ist ungültig');
-    return $email;
-}
-
-function passwordResetSettings(): array
-{
-    $settings = config();
-    $url = rtrim((string)($settings['app_url'] ?? ''), '/');
-    $from = (string)($settings['mail_from'] ?? '');
-    if (!filter_var($url, FILTER_VALIDATE_URL) || !str_starts_with($url, 'https://') || !filter_var($from, FILTER_VALIDATE_EMAIL)) {
-        throw new ApiError(503, 'Passwort-Wiederherstellung ist nicht konfiguriert');
-    }
-    return compact('url', 'from');
-}
-
-function sendPasswordReset(array $user, string $token): bool
-{
-    ['url' => $url, 'from' => $from] = passwordResetSettings();
-    $link = "$url/?reset=$token";
-    $message = "Hallo {$user['name']},\n\nüber diesen Link können Sie innerhalb von 30 Minuten ein neues Passwort vergeben:\n$link\n\nFalls Sie dies nicht angefordert haben, ignorieren Sie diese Nachricht.";
-    return mail($user['email'], 'Passwort zuruecksetzen', $message, "From: $from\r\nContent-Type: text/plain; charset=UTF-8");
-}
-
-function finiteNumber(mixed $value, string $name): int|float|null
-{
-    if ($value === null || $value === '') return null;
-    if (!is_numeric($value) || !is_finite((float)$value)) throw new ApiError(400, "$name ist ungültig");
-    return (float)$value == (int)$value ? (int)$value : (float)$value;
+    $settings = mailSettings();
+    ['url' => $url, 'from' => $from] = $settings;
+    $link = "$url/?" . ($invitation ? 'invite' : 'reset') . "=$token";
+    $subject = $invitation ? 'Konto aktivieren' : 'Passwort zuruecksetzen';
+    $message = $invitation
+        ? "Hallo {$user['name']},\n\nüber diesen Link können Sie innerhalb von 30 Minuten Ihr Konto aktivieren und ein Passwort vergeben:\n$link\n\nNach Ablauf können Sie über „Passwort vergessen“ einen neuen Link anfordern."
+        : "Hallo {$user['name']},\n\nüber diesen Link können Sie innerhalb von 30 Minuten ein neues Passwort vergeben:\n$link\n\nFalls Sie dies nicht angefordert haben, ignorieren Sie diese Nachricht.";
+    return $settings['smtpHost'] !== ''
+        ? smtpSend($settings, $user['email'], $subject, $message)
+        // mail() failures are returned as 503 instead of leaking a PHP warning into the JSON response.
+        : @mail($user['email'], $subject, $message, "From: $from\r\nContent-Type: text/plain; charset=UTF-8");
 }
 
 function isoDate(mixed $value): string
@@ -253,7 +98,7 @@ function currentUser(): ?array
         'SELECT u.*,o.name organization_name FROM sessions s
          JOIN users u ON u.id=s.user_id JOIN organizations o ON o.id=u.organization_id
          WHERE s.token=? AND s.expires_at>UTC_TIMESTAMP()',
-        [$token]
+        [hash('sha256', $token)]
     );
     if (!$user) return null;
     $user['unitIds'] = array_map('intval', query('SELECT unit_id FROM user_units WHERE user_id=?', [$user['id']])->fetchAll(PDO::FETCH_COLUMN));
@@ -268,6 +113,7 @@ function assertRole(array $user, string ...$roles): void
 
 function assertOwnUnit(array $user, int $unitId): void
 {
+    // Wehrleitung is organization-wide; unit lookups still enforce tenant ownership.
     if ($user['role'] !== 'wehrleitung' && !in_array($unitId, $user['unitIds'], true)) {
         throw new ApiError(403, 'Keine Berechtigung für diese Einheit');
     }
@@ -291,6 +137,7 @@ function replaceMemberships(int $userId, array $unitIds): void
 function vehicleSnapshots(mixed $value): array
 {
     if (!is_array($value)) throw new ApiError(400, 'Fahrzeuge sind ungültig');
+    // Preserve labels and ownership as they were when the incident was imported.
     return array_map(function ($vehicle) {
         if (is_string($vehicle)) return required($vehicle, 'Fahrzeug', 200);
         if (!is_array($vehicle)) throw new ApiError(400, 'Fahrzeug ist ungültig');
@@ -352,6 +199,7 @@ function replaceCrew(int $reportId, int $incidentId, int $unitId, mixed $crew, i
         $memberId = (int)($item['memberId'] ?? 0);
         $vehicle = trim((string)($item['vehicle'] ?? ''));
         $role = (string)($item['role'] ?? 'besatzung');
+        // Driver and unit leader are unique per vehicle; crew members are not.
         $slot = $vehicle && $role !== 'besatzung' ? "$vehicle:$role" : '';
         $member = one(
             'SELECT m.name FROM members m JOIN member_units mu ON mu.member_id=m.id
@@ -384,6 +232,7 @@ function diveraGet(string $url, string $error): array
         'method' => 'GET', 'timeout' => 20, 'ignore_errors' => true,
         'header' => "Accept: application/json\r\nUser-Agent: Einsatzberichte-PHP\r\n"
     ]]);
+    // Convert transport warnings and non-2xx responses into one stable API error.
     $raw = @file_get_contents($url, false, $context);
     $status = 0;
     foreach ($http_response_header ?? [] as $header) if (preg_match('/^HTTP\/\S+\s+(\d+)/', $header, $match)) $status = (int)$match[1];
@@ -492,8 +341,8 @@ try {
         $cookieName = sessionCookieName();
         transaction(function () use ($token, $login, $cookieName) {
             query('DELETE FROM sessions WHERE expires_at<=UTC_TIMESTAMP()');
-            if (preg_match('/^[a-f0-9]{64}$/', $_COOKIE[$cookieName] ?? '')) query('DELETE FROM sessions WHERE token=?', [$_COOKIE[$cookieName]]);
-            query('INSERT INTO sessions(token,user_id,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 12 HOUR)', [$token, $login['id']]);
+            if (preg_match('/^[a-f0-9]{64}$/', $_COOKIE[$cookieName] ?? '')) query('DELETE FROM sessions WHERE token=?', [hash('sha256', $_COOKIE[$cookieName])]);
+            query('INSERT INTO sessions(token,user_id,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 12 HOUR)', [hash('sha256', $token), $login['id']]);
         });
         setcookie($cookieName, $token, [
             'expires' => time() + 43200, 'path' => '/', 'secure' => requestIsHttps(),
@@ -505,7 +354,7 @@ try {
     if ($method === 'POST' && $path === '/api/password-reset/request') {
         $data = input();
         $email = emailAddress($data['email'] ?? null);
-        passwordResetSettings();
+        mailSettings();
         $user = one('SELECT id,name,email FROM users WHERE email=?', [$email]);
         if ($user) {
             $recent = one('SELECT id FROM password_resets WHERE user_id=? AND requested_at>UTC_TIMESTAMP()-INTERVAL 5 MINUTE', [$user['id']]);
@@ -515,12 +364,13 @@ try {
                     query('DELETE FROM password_resets WHERE expires_at<=UTC_TIMESTAMP() OR user_id=?', [$user['id']]);
                     query('INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 30 MINUTE)', [$user['id'], hash('sha256', $token)]);
                 });
-                if (!sendPasswordReset($user, $token)) {
+                if (!sendPasswordEmail($user, $token)) {
                     query('DELETE FROM password_resets WHERE user_id=?', [$user['id']]);
                     error_log('Passwort-Wiederherstellungs-E-Mail konnte nicht versendet werden');
                 }
             }
         }
+        // The response never reveals whether the address belongs to an account.
         respond(202, ['ok' => true]);
     }
 
@@ -542,7 +392,7 @@ try {
 
     if ($method === 'POST' && $path === '/api/logout') {
         $cookieName = sessionCookieName();
-        if (isset($_COOKIE[$cookieName])) query('DELETE FROM sessions WHERE token=?', [$_COOKIE[$cookieName]]);
+        if (preg_match('/^[a-f0-9]{64}$/', $_COOKIE[$cookieName] ?? '')) query('DELETE FROM sessions WHERE token=?', [hash('sha256', $_COOKIE[$cookieName])]);
         setcookie($cookieName, '', [
             'expires' => 1, 'path' => '/', 'secure' => requestIsHttps(),
             'httponly' => true, 'samesite' => 'Strict'
@@ -555,6 +405,59 @@ try {
             'id' => $user['id'], 'organization_id' => $user['organization_id'],
             'organization_name' => $user['organization_name'], 'name' => $user['name'],
             'email' => $user['email'], 'role' => $user['role'], 'unitIds' => $user['unitIds']
+        ]);
+    }
+
+    if ($method === 'GET' && $path === '/api/system') {
+        assertRole($user, 'wehrleitung');
+        $settings = config();
+        $databaseError = databaseConfigurationError();
+        $database = ['status' => $databaseError ?? 'Bereit'];
+        if ($databaseError === null) {
+            $database['name'] = (string)db()->query('SELECT DATABASE()')->fetchColumn();
+            $database['serverVersion'] = (string)db()->getAttribute(PDO::ATTR_SERVER_VERSION);
+        }
+        $email = [
+            'configured' => false,
+            'transport' => empty($settings['smtp_host']) ? 'PHP mail()' : 'SMTP mit STARTTLS',
+            'from' => (string)($settings['mail_from'] ?? '')
+        ];
+        try {
+            $mail = mailSettings();
+            $email = array_replace($email, [
+                'configured' => true,
+                'host' => $mail['smtpHost'],
+                'port' => $mail['smtpHost'] === '' ? null : $mail['smtpPort'],
+                'username' => $mail['smtpHost'] === '' ? '' : $mail['smtpUsername']
+            ]);
+        } catch (ApiError $error) {
+            $email['error'] = $error->getMessage();
+        }
+        $systemUnits = query(
+            'SELECT id,name,(divera_access_key IS NOT NULL) diveraConfigured FROM units WHERE organization_id=? ORDER BY name',
+            [$user['organization_id']]
+        )->fetchAll();
+        foreach ($systemUnits as &$unit) {
+            $unit['id'] = (int)$unit['id'];
+            $unit['diveraConfigured'] = (bool)$unit['diveraConfigured'];
+        }
+        $systemUsers = query(
+            "SELECT u.id,u.name,u.email,u.role,
+             COALESCE((SELECT GROUP_CONCAT(un.name ORDER BY un.name SEPARATOR ', ') FROM user_units uu JOIN units un ON un.id=uu.unit_id WHERE uu.user_id=u.id),'') units
+             FROM users u WHERE u.organization_id=? ORDER BY u.name",
+            [$user['organization_id']]
+        )->fetchAll();
+        foreach ($systemUsers as &$systemUser) $systemUser['id'] = (int)$systemUser['id'];
+        respond(200, [
+            'application' => [
+                'url' => (string)($settings['app_url'] ?? ''),
+                'phpVersion' => PHP_VERSION,
+                'setupConfigured' => strlen((string)($settings['setup_token'] ?? '')) >= 32
+            ],
+            'database' => $database,
+            'email' => $email,
+            'units' => $systemUnits,
+            'users' => $systemUsers
         ]);
     }
 
@@ -607,19 +510,28 @@ try {
         assertRole($user, 'wehrleitung');
         $data = input();
         if (!in_array($data['role'] ?? null, ROLES, true)) throw new ApiError(400, 'Rolle ist ungültig');
-        $password = required($data['password'] ?? null, 'Passwort', 200);
-        if (textLength($password) < 10) throw new ApiError(400, 'Passwort muss mindestens 10 Zeichen haben');
         $unitIds = membershipIds($data, $user['organization_id']);
-        $id = transaction(function () use ($data, $password, $unitIds, $user) {
+        $name = required($data['name'] ?? null, 'Name', 200);
+        $email = emailAddress($data['email'] ?? null);
+        mailSettings();
+        $token = bin2hex(random_bytes(32));
+        $id = transaction(function () use ($data, $name, $email, $token, $unitIds, $user) {
+            // An unknown random password keeps the account unusable until activation.
             query(
                 'INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) VALUES(?,?,?,?,?,?)',
-                [$user['organization_id'], $unitIds[0] ?? null, required($data['name'] ?? null, 'Name', 200),
-                 emailAddress($data['email'] ?? null), password_hash($password, PASSWORD_DEFAULT), $data['role']]
+                [$user['organization_id'], $unitIds[0] ?? null, $name, $email,
+                 password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT), $data['role']]
             );
             $id = (int)db()->lastInsertId();
             replaceMemberships($id, $unitIds);
+            query('INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 30 MINUTE)', [$id, hash('sha256', $token)]);
             return $id;
         });
+        if (!sendPasswordEmail(['name' => $name, 'email' => $email], $token, true)) {
+            query('DELETE FROM users WHERE id=?', [$id]);
+            error_log('Einladungs-E-Mail konnte nicht versendet werden');
+            throw new ApiError(503, 'Einladungs-E-Mail konnte nicht versendet werden');
+        }
         respond(201, ['id' => $id]);
     }
 
@@ -633,6 +545,12 @@ try {
         $password = (string)($data['password'] ?? '');
         if ($password && textLength($password) < 10) throw new ApiError(400, 'Passwort muss mindestens 10 Zeichen haben');
         transaction(function () use ($data, $password, $unitIds, $existing) {
+            query('SELECT id FROM organizations WHERE id=? FOR UPDATE', [$existing['organization_id']]);
+            $current = one('SELECT role FROM users WHERE id=? AND organization_id=?', [$existing['id'], $existing['organization_id']]);
+            if ($current && $current['role'] === 'wehrleitung' && $data['role'] !== 'wehrleitung'
+                && !one("SELECT id FROM users WHERE organization_id=? AND role='wehrleitung' AND id<>? LIMIT 1", [$existing['organization_id'], $existing['id']])) {
+                throw new ApiError(409, 'Mindestens eine Wehrführung ist erforderlich');
+            }
             query(
                 'UPDATE users SET unit_id=?,name=?,email=?,role=?,password_hash=? WHERE id=?',
                 [$unitIds[0] ?? null, required($data['name'] ?? null, 'Name', 200),
@@ -756,6 +674,7 @@ try {
         if (!$mayEdit) throw new ApiError(403, 'Der Bericht kann nicht bearbeitet werden');
         $data = input();
         transaction(function () use ($data, $foundReport, $user) {
+            // Locking closes the race between editing and releasing the same report.
             $lockedReport = one('SELECT * FROM reports WHERE id=? FOR UPDATE', [$foundReport['id']]);
             if (!$lockedReport || $lockedReport['status'] !== 'draft') {
                 throw new ApiError(409, 'Der Bericht wurde bereits freigegeben');
@@ -778,7 +697,8 @@ try {
         $foundReport = report((int)$match[1], $user['organization_id']);
         if (!$foundReport) throw new ApiError(404, 'Bericht nicht gefunden');
         assertOwnUnit($user, (int)$foundReport['unit_id']);
-        query("UPDATE reports SET status='released',released_at=UTC_TIMESTAMP() WHERE id=?", [$foundReport['id']]);
+        $released = query("UPDATE reports SET status='released',released_at=UTC_TIMESTAMP() WHERE id=? AND status='draft'", [$foundReport['id']]);
+        if ($released->rowCount() !== 1) throw new ApiError(409, 'Der Bericht wurde bereits freigegeben');
         respond(200, ['ok' => true]);
     }
 
@@ -821,6 +741,7 @@ try {
             $qualifications = [];
             foreach (($cluster['qualification'] ?? []) as $externalId => $qualification) {
                 $diveraId = (string)($qualification['id'] ?? $externalId);
+                // LAST_INSERT_ID(id) also returns the id of an existing upserted row.
                 query(
                     'INSERT INTO qualifications(unit_id,divera_id,name,shortname) VALUES(?,?,?,?)
                      ON DUPLICATE KEY UPDATE name=VALUES(name),shortname=VALUES(shortname),id=LAST_INSERT_ID(id)',
@@ -866,6 +787,7 @@ try {
         if (!$foundUnit) throw new ApiError(404, 'Einheit nicht gefunden');
         if (!$foundUnit['divera_access_key']) throw new ApiError(400, 'DIVERA ist nicht konfiguriert');
         $requestedId = required(input()['id'] ?? null, 'DIVERA-ID', 200);
+        // Trust only the id from the browser; reload all incident data from DIVERA.
         $verified = null;
         foreach (diveraData($foundUnit)['alarms'] as $alarm) {
             if ($alarm['id'] === $requestedId) { $verified = $alarm; break; }

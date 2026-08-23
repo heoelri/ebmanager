@@ -1,8 +1,24 @@
 # Security Review
 
+## API-Hardening vom 23. August 2026
+
+Die im vollständigen API-Review priorisierten Befunde zu Transport, Sitzungen und Zustandsinvarianten wurden umgesetzt. Apache erzwingt HTTPS und sendet HSTS. Der zufällige Sitzungstoken bleibt ausschließlich im `Secure`-Cookie; MySQL speichert nur seinen SHA-256-Hash. Rollenänderungen werden pro Organisation serialisiert und dürfen die letzte Wehrführung nicht entfernen. Berichtsfreigaben aktualisieren ausschließlich Entwürfe und überschreiben einen vorhandenen Freigabezeitpunkt nicht. Die Migration `002-hash-session-tokens.sql` überführt bestehende Sitzungen ohne Klartextverlust oder Abmeldung.
+
+## Systemübersicht vom 23. August 2026
+
+`GET /api/system` wurde auf Rollenprüfung und Konfigurationslecks geprüft. Nur `wehrleitung` erhält die Übersicht. Die API gibt ausschließlich kuratierte Statuswerte, Versionen, Namen, Rollen und boolesche Konfigurationsmerkmale aus; DSN, Datenbank- und SMTP-Kennwörter, Einrichtungstoken sowie DIVERA-Schlüssel bleiben serverseitig. Ein Smoke-Test prüft sowohl die Sperre für andere Rollen als auch das Fehlen geheimnisverdächtiger Schlüsselnamen.
+
+## SMTP-Versand vom 23. August 2026
+
+Der optionale SMTP-Versand verwendet Port 587 mit verpflichtendem STARTTLS, aktiviert Zertifikats- und Hostnamenprüfung und authentifiziert sich erst nach dem TLS-Handshake. SMTP-Passwörter werden ausschließlich aus der nicht versionierten Konfiguration oder aus Umgebungsvariablen gelesen und weder geloggt noch an den Browser übertragen. Unvollständige SMTP-Konfigurationen werden abgelehnt; ohne `smtp_host` bleibt PHP `mail()` der Fallback.
+
+## Benutzereinladungen vom 23. August 2026
+
+Die Benutzeranlage verwendet denselben 256-Bit-Einmaltoken und denselben bestätigten HTTPS-Link wie die Passwort-Wiederherstellung. Bis zur Aktivierung besitzt das Konto nur einen unbekannten zufälligen Passwort-Hash. Schlägt die Übergabe der Einladungs-E-Mail an den konfigurierten Mailtransport fehl, werden Benutzer, Einheitszuordnungen und Token wieder gelöscht. Einladungen laufen nach 30 Minuten ab; danach kann der Benutzer über „Passwort vergessen“ einen neuen Link anfordern.
+
 ## Passwort-Wiederherstellung vom 22. August 2026
 
-Der neue öffentliche Wiederherstellungsfluss wurde auf Kontoermittlung, Token-Leaks, Token-Wiederverwendung, Sitzungsfortbestand, CSRF und manipulierte Links geprüft. Die API antwortet unabhängig vom Vorhandensein eines Kontos gleich, speichert nur den SHA-256-Hash eines zufälligen 256-Bit-Tokens, begrenzt Anforderungen pro Benutzer auf eine Nachricht in fünf Minuten und lässt Tokens nach 30 Minuten ablaufen. `APP_URL` muss eine konfigurierte HTTPS-URL sein und wird nicht aus dem manipulierbaren Host-Header erzeugt. Ein erfolgreicher Reset löscht Token und sämtliche Sitzungen in derselben Transaktion. Der Webhoster übernimmt den Versand über PHP `mail()`; eine fehlgeschlagene Übergabe wird ohne Adresse oder Token protokolliert und der unzustellbare Token gelöscht. Als verbleibende Betriebsanforderung sollte der Webhoster zusätzlich allgemeines HTTP-Rate-Limiting aktivieren, falls automatisierter Missbrauch beobachtet wird.
+Der neue öffentliche Wiederherstellungsfluss wurde auf Kontoermittlung, Token-Leaks, Token-Wiederverwendung, Sitzungsfortbestand, CSRF und manipulierte Links geprüft. Die API antwortet unabhängig vom Vorhandensein eines Kontos gleich, speichert nur den SHA-256-Hash eines zufälligen 256-Bit-Tokens, begrenzt Anforderungen pro Benutzer auf eine Nachricht in fünf Minuten und lässt Tokens nach 30 Minuten ablaufen. `APP_URL` muss eine konfigurierte HTTPS-URL sein und wird nicht aus dem manipulierbaren Host-Header erzeugt. Ein erfolgreicher Reset löscht Token und sämtliche Sitzungen in derselben Transaktion. Eine fehlgeschlagene Übergabe an PHP `mail()` oder SMTP wird ohne Adresse oder Token protokolliert und der unzustellbare Token gelöscht. Als verbleibende Betriebsanforderung sollte der Webhoster zusätzlich allgemeines HTTP-Rate-Limiting aktivieren, falls automatisierter Missbrauch beobachtet wird.
 
 ## Vollreview vom 22. August 2026
 
@@ -17,7 +33,7 @@ Secrets, HTTPS und externe DIVERA-Aufrufe.
 | Schweregrad | Befund | Umsetzung |
 |---|---|---|
 | Hoch | Eine ungeschützte Ersteinrichtung könnte vom ersten externen Aufrufer übernommen werden. | `/api/setup` verlangt ein zufälliges `SETUP_TOKEN` mit mindestens 32 Zeichen und vergleicht es mit `hash_equals`. Nach dem ersten Benutzer ist die Route dauerhaft geschlossen. |
-| Hoch | Beim vorübergehenden HTTP-Betrieb können Sitzungscookies und Anmeldedaten im Netzwerk mitgelesen werden. | Das HTTP-Cookie bleibt `HttpOnly` und `SameSite=Strict`, die Origin-Prüfung bleibt aktiv. Sobald HTTPS verfügbar ist, verwendet die Anwendung automatisch wieder `Secure` und `__Host-session`; Weiterleitung und HSTS müssen dann in `.htaccess` reaktiviert werden. |
+| Hoch | Sitzungscookies und Anmeldedaten könnten über unverschlüsseltes HTTP mitgelesen werden. | `.htaccess` leitet HTTP dauerhaft auf HTTPS um und setzt HSTS; Cookies sind `Secure`, `HttpOnly` und `SameSite=Strict`. |
 | Mittel | Eine Passwortänderung ließ bereits bestehende Sitzungen aktiv. | Bei einer Passwortänderung werden alle Sitzungen des Benutzers innerhalb derselben Transaktion gelöscht. |
 | Mittel | Der Einsatzimport vertraute den vom Browser gesendeten Einsatzdetails und konnte gemeinsame Einsatzdaten überschreiben. | Der Browser sendet nur die DIVERA-ID. Das Backend lädt den Einsatz mit dem serverseitigen Schlüssel erneut per `GET` und speichert ausschließlich diese verifizierten Daten. |
 | Mittel | `SameSite=Strict` allein schützte auf Shared Hosting nicht vor schreibenden Anfragen einer fremden Subdomain derselben Site. | Alle schreibenden Anfragen erfordern `application/json`; vorhandene `Origin`-Header müssen exakt der Anwendungsorigin einschließlich des tatsächlich verwendeten Schemas entsprechen. |
@@ -78,6 +94,6 @@ Secrets, HTTPS und externe DIVERA-Aufrufe.
   Entwicklungsumgebung bestimmt.
 - Die Docker-Webports sind ausdrücklich an `127.0.0.1` gebunden; MySQL wird
   nicht auf dem Host veröffentlicht.
-- Der Webcontainer bindet nur `api.php`, `.htaccess` und `public/`
+- Der Webcontainer bindet nur `api.php`, `support.php`, `.htaccess` und `public/`
   schreibgeschützt ein; eine vorhandene `config.local.php` gelangt nicht in
   den Container.

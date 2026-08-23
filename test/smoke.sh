@@ -5,6 +5,8 @@ export DB_DSN="${DB_DSN:-mysql:host=127.0.0.1;port=3306;dbname=einsatzberichte;c
 export DB_USER="${DB_USER:-root}"
 export DB_PASSWORD="${DB_PASSWORD:-test-password}"
 export SETUP_TOKEN="${SETUP_TOKEN:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
+export APP_URL="${APP_URL:-https://localhost}"
+export MAIL_FROM="${MAIL_FROM:-einsatzberichte@localhost.test}"
 base_url="${TEST_BASE_URL:-http://127.0.0.1:8080}"
 session_cookie='session'
 [[ "$base_url" == https://* ]] && session_cookie='__Host-session'
@@ -21,9 +23,20 @@ DB_DSN='' php -r '$_SERVER["REQUEST_METHOD"]="GET"; $_SERVER["REQUEST_URI"]="/eb
 DB_DSN='' php -r '$_COOKIE["session"]=str_repeat("a",64); $_SERVER["REQUEST_METHOD"]="GET"; $_SERVER["REQUEST_URI"]="/api/me"; require "api.php";' | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
 
 if [[ -z "${TEST_BASE_URL:-}" ]]; then
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost -addext subjectAltName=DNS:localhost \
+    -keyout smtp-key.pem -out smtp-cert.pem >/dev/null 2>&1
+  php test/fake-smtp.php smtp-cert.pem smtp-key.pem >smtp-server.log 2>&1 &
+  smtp_pid=$!
+  export SMTP_HOST=localhost SMTP_PORT=2525 SMTP_USERNAME=test SMTP_PASSWORD=test SMTP_CA_FILE="$PWD/smtp-cert.pem"
   php -S 127.0.0.1:8080 api.php >php-server.log 2>&1 &
   server_pid=$!
-  trap 'kill "$server_pid"; cat php-server.log' EXIT
+  trap 'kill "$server_pid" "${smtp_pid:-}" 2>/dev/null || true; rm -f smtp-cert.pem smtp-key.pem; cat php-server.log smtp-server.log' EXIT
+fi
+
+if [[ "$base_url" == https://* ]]; then
+  http_url="http://${base_url#https://}"
+  test "$(curl --silent --output /dev/null --write-out '%{http_code}' "$http_url/")" = 301
+  curl --insecure --silent --head "$base_url/" | grep --ignore-case --quiet '^Strict-Transport-Security: max-age=31536000'
 fi
 
 for _ in {1..20}; do
@@ -50,16 +63,57 @@ curl --insecure --silent --fail \
   --data "{\"organization\":\"Testwehr\",\"unit\":\"Löschzug\",\"name\":\"Admin\",\"email\":\"admin@example.test\",\"password\":\"geheimes-passwort\",\"setupToken\":\"$SETUP_TOKEN\"}" \
   "$base_url/api/setup" | grep --quiet '"ok":true'
 
+migration_token='eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="INSERT INTO sessions(token,user_id,expires_at) SELECT '$migration_token',id,UTC_TIMESTAMP()+INTERVAL 1 HOUR FROM users WHERE email='admin@example.test'"
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  <migrations/002-hash-session-tokens.sql
+curl --insecure --silent --fail --cookie "$session_cookie=$migration_token" \
+  "$base_url/api/me" | grep --quiet '"role":"wehrleitung"'
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DELETE FROM sessions WHERE token=SHA2('$migration_token',256)"
+
 curl --insecure --silent --fail --cookie-jar cookies.txt \
   --header 'Content-Type: application/json' \
   --header "Origin: $base_url" \
   --data '{"email":"admin@example.test","password":"geheimes-passwort"}' \
   "$base_url/api/login" | grep --quiet '"ok":true'
 
-session_token=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
-  einsatzberichte --execute='SELECT token FROM sessions LIMIT 1')
+session_token=$(awk -v name="$session_cookie" '$6==name {print $7}' cookies.txt)
+test "$session_token"
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT token=SHA2('$session_token',256) FROM sessions LIMIT 1")" = 1
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" \
   "$base_url/api/me" | grep --quiet '"role":"wehrleitung"'
+
+system_json=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/system")
+printf '%s' "$system_json" | php -r '
+  $data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+  if (($data["database"]["status"]??"")!=="Bereit" || count($data["units"]??[])!==1 || count($data["users"]??[])!==1) exit(1);
+  $check=function(array $value) use (&$check) {
+    foreach ($value as $key=>$item) {
+      if (preg_match("/password|dsn|token|access.?key/i",(string)$key)) exit(1);
+      if (is_array($item)) $check($item);
+    }
+  };
+  $check($data);
+'
+
+regular_token='dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
+regular_hash=$(php -r "echo hash('sha256', '$regular_token');")
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) SELECT organization_id,unit_id,'Testkraft','testkraft@example.test',password_hash,'fuehrungskraft' FROM users WHERE email='admin@example.test'; SET @user_id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@user_id,1); INSERT INTO sessions(token,user_id,expires_at) VALUES('$regular_hash',@user_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR)"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$regular_token" "$base_url/api/system")" = 403
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DELETE FROM users WHERE email='testkraft@example.test'"
+
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' \
+  --request PUT \
+  --data '{"name":"Admin","email":"admin@example.test","role":"fuehrungskraft","unitIds":[1]}' \
+  "$base_url/api/users/1")" = 409
 
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$session_token" \
@@ -67,6 +121,31 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --header 'Origin: https://angreifer.example.test' \
   --request POST \
   "$base_url/api/logout")" = 403
+
+invite_status=$(curl --insecure --silent --output invite.json --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' \
+  --data '{"name":"Eingeladene Person","email":"invite@example.test","role":"fuehrungskraft","unitIds":[1]}' \
+  "$base_url/api/users")
+case "$invite_status" in
+  201)
+    test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+      einsatzberichte --execute="SELECT COUNT(*) FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE u.email='invite@example.test'")" = 1
+    MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+      --execute="DELETE FROM users WHERE email='invite@example.test'"
+    ;;
+  503)
+    test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+      einsatzberichte --execute="SELECT COUNT(*) FROM users WHERE email='invite@example.test'")" = 0
+    ;;
+  *) cat invite.json >&2; exit 1 ;;
+esac
+if [[ -z "${TEST_BASE_URL:-}" ]]; then
+  test "$invite_status" = 201
+  wait "$smtp_pid"
+  smtp_pid=''
+fi
+rm -f invite.json
 
 incident_id=$(curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" \
@@ -102,6 +181,16 @@ wait "$release_pid"
 test "$edit_status" = 409
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT CONCAT(status, ':', narrative) FROM reports WHERE id=$report_id_int")" = 'released:Ursprünglich'
+released_at=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT released_at FROM reports WHERE id=$report_id_int")
+sleep 1
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' \
+  --request POST \
+  "$base_url/api/reports/$report_id/release")" = 409
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT released_at FROM reports WHERE id=$report_id_int")" = "$released_at"
 
 reset_token='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 reset_hash=$(php -r "echo hash('sha256', '$reset_token');")

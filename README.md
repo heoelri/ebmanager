@@ -43,7 +43,7 @@ allgemein freigegeben.
 |---|---|
 | `fuehrungskraft` | Schreibt Berichte für ihre zugeordneten Einheiten und sieht eigene Berichte. |
 | `einheitsleitung` | Sieht und bearbeitet Entwürfe ihrer Einheiten und gibt sie frei. |
-| `wehrleitung` | Verwaltet Wehr, Einheiten und Benutzer, sieht alle Berichte und konsolidiert sie. |
+| `wehrleitung` | Verwaltet Wehr, Einheiten und Benutzer, sieht die Systemübersicht, alle Berichte und konsolidiert sie. |
 
 ## Dokumentation
 
@@ -127,7 +127,7 @@ Docker-Image und führt denselben End-to-End-Test gegen Apache, HTTPS und MySQL
 aus.
 
 Nach einem erfolgreichen Testlauf eines Pushs auf `main` lädt
-`.github/workflows/deploy.yml` ausschließlich `.htaccess`, `api.php` und
+`.github/workflows/deploy.yml` ausschließlich `.htaccess`, `api.php`, `support.php` und
 `public/index.html` per **SFTP** hoch. `config.local.php`, Datenbankdateien und
 `schema.sql` werden niemals automatisch übertragen.
 
