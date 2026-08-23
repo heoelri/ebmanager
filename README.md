@@ -170,7 +170,8 @@ aus.
 
 Nach einem erfolgreichen Testlauf eines Pushs auf `main` lädt
 `.github/workflows/deploy.yml` ausschließlich `.htaccess`, `api.php`,
-`constants.php`, `support.php` und `public/index.html` per **SFTP** hoch.
+`constants.php`, `support.php`, `public/index.html` und `public/styles.css`
+per **SFTP** hoch.
 `config.local.php`, Datenbankdateien und `schema.sql` werden niemals
 automatisch übertragen.
 

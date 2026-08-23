@@ -26,9 +26,14 @@ DB_DSN='' php -r '$_COOKIE["session"]=str_repeat("a",64); $_SERVER["REQUEST_METH
 # Das Frontend enthält die erwarteten Accessibility- und DIVERA-Elemente, aber keine duplizierten Fachoptionen.
 php -r '
   $html=file_get_contents("public/index.html");
-  foreach (["viewport-fit=cover","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","min-height:44px",":focus-visible","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:","rankOptions","pendingWarning","initialView","DIVERA-Einsatznummer","class=\"command-row\"","class=\"form-section\"","class=\"report-times\"","restoreDialogFocus","<select name=\"commandRank\">","<select name=\"additionalCommandRank\">"] as $required) {
+  $css=file_get_contents("public/styles.css");
+  foreach (["viewport-fit=cover","public/styles.css","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:","rankOptions","pendingWarning","initialView","DIVERA-Einsatznummer","class=\"command-row\"","class=\"form-section\"","class=\"report-times\"","restoreDialogFocus","<select name=\"commandRank\">","<select name=\"additionalCommandRank\">"] as $required) {
     if (!str_contains($html,$required)) exit(1);
   }
+  foreach (["--control-height: 44px",":focus-visible","safe-area-inset-bottom","forced-colors: active"] as $required) {
+    if (!str_contains($css,$required)) exit(1);
+  }
+  if (str_contains($html,"<style") || preg_match("/\\sstyle=\"/i",$html)) exit(1);
   foreach (["Kleinbrand","Wohngebäude","Menschen in Notlage","Feuerwehrmann-Anwärter"] as $duplicatedOption) {
     if (str_contains($html,$duplicatedOption)) exit(1);
   }
@@ -225,7 +230,8 @@ if [[ -z "${TEST_BASE_URL:-}" ]]; then
   smtp_pid=''
   grep --quiet 'Recipient: invite@example.test' smtp-messages.log
   grep --quiet 'Subject: Konto aktivieren' smtp-messages.log
-  grep --quiet '?invite=' smtp-messages.log
+  grep --quiet '#invite=' smtp-messages.log
+  ! grep --quiet '?invite=' smtp-messages.log
 fi
 rm -f invite.json
 
@@ -402,8 +408,26 @@ fi
 # Das Zurücksetzen des Passworts verbraucht das Token, beendet bestehende Sitzungen und erlaubt den neuen Login.
 reset_token='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 reset_hash=$(php -r "echo hash('sha256', '$reset_token');")
+expired_token='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
+expired_hash=$(php -r "echo hash('sha256', '$expired_token');")
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="INSERT INTO password_resets(user_id,token_hash,expires_at) SELECT id,'$expired_hash',UTC_TIMESTAMP()-INTERVAL 1 MINUTE FROM users WHERE email='admin@example.test'"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --header 'Content-Type: application/json' \
+  --data "{\"token\":\"$expired_token\"}" \
+  "$base_url/api/password-reset/context")" = 400
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DELETE FROM password_resets WHERE token_hash='$expired_hash'"
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="INSERT INTO password_resets(user_id,token_hash,expires_at) SELECT id,'$reset_hash',UTC_TIMESTAMP()+INTERVAL 30 MINUTE FROM users WHERE email='admin@example.test'"
+curl --insecure --silent --fail \
+  --header 'Content-Type: application/json' \
+  --data "{\"token\":\"$reset_token\"}" \
+  "$base_url/api/password-reset/context" | grep --quiet '"email":"admin@example.test"'
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --header 'Content-Type: application/json' \
+  --data '{"token":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}' \
+  "$base_url/api/password-reset/context")" = 400
 curl --insecure --silent --fail \
   --header 'Content-Type: application/json' \
   --data "{\"token\":\"$reset_token\",\"password\":\"neues-geheimes-passwort\"}" \

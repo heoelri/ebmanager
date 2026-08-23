@@ -30,7 +30,7 @@ function sendPasswordEmail(array $user, string $token, bool $invitation = false)
 {
     $settings = mailSettings();
     ['url' => $url] = $settings;
-    $link = "$url/?" . ($invitation ? 'invite' : 'reset') . "=$token";
+    $link = "$url/#" . ($invitation ? 'invite' : 'reset') . "=$token";
     $subject = $invitation ? 'Konto aktivieren' : 'Passwort zuruecksetzen';
     $message = $invitation
         ? "Hallo {$user['name']},\n\nüber diesen Link können Sie innerhalb von 30 Minuten Ihr Konto aktivieren und ein Passwort vergeben:\n$link\n\nNach Ablauf können Sie über „Passwort vergessen“ einen neuen Link anfordern."
@@ -365,7 +365,7 @@ try {
     $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
     assertRequestOrigin($method);
     $path = requestPath();
-    $public = in_array($path, ['/api/bootstrap', '/api/setup', '/api/login', '/api/password-reset/request', '/api/password-reset/confirm'], true);
+    $public = in_array($path, ['/api/bootstrap', '/api/setup', '/api/login', '/api/password-reset/context', '/api/password-reset/request', '/api/password-reset/confirm'], true);
     $user = $public ? null : currentUser();
     if (!$public && !$user) respond(401, ['error' => 'Bitte anmelden']);
 
@@ -440,6 +440,18 @@ try {
         }
         // The response never reveals whether the address belongs to an account.
         respond(202, ['ok' => true]);
+    }
+
+    if ($method === 'POST' && $path === '/api/password-reset/context') {
+        $data = input();
+        $token = (string)($data['token'] ?? '');
+        if (!preg_match('/^[a-f0-9]{64}$/', $token)) throw new ApiError(400, 'Wiederherstellungslink ist ungültig oder abgelaufen');
+        $reset = one(
+            'SELECT u.email FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE pr.token_hash=? AND pr.expires_at>UTC_TIMESTAMP()',
+            [hash('sha256', $token)]
+        );
+        if (!$reset) throw new ApiError(400, 'Wiederherstellungslink ist ungültig oder abgelaufen');
+        respond(200, ['email' => $reset['email']]);
     }
 
     if ($method === 'POST' && $path === '/api/password-reset/confirm') {

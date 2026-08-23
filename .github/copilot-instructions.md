@@ -17,7 +17,7 @@
 - Eine Organisation beziehungsweise Wehr ist ein strikt getrennter Mandant mit mehreren Einheiten. Einheitsnamen sind innerhalb einer Organisation über `(organization_id, name)` eindeutig.
 - Zielbetrieb ist klassischer Webspace mit HTTPS, SFTP, PHP 8.2 oder neuer, Apache und MySQL 8.0 oder neuer.
 - `api.php` enthält Routing und Fachlogik. `constants.php` ist die zentrale Quelle für Rollen und fachliche Auswahllisten. `support.php` enthält gemeinsame HTTP-, PDO-, Validierungs- und Mailfunktionen.
-- `public/index.html` enthält das gesamte Frontend in nativem HTML, CSS und JavaScript. Es gibt kein Frontend-Framework und keine Composer-Laufzeitabhängigkeiten.
+- `public/index.html` enthält das native HTML und JavaScript; `public/styles.css` enthält die lokal ausgelieferten, responsiven Styles. Es gibt kein Frontend-Framework und keine Composer-Laufzeitabhängigkeiten.
 - `.htaccess` erzwingt HTTPS, schützt nicht öffentliche Dateien, leitet `/api/*` an `api.php` weiter und liefert `public/index.html` aus.
 - Root- und Unterverzeichnis-Deployment funktionieren ohne separate Pfadkonfiguration.
 - API-Fehler haben die Form `{ "error": "..." }`. Eingaben werden an der API-Grenze validiert; Fehler werden weder verschluckt noch als Erfolg dargestellt.
@@ -95,6 +95,7 @@
 - „System“ ist nur für die Wehrleitung sichtbar und zeigt ausschließlich kuratierte, nicht geheime Zustandsdaten. Gib niemals DSN, Kennwörter, Einrichtungstoken oder DIVERA-Schlüssel aus.
 - Die Oberfläche bleibt ohne Framework responsiv und mit Tastatur, Screenreader und Touch bedienbar.
 - Interaktive Ziele sind mindestens 44 Pixel groß, Tastaturfokus ist sichtbar und dynamische Fehler sowie Statusänderungen werden angekündigt.
+- Verwende die CSS-Custom-Properties in `public/styles.css` und wiederverwendbare Klassen statt Inline-Styles. Externe Stylesheets, Webfonts und CSS-Frameworks sind nicht vorgesehen.
 - Nutze native Eingabetypen, Labels, Fieldsets und mobil bedienbare Kontrollfelder.
 - Gruppiere optionale Berichtsbereiche mit nativen `<details>` und `<summary>`. Vorhandene Werte öffnen den jeweiligen Bereich beim Bearbeiten automatisch.
 - Halte den Fokus in Bearbeitungsdialogen stabil und gib ihn beim Schließen an das auslösende Element zurück; nur sichtbare Fehlermeldungen erhalten gezielt den Fokus.
@@ -115,7 +116,7 @@
 - `test/migrations.sh` prüft, dass spätere Migrationen in Dev-Volumes genau einmal ausgeführt werden.
 - GitHub Actions prüft PHP- und JavaScript-Syntax, Shellskripte, `schema.sql`, den HTTP-End-to-End-Fluss sowie Docker Compose gegen Apache/HTTPS und MySQL.
 - Pull Requests erhalten keinen Zugriff auf Deployment-Secrets.
-- Nach erfolgreichen Tests eines Pushs auf `main` lädt der Workflow nur `.htaccess`, `api.php`, `constants.php`, `support.php` und `public/index.html` per SFTP mit geprüftem Host-Key hoch. Lokale Konfiguration, Schema und Migrationen werden nie automatisch deployt.
+- Nach erfolgreichen Tests eines Pushs auf `main` lädt der Workflow nur `.htaccess`, `api.php`, `constants.php`, `support.php`, `public/index.html` und `public/styles.css` per SFTP mit geprüftem Host-Key hoch. Lokale Konfiguration, Schema und Migrationen werden nie automatisch deployt.
 - Das produktive GitHub-Environment heißt `hiba`. Jedes weitere Ziel benötigt eigene Secrets, Schutzregeln und eine eigene Concurrency-Gruppe.
 
 ## Betrieb und Zurücksetzen
