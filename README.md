@@ -108,7 +108,8 @@ Die Docker-Tests verwenden dieselben MySQL- und HTTP-Prüfungen wie CI:
 
 ```powershell
 docker compose --profile test down --volumes
-docker compose --profile test up --build --abort-on-container-exit --exit-code-from test
+docker compose up --build --detach --wait web
+docker compose --profile test run --rm test
 docker compose --profile test down --volumes
 ```
 

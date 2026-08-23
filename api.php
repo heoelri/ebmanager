@@ -84,7 +84,8 @@ function requestDate(mixed $value, string $name): DateTimeImmutable
 {
     $text = required($value, $name, 100);
     $date = DateTimeImmutable::createFromFormat('!Y-m-d\TH:i:s.v\Z', $text, new DateTimeZone('UTC'));
-    if (!$date || DateTimeImmutable::getLastErrors() !== false) throw new ApiError(400, "$name ist ungültig");
+    $errors = DateTimeImmutable::getLastErrors();
+    if (!$date || ($errors && ($errors['warning_count'] || $errors['error_count']))) throw new ApiError(400, "$name ist ungültig");
     return $date;
 }
 
