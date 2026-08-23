@@ -14,11 +14,13 @@ flowchart LR
     Browser[Browser<br>HTML, CSS, JavaScript]
     Apache[Apache<br>.htaccess]
     API[PHP API<br>api.php]
+    Support[Infrastruktur<br>support.php]
     DB[(MySQL 8)]
     Divera[DIVERA 24/7]
 
     Browser -->|HTTPS /api/*| Apache
     Apache --> API
+    API --> Support
     API -->|PDO, vorbereitete Statements| DB
     API -->|HTTPS GET| Divera
 ```
@@ -27,8 +29,9 @@ flowchart LR
   Browserfunktionen einschließlich Drag-and-Drop.
 - `.htaccess` erzwingt HTTPS, schützt Konfigurationsdateien und leitet
   `/api/*` an `api.php` weiter.
-- `api.php` enthält Routing, Validierung, Authentifizierung,
-  Berechtigungsprüfung und fachliche Transaktionen.
+- `api.php` enthält Routing, Authentifizierung, Berechtigungsprüfung und fachliche Transaktionen.
+- `support.php` enthält die wiederverwendbaren HTTP-, Datenbank-, Validierungs- und Mailfunktionen und ist nicht direkt öffentlich abrufbar.
+- `GET /api/system` liefert ausschließlich der Wehrleitung eine kuratierte, read-only Systemübersicht ohne Zugangsdaten oder Schlüssel.
 - `schema.sql` ist die maßgebliche Definition des MySQL-Schemas.
 
 ## Authentifizierung und Autorisierung
@@ -36,6 +39,7 @@ flowchart LR
 Passwörter werden mit `password_hash` gespeichert. Nach erfolgreicher
 Anmeldung erhält der Browser ein zwölf Stunden gültiges, zufälliges
 `__Host-session`-Cookie. Es ist `Secure`, `HttpOnly` und `SameSite=Strict`.
+Die Datenbank speichert ausschließlich den SHA-256-Hash dieses Sitzungswerts.
 
 Die API prüft bei jeder fachlichen Route Organisation, Rolle und gegebenenfalls
 Einheitszuordnung. Die Oberfläche blendet unzulässige Funktionen zusätzlich

@@ -105,6 +105,7 @@ jobs:
             printf -- '-mkdir "public"\n'
             printf 'put ".htaccess" ".htaccess"\n'
             printf 'put "api.php" "api.php"\n'
+            printf 'put "support.php" "support.php"\n'
             printf 'put "public/index.html" "public/index.html"\n'
           } >"$workdir/batch"
 

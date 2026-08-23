@@ -1,13 +1,13 @@
 # Datenmodell
 
 Das produktive Datenmodell liegt in MySQL 8. Maßgebliche Quelle für das Schema
-ist `schema.sql`; `api.php` enthält die fachlichen Abfragen und
-Validierungsregeln. Diese Datei beschreibt Tabellen, Beziehungen und
+ist `schema.sql`; `api.php` enthält die fachlichen Abfragen, während `support.php` die gemeinsamen Datenbank- und Validierungsfunktionen bereitstellt. Diese Datei beschreibt Tabellen, Beziehungen und
 fachliche Regeln.
 
 `GET /api/bootstrap` prüft vor Einrichtung und Anmeldung die Datenbankverbindung sowie das Vorhandensein aller in diesem Dokument beschriebenen Tabellen. Eine fehlende Konfiguration, nicht erreichbare Datenbank oder unvollständige Migration wird mit HTTP 503 gemeldet; dabei werden keine Zugangsdaten ausgegeben.
 Die Anwendung initialisiert jede PDO-Verbindung explizit mit `utf8mb4`.
 API-Routen bleiben unabhängig davon `/api/...`, ob die Anwendung im Dokumentenstamm oder in einem Unterverzeichnis installiert ist; der Installationspfad wird vor dem Routing entfernt.
+`GET /api/system` liest ausschließlich für die Wehrleitung nicht geheime Konfigurationsmetadaten sowie die vorhandenen Einheiten und Benutzer. Die Übersicht speichert keine zusätzlichen Daten.
 
 `schema.sql` wird nicht durch den SFTP-Workflow deployt. Schemaänderungen
 werden vor dem Anwendungscode kontrolliert über die Datenbankverwaltung des
@@ -49,7 +49,7 @@ Eine `organization` ist ein Mandant. Tabellen ohne eigene
 ihren Bericht einem Mandanten zugeordnet. Die Anwendung prüft diese Grenze bei
 jeder fachlichen Abfrage.
 
-Sitzungen werden über HTTPS im `Secure`-Cookie `__Host-session` und während des temporären HTTP-Betriebs im Cookie `session` übertragen. Beide Varianten sind `HttpOnly` und `SameSite=Strict`.
+Sitzungen werden ausschließlich über HTTPS im `Secure`-, `HttpOnly`- und `SameSite=Strict`-Cookie `__Host-session` übertragen.
 
 ## Tabellen
 
@@ -102,11 +102,11 @@ Beide Fremdschlüssel werden beim Löschen ihres Elternsatzes kaskadiert.
 
 | Spalte | Typ | Bedeutung |
 |---|---|---|
-| `token` | CHAR(64), PK | Zufälliger 256-Bit-Sitzungswert |
+| `token` | CHAR(64), PK | SHA-256-Hash des zufälligen 256-Bit-Sitzungswerts |
 | `user_id` | BIGINT UNSIGNED, FK | Angemeldeter Benutzer |
 | `expires_at` | DATETIME, NOT NULL | Ablaufzeitpunkt; Sitzungen gelten zwölf Stunden |
 
-Sitzungen werden beim Löschen des Benutzers mitgelöscht.
+Der Klartext-Sitzungswert existiert nur im Browsercookie. Sitzungen werden beim Löschen des Benutzers mitgelöscht.
 
 ### `password_resets`
 
@@ -299,7 +299,7 @@ mit zwei getrennten Datenbankverbindungen nach.
 
 ## Datenschutz
 
-`password_hash`, `sessions.token` und `units.divera_access_key` dürfen nicht
+`password_hash`, Klartext-Sitzungswerte und `units.divera_access_key` dürfen nicht
 über die API ausgegeben oder protokolliert werden. `incidents.patient` und
 `incidents.caller` sind sensible Einsatzdaten und müssen stets auf den
 aktuellen Mandanten begrenzt bleiben.

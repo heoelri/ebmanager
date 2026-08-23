@@ -108,12 +108,13 @@ Folgende Struktur muss im gewählten Zielverzeichnis entstehen:
 ```text
 .htaccess
 api.php
+support.php
 config.local.php
 public/
   index.html
 ```
 
-1. Das gewählte Zielverzeichnis anlegen und `.htaccess`, `api.php`, `config.local.php` sowie `public/index.html` per SFTP dorthin hochladen.
+1. Das gewählte Zielverzeichnis anlegen und `.htaccess`, `api.php`, `support.php`, `config.local.php` sowie `public/index.html` per SFTP dorthin hochladen.
 2. Prüfen, dass `.htaccess` tatsächlich vorhanden ist; einige Dateiübertragungsprogramme blenden versteckte Dateien aus.
 3. Für Verzeichnisse Berechtigungen wie `755` und für öffentliche Dateien `644` verwenden, sofern der Hoster keine anderen Vorgaben macht.
 4. `config.local.php` so restriktiv wie vom Hoster unterstützt auf `600` oder `640` setzen.
@@ -140,6 +141,7 @@ sftp> mkdir ebmanager
 sftp> cd ebmanager
 sftp> put .htaccess
 sftp> put api.php
+sftp> put support.php
 sftp> put config.local.php
 sftp> mkdir public
 sftp> put public/index.html public/index.html
@@ -161,17 +163,18 @@ Die Ersteinrichtung ist nach dem ersten Benutzer dauerhaft geschlossen.
 ## 8. Funktionen nach der Installation prüfen
 
 1. Anmelden und wieder abmelden.
-2. In der Verwaltung einen Testbenutzer anlegen und prüfen, dass die Einladung ankommt, der Link die Anwendung öffnet und der Benutzer sein Passwort selbst setzen kann.
-3. Einen manuellen Einsatz und einen Bericht anlegen.
-4. Über „Passwort vergessen“ prüfen, dass der Webhoster E-Mails mit dem korrekten HTTPS-Link versendet.
-5. Optional pro Einheit einen DIVERA-Access-Key hinterlegen und einen lesenden Abruf durchführen.
-6. Serverprotokolle auf PHP-, Apache- oder Mailfehler prüfen, ohne Zugangsdaten oder DIVERA-Schlüssel weiterzugeben.
+2. Auf der Seite „System“ Datenbank- und E-Mail-Status prüfen; dort dürfen keine Kennwörter oder Schlüssel erscheinen.
+3. In der Verwaltung einen Testbenutzer anlegen und prüfen, dass die Einladung ankommt, der Link die Anwendung öffnet und der Benutzer sein Passwort selbst setzen kann.
+4. Einen manuellen Einsatz und einen Bericht anlegen.
+5. Über „Passwort vergessen“ prüfen, dass der Webhoster E-Mails mit dem korrekten HTTPS-Link versendet.
+6. Optional pro Einheit einen DIVERA-Access-Key hinterlegen und einen lesenden Abruf durchführen.
+7. Serverprotokolle auf PHP-, Apache- oder Mailfehler prüfen, ohne Zugangsdaten oder DIVERA-Schlüssel weiterzugeben.
 
 ## 9. Automatisches Deployment mit GitHub Actions einrichten
 
 Das Repository deployt nach erfolgreichen Tests eines Pushs auf `main` den exakt getesteten Commit. Der Workflow verwendet das GitHub-Environment `hiba`.
 
-Der derzeitige GitHub-Workflow unterstützt explizites FTPS. Bietet der Webspace ausschließlich SFTP an, müssen bis zu einer entsprechenden Workflow-Umstellung die Schritte unter „Upload per SFTP mit Passwort“ verwendet werden.
+Der GitHub-Workflow unterstützt SFTP wahlweise mit privatem Schlüssel oder Passwort und prüft den Host-Key verpflichtend.
 
 1. Im GitHub-Repository unter **Settings → Environments** das Environment `hiba` anlegen.
 2. Gewünschte Schutzregeln wie erforderliche Freigaben konfigurieren.
@@ -190,7 +193,7 @@ Der derzeitige GitHub-Workflow unterstützt explizites FTPS. Bietet der Webspace
 4. Prüfen, dass der Server SFTP über SSH anbietet und der ermittelte Host-Key mit der Angabe des Hosters übereinstimmt.
 5. Einen Push auf `main` durchführen und zuerst den Workflow `Tests`, danach den Workflow `Deployment` beobachten.
 
-Der Workflow lädt ausschließlich `.htaccess`, `api.php` und `public/index.html` hoch. `config.local.php`, Datenbankzugangsdaten, `schema.sql` und Migrationen werden absichtlich nicht automatisiert übertragen.
+Der Workflow lädt ausschließlich `.htaccess`, `api.php`, `support.php` und `public/index.html` hoch. `config.local.php`, Datenbankzugangsdaten, `schema.sql` und Migrationen werden absichtlich nicht automatisiert übertragen.
 
 Weitere Ziele wie `devpreview` benötigen ein eigenes GitHub-Environment, eigene Secrets, eigene Schutzregeln und eine eigene Concurrency-Gruppe. Zugangsdaten aus `hiba` dürfen nicht wiederverwendet werden.
 
@@ -209,7 +212,7 @@ Wenn das automatische Deployment verwendet wird, müssen erforderliche Migration
 ## 11. Rollback
 
 1. Vor jeder Aktualisierung eine Datenbanksicherung und eine Kopie der bisherigen Anwendungsdateien erstellen.
-2. Bei einem reinen Anwendungsfehler die vorherigen Versionen von `.htaccess`, `api.php` und `public/index.html` wiederherstellen.
+2. Bei einem reinen Anwendungsfehler die vorherigen Versionen von `.htaccess`, `api.php`, `support.php` und `public/index.html` wiederherstellen.
 3. Bei einer inkompatiblen Datenbankänderung die zum Release dokumentierten Rollback-Schritte verwenden oder die vorherige Datenbanksicherung einspielen.
 4. Nach einem Rollback Anmeldung und zentrale Funktionen erneut prüfen.
 

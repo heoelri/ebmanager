@@ -35,7 +35,7 @@
 
 - Zielbetrieb ist regulärer Webspace mit SFTP-Zugang, PHP 8.2 oder
   neuer, Apache und MySQL 8.0 oder neuer.
-- Backend: `api.php` mit PHP-Standardfunktionen und PDO MySQL.
+- Backend: `api.php` enthält die fachlichen Routen; `support.php` bündelt wiederverwendbare HTTP-, Datenbank-, Validierungs- und Mailfunktionen mit PHP-Standardfunktionen und PDO MySQL.
 - Frontend: `public/index.html` mit nativem HTML, CSS und JavaScript.
 - Es gibt keine Composer-Laufzeitabhängigkeiten.
 - Lokale Entwicklung läuft über `compose.yaml` mit PHP 8.2/Apache, MySQL 8.4
@@ -46,7 +46,7 @@
   `public/index.html` als Startseite aus.
 - Die Anwendung unterstützt ohne separate Pfadkonfiguration sowohl den Betrieb im Dokumentenstamm als auch in einem Unterverzeichnis.
 - Nach erfolgreichen Tests eines Pushs auf `main` lädt der Deployment-Workflow
-  nur `.htaccess`, `api.php` und `public/index.html` per verpflichtendem SFTP
+  nur `.htaccess`, `api.php`, `support.php` und `public/index.html` per verpflichtendem SFTP
   mit geprüftem Host-Key hoch. Konfiguration und SQL-Dateien werden nie automatisch deployt.
 - Das produktive GitHub-Environment heißt `hiba`. Weitere Ziele wie `devpreview` müssen eigene Environments, Secrets, Schutzregeln und Concurrency-Gruppen verwenden; Produktionszugangsdaten werden nicht geteilt.
 - Datenbankzugangsdaten, das einmalige Einrichtungstoken, die öffentliche HTTPS-Anwendungsadresse und die Absenderadresse kommen aus Umgebungsvariablen oder der nicht versionierten `config.local.php`.
@@ -155,7 +155,8 @@
 ## Oberfläche
 
 - Hauptnavigation: Einsätze, Mitglieder & Fahrzeuge, rollenabhängig
-  Verwaltung und DIVERA sowie Abmelden.
+  Verwaltung, System und DIVERA sowie Abmelden.
+- Die Seite „System“ ist ausschließlich für die Wehrleitung sichtbar und zeigt eine read-only Übersicht zu Anwendung, Datenbank, E-Mail, Einheiten und Benutzern. DSN, Kennwörter, Einrichtungstoken und DIVERA-Schlüssel werden nie ausgegeben.
 - Der Tab „Mitglieder & Fahrzeuge“ zeigt je zugänglicher Einheit
   synchronisierte Mitglieder und Qualifikationen sowie eigene und fremde
   Fahrzeuge aus den letzten Einsatzimporten.
@@ -174,9 +175,11 @@
   `password_verify` geprüft.
 - Die öffentliche Ersteinrichtung erfordert ein zufälliges, mindestens 32
   Zeichen langes `SETUP_TOKEN`.
-- Sitzungscookies sind `HttpOnly`, `SameSite=Strict` und bei HTTPS `Secure`.
+- Sitzungscookies sind ausschließlich über HTTPS verfügbar und immer `Secure`, `HttpOnly` und `SameSite=Strict`.
   Eine Passwortänderung widerruft alle Sitzungen des betroffenen Benutzers.
-- Das Sitzungscookie heißt unter HTTPS `__Host-session` und während des temporären HTTP-Betriebs `session`. Alle schreibenden API-Anfragen erfordern `application/json`; vorhandene `Origin`-Header müssen exakt der Anwendungsorigin mit dem tatsächlich verwendeten Schema entsprechen.
+- Das Sitzungscookie heißt `__Host-session`; in der Datenbank liegt ausschließlich sein SHA-256-Hash. Alle schreibenden API-Anfragen erfordern `application/json`; vorhandene `Origin`-Header müssen exakt der HTTPS-Anwendungsorigin entsprechen.
+- Eine Organisation muss immer mindestens einen Benutzer mit der Rolle `wehrleitung` behalten.
+- Ein Bericht kann nur einmal vom Status `draft` nach `released` wechseln; `released_at` wird danach nicht mehr überschrieben.
 - Passwort-Hashes, Sitzungswerte und DIVERA-Schlüssel werden nie über die API
   ausgegeben.
 - Mandanten- und Einheitsgrenzen werden serverseitig geprüft; reine
