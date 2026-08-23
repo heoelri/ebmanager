@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-compose=(docker compose)
+project="democheck-$$"
+compose=(docker compose -p "$project")
 mysql=("${compose[@]}" exec -T db mysql --user=root --password=test-password --database=einsatzberichte --batch --skip-column-names)
+trap '"${compose[@]}" --profile demo down --volumes --remove-orphans >/dev/null 2>&1 || true' EXIT
+export HTTP_PORT=0 HTTPS_PORT=0
 
-"${compose[@]}" --profile demo down --volumes
 "${compose[@]}" up --build --detach --wait web
 [[ "$("${mysql[@]}" --execute='SELECT COUNT(*) FROM organizations')" == 0 ]]
 
@@ -31,5 +33,6 @@ mysql=("${compose[@]}" exec -T db mysql --user=root --password=test-password --d
       }
   }'
 
-[[ "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --header 'Content-Type: application/json' \
-  --data '{"email":"wehrleitung@demo.local","password":"Demo-Feuerwehr-2026!"}' https://localhost:8443/api/login)" == 200 ]]
+[[ "$("${compose[@]}" exec -T web curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --header 'Content-Type: application/json' --data '{"email":"wehrleitung@demo.local","password":"Demo-Feuerwehr-2026!"}' \
+  https://localhost/api/login)" == 200 ]]
