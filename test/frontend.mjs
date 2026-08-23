@@ -72,8 +72,15 @@ assert.equal(focusCount, 1);
 const editReportSource = html.match(/async function editReport[^\n]+/)?.[0];
 assert(editReportSource, 'editReport fehlt');
 assert.match(editReportSource, /<button type="submit" disabled>Speichern<\/button>/);
-assert(editReportSource.indexOf("bindForm('#edit'") < editReportSource.indexOf("await renderCrew('#editCrew'"));
-assert.doesNotMatch(editReportSource, /catch\(e\)\{dialog\.close\(\)/);
+assert(editReportSource.indexOf("bindForm('#edit'") < editReportSource.indexOf("await loadReportCrew(form,'#editCrew'"));
+
+const loadCrewSource = html.match(/async function loadReportCrew[^\n]+/)?.[0];
+assert(loadCrewSource, 'loadReportCrew fehlt');
+assert.match(loadCrewSource, /unitSelect\.disabled=true/);
+assert.match(loadCrewSource, /form\.closest\('dialog'\)&&!dialog\.open/);
+assert.match(loadCrewSource, /root\.dataset\.crewRequest!==request/);
+assert.match(loadCrewSource, /unitSelect\?\.value\|\|unitId/);
+assert.match(loadCrewSource, /Erneut laden/);
 
 const initialViewSource = html.match(/async function initialView[\s\S]*?(?=\nasync function start)/)?.[0];
 assert(initialViewSource, 'initialView fehlt');
