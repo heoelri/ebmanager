@@ -1,8 +1,16 @@
 # Security Review
 
+## Login-Historie vom 23. August 2026
+
+Die Historie erfasst ausschließlich die Benutzer-ID und den UTC-Zeitpunkt erfolgreicher Anmeldungen. IP-Adressen, User-Agents, Kennwörter und fehlgeschlagene Versuche werden nicht gespeichert. Die Ausgabe erfolgt nur über die bereits auf `wehrleitung` und den aktuellen Mandanten begrenzte Benutzerverwaltung; pro Benutzer werden höchstens fünf Zeitpunkte ausgegeben. Beim Löschen eines Benutzers werden die Einträge kaskadierend entfernt.
+
+## Personenangaben in Einheitsberichten vom 23. August 2026
+
+Geschädigte und Schädiger werden als optionale strukturierte Angaben im jeweiligen Einheitsbericht gespeichert. Sie nutzen keine neuen API-Routen und werden ausschließlich über die bereits mandanten- und rollenbegrenzten Berichtsabfragen ausgegeben. Namen, Telefonnummern und Adressen werden serverseitig längenbegrenzt, nicht protokolliert und nach der Freigabe nicht mehr bearbeitet. Die Angaben erhöhen den Umfang personenbezogener Einsatzdaten; Betreiber müssen sie daher in Aufbewahrungs- und Löschkonzepten wie Patienten-, Anrufer- und Berichtsdaten behandeln.
+
 ## API-Hardening vom 23. August 2026
 
-Die im vollständigen API-Review priorisierten Befunde zu Transport, Sitzungen und Zustandsinvarianten wurden umgesetzt. Apache erzwingt HTTPS und sendet HSTS. Der zufällige Sitzungstoken bleibt ausschließlich im `Secure`-Cookie; MySQL speichert nur seinen SHA-256-Hash. Rollenänderungen werden pro Organisation serialisiert und dürfen die letzte Wehrführung nicht entfernen. Berichtsfreigaben aktualisieren ausschließlich Entwürfe und überschreiben einen vorhandenen Freigabezeitpunkt nicht. Die Migration `002-hash-session-tokens.sql` überführt bestehende Sitzungen ohne Klartextverlust oder Abmeldung.
+Die im vollständigen API-Review priorisierten Befunde zu Transport, Sitzungen und Zustandsinvarianten wurden umgesetzt. Apache erzwingt HTTPS und sendet HSTS. Der zufällige Sitzungstoken bleibt ausschließlich im `Secure`-Cookie; MySQL speichert nur seinen SHA-256-Hash. Rollenänderungen werden pro Organisation serialisiert und dürfen die letzte Wehrführung nicht entfernen. Berichtsfreigaben aktualisieren ausschließlich Entwürfe und überschreiben einen vorhandenen Freigabezeitpunkt nicht. Manuelle Einsatzzeitpunkte werden strikt validiert; DIVERA-Importe ohne Alarmzeit werden abgelehnt, statt die Serverzeit einzusetzen. Die Migration `002-hash-session-tokens.sql` überführt bestehende Sitzungen ohne Klartextverlust oder Abmeldung.
 
 ## Systemübersicht vom 23. August 2026
 
@@ -94,6 +102,6 @@ Secrets, HTTPS und externe DIVERA-Aufrufe.
   Entwicklungsumgebung bestimmt.
 - Die Docker-Webports sind ausdrücklich an `127.0.0.1` gebunden; MySQL wird
   nicht auf dem Host veröffentlicht.
-- Der Webcontainer bindet nur `api.php`, `support.php`, `.htaccess` und `public/`
-  schreibgeschützt ein; eine vorhandene `config.local.php` gelangt nicht in
-  den Container.
+- Der Webcontainer bindet nur `api.php`, `constants.php`, `support.php`,
+  `.htaccess` und `public/` schreibgeschützt ein; eine vorhandene
+  `config.local.php` gelangt nicht in den Container.

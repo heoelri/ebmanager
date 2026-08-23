@@ -7,8 +7,9 @@ veröffentlichen diese Einzelberichte; die Wehrführung sieht alle Berichte und
 erstellt daraus den konsolidierten Gesamtbericht.
 
 Die Anwendung ist für klassischen Webspace ausgelegt: PHP und Apache liefern
-eine responsive Oberfläche ohne Frontend-Framework, PDO speichert die Daten in
-MySQL. DIVERA 24/7 wird pro Einheit ausschließlich lesend angebunden.
+eine responsive, tastatur- und touchbedienbare Oberfläche ohne
+Frontend-Framework, PDO speichert die Daten in MySQL. DIVERA 24/7 wird pro
+Einheit ausschließlich lesend angebunden.
 
 ## Open Source und Self-Hosting
 
@@ -30,11 +31,14 @@ allgemein freigegeben.
 
 - mehrere Wehren als strikt getrennte Mandanten
 - mehrere Einheiten und Mehrfachzuordnung von Führungskräften
+- Login-Historie mit den fünf neuesten erfolgreichen Anmeldungen in der Benutzerverwaltung
 - ein Einheitsbericht pro Einsatz und Einheit
+- manuelle laufende Nummern je Einheit und Jahr sowie strukturierte Angaben zu Geschädigten, Schädigern und Einsatzleitung
 - Entwurf, Bearbeitung, Freigabe und Konsolidierung
 - strukturierte Fahrzeugbesatzung mit Drag-and-Drop
 - Mitglieder und Qualifikationen aus DIVERA
 - idempotenter, serverseitig verifizierter DIVERA-Einsatzimport
+- Hinweis, Direktimport und letzter Importzeitpunkt für neue DIVERA-Einsätze in der Einsatzübersicht
 - lokale Docker-Umgebung, GitHub-Tests und SFTP-Deployment
 
 ## Rollen
@@ -44,6 +48,22 @@ allgemein freigegeben.
 | `fuehrungskraft` | Schreibt Berichte für ihre zugeordneten Einheiten und sieht eigene Berichte. |
 | `einheitsleitung` | Sieht und bearbeitet Entwürfe ihrer Einheiten und gibt sie frei. |
 | `wehrleitung` | Verwaltet Wehr, Einheiten und Benutzer, sieht die Systemübersicht, alle Berichte und konsolidiert sie. |
+
+## Fachliche Anpassung
+
+`constants.php` ist die zentrale Quelle für fachlich anpassbare Listen. Dort
+können `INCIDENT_TYPES`, `CLASSIFICATIONS` und die zugehörigen
+`CLASSIFICATION_LABELS` geändert oder um eigene Einträge und Gruppen ergänzt
+werden. Backend und Oberfläche lesen dieselben Werte; eine doppelte Anpassung
+im JavaScript ist nicht erforderlich.
+
+Die Schlüssel in `CLASSIFICATIONS` und `CLASSIFICATION_LABELS` müssen
+übereinstimmen und dauerhaft stabil bleiben, weil Berichte sie im
+Klassifikations-JSON speichern. Entfernte Einsatzarten und Klassifikationen
+bleiben in bestehenden Berichten lesbar, können beim nächsten Bearbeiten aber
+nicht erneut ausgewählt werden. `ROLES` liegt ebenfalls in `constants.php`,
+ist jedoch mit Datenbankschema und Berechtigungslogik gekoppelt und darf nicht
+ohne entsprechende Code- und Schemaänderung angepasst werden.
 
 ## Dokumentation
 
@@ -79,14 +99,20 @@ Danach ist die nur an `127.0.0.1` gebundene Anwendung unter
 selbstsigniert und muss im Browser einmalig bestätigt werden. Für die
 Ersteinrichtung gilt ausschließlich lokal dieses Token:
 
+Falls die Standardports belegt sind, können sie vor dem Start beispielsweise
+mit `HTTP_PORT=18080` und `HTTPS_PORT=18443` überschrieben werden.
+
 ```text
 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 ```
 
 Die Anwendungsdateien sind schreibgeschützt in den Webcontainer eingebunden;
 Änderungen an PHP, HTML und `.htaccess` sind ohne neuen Image-Build verfügbar.
-Lokale Konfiguration und Repository-Metadaten werden nicht eingebunden. Ein
-kompletter lokaler Datenbankreset erfolgt mit:
+Lokale Konfiguration und Repository-Metadaten werden nicht eingebunden. Beim
+Start führt der einmalige Dienst `migrate` alle noch nicht vermerkten Dateien
+aus `migrations/` vor dem Webcontainer aus. Beim ersten Upgrade eines älteren
+Dev-Volumes werden bestehende lokale Sitzungen verworfen; fachliche Daten
+bleiben erhalten. Ein kompletter lokaler Datenbankreset erfolgt mit:
 
 ```powershell
 docker compose down --volumes
@@ -98,7 +124,8 @@ Die Docker-Tests verwenden dieselben MySQL- und HTTP-Prüfungen wie CI:
 
 ```powershell
 docker compose --profile test down --volumes
-docker compose --profile test up --build --abort-on-container-exit --exit-code-from test
+docker compose up --build --detach --wait web
+docker compose --profile test run --rm test
 docker compose --profile test down --volumes
 ```
 
@@ -127,9 +154,10 @@ Docker-Image und führt denselben End-to-End-Test gegen Apache, HTTPS und MySQL
 aus.
 
 Nach einem erfolgreichen Testlauf eines Pushs auf `main` lädt
-`.github/workflows/deploy.yml` ausschließlich `.htaccess`, `api.php`, `support.php` und
-`public/index.html` per **SFTP** hoch. `config.local.php`, Datenbankdateien und
-`schema.sql` werden niemals automatisch übertragen.
+`.github/workflows/deploy.yml` ausschließlich `.htaccess`, `api.php`,
+`constants.php`, `support.php` und `public/index.html` per **SFTP** hoch.
+`config.local.php`, Datenbankdateien und `schema.sql` werden niemals
+automatisch übertragen.
 
 Die Einrichtung des Environments `hiba`, alle Secrets und die Trennung zukünftiger Ziele wie `devpreview` sind unter [Automatisches Deployment mit GitHub Actions einrichten](docs/WEBSPACE-DEPLOYMENT.md#9-automatisches-deployment-mit-github-actions-einrichten) dokumentiert.
 

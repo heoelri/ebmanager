@@ -108,13 +108,14 @@ Folgende Struktur muss im gewählten Zielverzeichnis entstehen:
 ```text
 .htaccess
 api.php
+constants.php
 support.php
 config.local.php
 public/
   index.html
 ```
 
-1. Das gewählte Zielverzeichnis anlegen und `.htaccess`, `api.php`, `support.php`, `config.local.php` sowie `public/index.html` per SFTP dorthin hochladen.
+1. Das gewählte Zielverzeichnis anlegen und `.htaccess`, `api.php`, `constants.php`, `support.php`, `config.local.php` sowie `public/index.html` per SFTP dorthin hochladen.
 2. Prüfen, dass `.htaccess` tatsächlich vorhanden ist; einige Dateiübertragungsprogramme blenden versteckte Dateien aus.
 3. Für Verzeichnisse Berechtigungen wie `755` und für öffentliche Dateien `644` verwenden, sofern der Hoster keine anderen Vorgaben macht.
 4. `config.local.php` so restriktiv wie vom Hoster unterstützt auf `600` oder `640` setzen.
@@ -141,6 +142,7 @@ sftp> mkdir ebmanager
 sftp> cd ebmanager
 sftp> put .htaccess
 sftp> put api.php
+sftp> put constants.php
 sftp> put support.php
 sftp> put config.local.php
 sftp> mkdir public
@@ -193,7 +195,7 @@ Der GitHub-Workflow unterstützt SFTP wahlweise mit privatem Schlüssel oder Pas
 4. Prüfen, dass der Server SFTP über SSH anbietet und der ermittelte Host-Key mit der Angabe des Hosters übereinstimmt.
 5. Einen Push auf `main` durchführen und zuerst den Workflow `Tests`, danach den Workflow `Deployment` beobachten.
 
-Der Workflow lädt ausschließlich `.htaccess`, `api.php`, `support.php` und `public/index.html` hoch. `config.local.php`, Datenbankzugangsdaten, `schema.sql` und Migrationen werden absichtlich nicht automatisiert übertragen.
+Der Workflow lädt ausschließlich `.htaccess`, `api.php`, `constants.php`, `support.php` und `public/index.html` hoch. `config.local.php`, Datenbankzugangsdaten, `schema.sql` und Migrationen werden absichtlich nicht automatisiert übertragen.
 
 Weitere Ziele wie `devpreview` benötigen ein eigenes GitHub-Environment, eigene Secrets, eigene Schutzregeln und eine eigene Concurrency-Gruppe. Zugangsdaten aus `hiba` dürfen nicht wiederverwendet werden.
 
@@ -212,7 +214,7 @@ Wenn das automatische Deployment verwendet wird, müssen erforderliche Migration
 ## 11. Rollback
 
 1. Vor jeder Aktualisierung eine Datenbanksicherung und eine Kopie der bisherigen Anwendungsdateien erstellen.
-2. Bei einem reinen Anwendungsfehler die vorherigen Versionen von `.htaccess`, `api.php`, `support.php` und `public/index.html` wiederherstellen.
+2. Bei einem reinen Anwendungsfehler die vorherigen Versionen von `.htaccess`, `api.php`, `constants.php`, `support.php` und `public/index.html` wiederherstellen.
 3. Bei einer inkompatiblen Datenbankänderung die zum Release dokumentierten Rollback-Schritte verwenden oder die vorherige Datenbanksicherung einspielen.
 4. Nach einem Rollback Anmeldung und zentrale Funktionen erneut prüfen.
 

@@ -1,215 +1,119 @@
 # GitHub Copilot Instructions
 
-## Verbindlicher Arbeitsablauf
+## Arbeitsweise und Dokumentation
 
-- Lies diese Datei vor jeder Änderung vollständig und prüfe den Auftrag gegen
-  die hier dokumentierten Entscheidungen.
-- Ändere keine dieser Grundentscheidungen stillschweigend. Wenn ein Auftrag
-  ihnen widerspricht oder eine Entscheidung ersetzen, erweitern oder
-  relativieren würde, frage den Benutzer vor der Umsetzung.
-- Dokumentiere neue dauerhafte Produkt- oder Architekturentscheidungen in
-  dieser Datei. Temporäre Implementierungsdetails gehören nicht hierher.
-- Aktualisiere `CHANGELOG.md` bei jeder relevanten funktionalen, technischen oder betrieblichen Änderung. Nicht rückwärtskompatible Änderungen müssen ausdrücklich unter `Breaking Changes` stehen.
-- Dokumentiere jeden nicht automatisierbaren Aktualisierungsschritt vollständig in `CHANGELOG.md` und im Aktualisierungsabschnitt der `README.md`; insbesondere müssen erforderliche SQL-Migrationen, Konfigurationswerte und ihre Ausführungsreihenfolge genannt werden.
-- `docs/WEBSPACE-DEPLOYMENT.md` ist die maßgebliche ausführliche Anleitung für Installation, Deployment, Updates und Rollback auf Webspace. Andere Dokumente verlinken darauf, statt dieselben Schritte zu duplizieren.
-- Aktualisiere `DATENMODELL.md` bei jeder Änderung am Code, damit Tabellen,
-  Beziehungen, Datenformate und fachliche Regeln immer dem aktuellen
-  Implementierungsstand entsprechen.
-- Größere Änderungen an Anwendung, Berechtigungen, Datenmodell oder
-  Infrastruktur müssen vor Abschluss einen Security Review durchlaufen.
-  Dokumentiere Befunde und Entscheidungen in `SECURITY-REVIEW.md`.
-- Halte Änderungen klein und vollständig. Verwende zuerst vorhandenen Code,
-  dann PHP-, MySQL- oder Browser-Funktionen und erst danach zusätzliche
-  Abhängigkeiten.
+- Lies diese Datei vor jeder Änderung vollständig. Ändere dokumentierte Grundentscheidungen nicht stillschweigend; frage bei widersprechenden Anforderungen nach.
+- Halte Änderungen klein und vollständig. Nutze zuerst vorhandenen Code, dann PHP-, MySQL- oder Browserfunktionen und erst zuletzt neue Abhängigkeiten.
+- Schreibe Oberfläche, Validierungsfehler und fachliche Begriffe auf Deutsch.
+- Dokumentiere relevante Änderungen in `CHANGELOG.md`. Kennzeichne inkompatible Änderungen unter `Breaking Changes` und beschreibe manuelle Schritte in ihrer Ausführungsreihenfolge.
+- `docs/WEBSPACE-DEPLOYMENT.md` ist die kanonische Anleitung für Installation, Deployment, Updates und Rollback. Andere Dokumente verlinken darauf, statt sie zu duplizieren.
+- Halte `DATENMODELL.md` bei Änderungen an Tabellen, Beziehungen, Datenformaten oder fachlichen Regeln synchron.
+- Dokumentiere neue dauerhafte Produkt- und Architekturentscheidungen hier. Temporäre Implementierungsdetails gehören nicht in diese Datei.
+- Änderungen an Authentifizierung, Berechtigungen, sensiblen Daten oder Infrastruktur benötigen vor Abschluss einen dokumentierten Review in `SECURITY-REVIEW.md`.
 
-## Produkt und Sprache
+## Produkt und Architektur
 
-- Die Anwendung erstellt und konsolidiert Einsatzberichte für Feuerwehren.
-- Oberfläche, Validierungsfehler und fachliche Begriffe sind deutsch.
-- Eine Organisation beziehungsweise Wehr ist ein Mandant und besitzt mehrere
-  Einheiten.
-- Die Anwendung bleibt eine einfache, responsive Weboberfläche ohne
-  Frontend-Framework.
+- Die Anwendung erstellt Einheitsberichte für Feuerwehreinsätze und konsolidiert sie zu einem Gesamtbericht.
+- Eine Organisation beziehungsweise Wehr ist ein strikt getrennter Mandant mit mehreren Einheiten. Einheitsnamen sind innerhalb einer Organisation über `(organization_id, name)` eindeutig.
+- Zielbetrieb ist klassischer Webspace mit HTTPS, SFTP, PHP 8.2 oder neuer, Apache und MySQL 8.0 oder neuer.
+- `api.php` enthält Routing und Fachlogik. `constants.php` ist die zentrale Quelle für Rollen und fachliche Auswahllisten. `support.php` enthält gemeinsame HTTP-, PDO-, Validierungs- und Mailfunktionen.
+- `public/index.html` enthält das gesamte Frontend in nativem HTML, CSS und JavaScript. Es gibt kein Frontend-Framework und keine Composer-Laufzeitabhängigkeiten.
+- `.htaccess` erzwingt HTTPS, schützt nicht öffentliche Dateien, leitet `/api/*` an `api.php` weiter und liefert `public/index.html` aus.
+- Root- und Unterverzeichnis-Deployment funktionieren ohne separate Pfadkonfiguration.
+- API-Fehler haben die Form `{ "error": "..." }`. Eingaben werden an der API-Grenze validiert; Fehler werden weder verschluckt noch als Erfolg dargestellt.
+- `GET /api/bootstrap` meldet fehlende Konfiguration, Datenbankfehler und unvollständige Schemata ohne Zugangsdaten mit HTTP 503.
 
-## Technische Architektur
+## Datenbank und Migrationen
 
-- Zielbetrieb ist regulärer Webspace mit SFTP-Zugang, PHP 8.2 oder
-  neuer, Apache und MySQL 8.0 oder neuer.
-- Backend: `api.php` enthält die fachlichen Routen; `support.php` bündelt wiederverwendbare HTTP-, Datenbank-, Validierungs- und Mailfunktionen mit PHP-Standardfunktionen und PDO MySQL.
-- Frontend: `public/index.html` mit nativem HTML, CSS und JavaScript.
-- Es gibt keine Composer-Laufzeitabhängigkeiten.
-- Lokale Entwicklung läuft über `compose.yaml` mit PHP 8.2/Apache, MySQL 8.4
-  und einem ausschließlich lokalen, selbstsignierten HTTPS-Zertifikat.
-- Das initiale MySQL-Schema liegt in `schema.sql`. Spätere Schemaänderungen
-  benötigen kleine, vor dem Anwendungscode auszuführende SQL-Migrationen.
-- Apache leitet `/api/*` über `.htaccess` an `api.php` weiter und liefert
-  `public/index.html` als Startseite aus.
-- Die Anwendung unterstützt ohne separate Pfadkonfiguration sowohl den Betrieb im Dokumentenstamm als auch in einem Unterverzeichnis.
-- Nach erfolgreichen Tests eines Pushs auf `main` lädt der Deployment-Workflow
-  nur `.htaccess`, `api.php`, `support.php` und `public/index.html` per verpflichtendem SFTP
-  mit geprüftem Host-Key hoch. Konfiguration und SQL-Dateien werden nie automatisch deployt.
-- Das produktive GitHub-Environment heißt `hiba`. Weitere Ziele wie `devpreview` müssen eigene Environments, Secrets, Schutzregeln und Concurrency-Gruppen verwenden; Produktionszugangsdaten werden nicht geteilt.
-- Datenbankzugangsdaten, das einmalige Einrichtungstoken, die öffentliche HTTPS-Anwendungsadresse und die Absenderadresse kommen aus Umgebungsvariablen oder der nicht versionierten `config.local.php`.
-- API-Fehler haben die Form `{ "error": "..." }`. Eingaben werden an der
-  API-Grenze validiert; Fehler dürfen nicht still ignoriert werden.
-- `GET /api/bootstrap` prüft Datenbankkonfiguration, Erreichbarkeit und das vollständige Schema. Fehler werden ohne Zugangsdaten mit HTTP 503 gemeldet und in der Oberfläche als Betriebszustand angezeigt.
+- `schema.sql` definiert das vollständige aktuelle Schema für neue Installationen.
+- Jede spätere Schemaänderung erhält eine kleine, fortlaufend nummerierte Datei unter `migrations/`, die vor dem zugehörigen Anwendungscode ausgeführt wird.
+- Arbeite jede Migration zusätzlich in `schema.sql` ein und markiere sie dort in `schema_migrations` als angewendet.
+- Lokales Docker Compose führt ausstehende Migrationen mit `docker/migrate.sh` vor dem Webstart genau einmal aus. Bestehende Dev-Volumes müssen ohne Verlust fachlicher Daten aktualisiert werden.
+- Produktionsmigrationen werden nicht per SFTP automatisiert; dokumentiere ihre manuelle Ausführung in `CHANGELOG.md` und `docs/WEBSPACE-DEPLOYMENT.md`.
 
-## Mandanten und Berechtigungen
+## Mandanten, Rollen und Benutzer
 
-- Jede Abfrage fachlicher Daten muss über `organization_id` auf den aktuellen
-  Mandanten begrenzt sein.
-- `wehrleitung` sieht alle Einsätze und Berichte der eigenen Organisation,
-  verwaltet Einheiten und Benutzer und schreibt den Gesamtbericht.
-- `einheitsleitung` kann mehreren Einheiten angehören. Sie sieht und bearbeitet
-  Entwürfe ihrer Einheiten und gibt diese für die Wehrleitung frei.
-- `fuehrungskraft` kann mehreren Einheiten angehören und für jede dieser
-  Einheiten Berichte schreiben. Sie sieht nur selbst verfasste Berichte.
-- Benutzer gehören über `user_units` zu beliebig vielen Einheiten. Das alte
-  Feld `users.unit_id` bleibt nur als kompatible Primärzuordnung bestehen.
-- Benutzer können durch die Wehrleitung bearbeitet werden. Ein neues Passwort
-  ist dabei optional.
-- Neue Benutzer werden ohne Startpasswort angelegt und erhalten per E-Mail einen einmaligen Link, über den sie ihr Konto aktivieren und selbst ein Passwort setzen.
-- Vergessene Passwörter werden über einen per E-Mail versendeten, nur als SHA-256-Hash gespeicherten Einmal-Token zurückgesetzt. Der Token gilt 30 Minuten, Anforderungen sind pro Benutzer fünf Minuten gesperrt und ein erfolgreicher Reset widerruft alle Sitzungen.
-- E-Mails werden standardmäßig mit PHP `mail()` oder optional über authentifiziertes SMTP mit STARTTLS versendet. SMTP-Zugangsdaten bleiben ausschließlich in Umgebungsvariablen oder `config.local.php`.
-- Freigegebene Berichte sind unveränderlich.
-- Sitzungen liegen in einem `HttpOnly`- und `SameSite=Strict`-Cookie und laufen
-  nach zwölf Stunden ab.
+- Begrenze jede fachliche Abfrage serverseitig auf die `organization_id` des aktuellen Benutzers. UI-Ausblendung ersetzt keine Berechtigungsprüfung.
+- `wehrleitung` verwaltet Einheiten und Benutzer, sieht alle Einsätze und Berichte ihrer Organisation, sieht die Systemübersicht und schreibt den Gesamtbericht.
+- `einheitsleitung` kann mehreren Einheiten angehören, deren Entwürfe sehen und bearbeiten sowie Berichte freigeben.
+- `fuehrungskraft` kann für alle ihr zugeordneten Einheiten Berichte schreiben, sieht aber nur selbst verfasste Berichte.
+- Benutzer gehören über `user_units` zu beliebig vielen Einheiten. `users.unit_id` bleibt nur als kompatible Primärzuordnung bestehen.
+- Eine Organisation muss immer mindestens eine `wehrleitung` behalten.
+- Neue Benutzer erhalten kein Startpasswort, sondern einen 30 Minuten gültigen Einmallink zur Aktivierung. Vergessene Passwörter verwenden denselben gehashten Tokenmechanismus; Anforderungen sind pro Benutzer fünf Minuten gesperrt.
+- Eine Passwortänderung widerruft alle Sitzungen des Benutzers.
+- Erfolgreiche Anmeldungen werden mit Benutzer und UTC-Zeitpunkt in `login_history` gespeichert. Nur die Wehrleitung sieht die fünf neuesten Einträge je Benutzer. Speichere keine IP-Adressen, Browserdaten oder fehlgeschlagenen Anmeldungen.
+
+## Sitzungen, Requests und E-Mail
+
+- Die Anwendung läuft produktiv ausschließlich über HTTPS. Das Cookie `__Host-session` ist `Secure`, `HttpOnly`, `SameSite=Strict` und zwölf Stunden gültig.
+- Die Datenbank speichert nur den SHA-256-Hash des zufälligen Sitzungswerts.
+- Schreibende API-Anfragen verwenden `application/json`; vorhandene `Origin`-Header müssen exakt der konfigurierten HTTPS-Origin entsprechen.
+- Behalte die Größenbegrenzung für Request-Bodies bei und validiere IDs, Rollen, Koordinaten und Textlängen.
+- Passwörter werden mit `password_hash` gespeichert und mit `password_verify` geprüft.
+- Die öffentliche Ersteinrichtung erfordert ein zufälliges `SETUP_TOKEN` mit mindestens 32 Zeichen.
+- E-Mails werden über PHP `mail()` oder optional per authentifiziertem SMTP mit STARTTLS versendet. Zugangsdaten bleiben in Umgebungsvariablen oder der nicht versionierten `config.local.php`.
 
 ## Einsätze und Berichte
 
-- Ein Einsatz kann mehreren Einheiten zugeordnet sein.
-- Jede beteiligte Einheit verfasst genau einen Bericht pro Einsatz; die Wehrleitung
-  konsolidiert diese in `incidents.consolidated_text`.
-- Ein DIVERA-Einsatz ist innerhalb einer Organisation über `divera_id`
-  eindeutig. Wiederholter Import aktualisiert ihn, statt ihn zu duplizieren.
-- `incident_units` ist je Kombination aus Einsatz und Einheit eindeutig.
-  Wiederholter Import aktualisiert diese Zuordnung und ihre Fahrzeuge.
-- Importierte Einsatzdaten umfassen `foreign_id`, DIVERA-`date`,
-  Alarmierungszeit, `title`, `text`, Adresse, `lat`/`lng`, `remark`, `patient`
-  und `caller`.
-- Jeder Einheitsbericht enthält die Alarmierungszeit des Einsatzes sowie
-  `departed_at`, `arrived_at` und `ended_at`. Die Alarmierungszeit ist im
-  Bericht nicht frei änderbar und stammt bei DIVERA-Einsätzen aus `date`.
-- Einsatzzeiten müssen vollständig und chronologisch sein. Die Einsatzdauer
-  wird aus Alarmierungszeit und Einsatzende berechnet und nicht separat
-  gespeichert.
-- Zulässige Einsatzarten sind: Kleinbrand, Mittelbrand, Großbrand, Wald- und
-  Flächenbrand, Schornsteinbrand, Kfz-Brand, Verkehrsunfall,
-  Oelunfall/Oelspur, Chemieunfall, Technische Hilfe, Sturmeinsatz,
-  Hochwassereinsatz, Fehlalarm BMA, BMA, Fehlalarm, Böswilliger Alarm und
-  Sonstiges.
-- Die Aufgliederung ist eine Mehrfachauswahl in den drei Gruppen
-  `site` (Einsatzstelle), `cause` (Schadensursache) und `technical`
-  (Technische Hilfe). Die Werte entsprechen dem Formular
-  `FW-Einsatzbericht 66.2026 F4 Hilchenbach.pdf`.
-- Andere Felder aus diesem PDF werden vorerst ausdrücklich nicht übernommen.
-- `patient` und `caller` sind sensible, mandantengebundene Daten. Sie dürfen
-  weder protokolliert noch organisationsübergreifend ausgegeben werden.
+- Ein Einsatz kann mehreren Einheiten zugeordnet sein. `(incident_id, unit_id)` ist eindeutig; jede beteiligte Einheit schreibt genau einen Bericht.
+- Die Wehrleitung konsolidiert Einzelberichte in `incidents.consolidated_text`.
+- Eine manuelle laufende Nummer ist je Einheit und lokalem Kalenderjahr eindeutig.
+- Einheitsberichte enthalten Geschädigte und Schädiger mit optionalem Namen, Telefon und Adresse sowie Einsatzleitung und eine optionale weitere Führungskraft mit Dienstgrad und Name.
+- Alarmierungszeit, Ausrückezeit, Eintreffzeit und Einsatzende müssen vollständig und chronologisch sein. Die Alarmierungszeit stammt aus dem Einsatz und ist im Bericht unveränderlich; die Dauer wird berechnet.
+- Rollen, Einsatzarten, Gruppenbezeichnungen und Aufgliederungen liegen zentral in `constants.php`. Die Oberfläche lädt die fachlichen Optionen über `GET /api/options`; dupliziere sie nicht im Frontend.
+- Die Aufgliederung entspricht dem Feuerwehrformular und besteht aus den Mehrfachauswahlgruppen `site`, `cause` und `technical`.
+- Strukturierte meldende Person, detaillierte Einsatzortfelder, Kostenpflicht, Schadenssumme, Geräte, Löschmittel, Brandwache, Personal am Gerätehaus und Verwaltungsvermerke werden derzeit bewusst nicht erfasst.
+- Berichte wechseln genau einmal von `draft` nach `released`. Freigegebene Berichte und `released_at` sind unveränderlich; Wiederholungen liefern HTTP 409.
+- `patient`, `caller`, Geschädigte, Schädiger und Berichtstexte sind sensible, mandantengebundene Einsatzdaten. Protokolliere sie nicht.
 
-## Mitglieder, Qualifikationen und Besatzung
+## Mitglieder, Fahrzeuge und Besatzung
 
-- Mitglieder sind fachliche Personen und von Anmeldebenutzern getrennt.
-- Eine Person wird anhand ihrer DIVERA-ID organisationsweit einmal in
-  `members` gespeichert und über `member_units` mehreren Einheiten zugeordnet.
-- Qualifikationen sind einheitsspezifisch. Der Sync aktualisiert
-  `cluster.qualification` und die IDs aus
-  `cluster.consumer[*].qualifications`.
-- Berichtsbesatzungen liegen strukturiert in `report_crew`. Ein Mitglied kann
-  pro Bericht höchstens einmal eingesetzt werden.
-- Zulässige Funktionen sind `maschinist`, `einheitsfuehrer` und `besatzung`.
-- Je Fahrzeug gibt es höchstens einen Maschinisten und einen Einheitsführer,
-  aber beliebig viele Personen in der Besatzung.
-- Nur eigene Fahrzeuge der berichtenden Einheit oder „Ohne Fahrzeug“ sind als
-  Besatzungsziel zulässig. Der Server erzwingt diese Regel unabhängig von der
-  Oberfläche.
-- In der Berichtsansicht stehen zuerst die Fahrzeugspalten mit den drei
-  Funktionen und darunter eine volle Breite mit verfügbarem Personal.
-- Die Box mit verfügbarem Personal ist nativ ein- und ausklappbar.
-- Drag-and-Drop ist die primäre Bedienung. Auswahlfelder bleiben als
-  barrierearmer Tastatur- und Mobil-Fallback erhalten.
+- Mitglieder sind fachliche Personen und keine Anmeldebenutzer.
+- Eine Person wird anhand ihrer DIVERA-ID organisationsweit einmal in `members` gespeichert und über `member_units` mehreren Einheiten zugeordnet.
+- Qualifikationen sind einheitsspezifisch und werden aus `cluster.qualification` sowie `cluster.consumer[*].qualifications` synchronisiert.
+- `report_crew` ist die maßgebliche strukturierte Besatzung. Ein Mitglied kommt pro Bericht höchstens einmal vor.
+- Zulässige Funktionen sind `maschinist`, `einheitsfuehrer` und `besatzung`. Pro Fahrzeug gibt es höchstens einen Maschinisten und einen Einheitsführer; die Besatzung ist unbegrenzt.
+- Nur eigene Fahrzeuge der berichtenden Einheit oder „Ohne Fahrzeug“ sind Besatzungsziele. Der Server erzwingt diese Regel.
 
 ## DIVERA 24/7
 
-- DIVERA wird je Einheit mit einem eigenen Access-Key konfiguriert.
-- DIVERA ist strikt nur lesend angebunden. Jeder externe DIVERA-Aufruf muss
-  HTTP `GET` verwenden.
-- Rufe niemals Endpunkte auf, die Alarme, Rückmeldungen, Status,
-  Fahrzeugbesatzungen, Dateien oder andere DIVERA-Daten erstellen, ändern,
-  bestätigen, schließen oder löschen.
-- Access-Keys dürfen nie geloggt, an den Browser zurückgegeben oder committed
-  werden.
-- Einsätze werden über `GET /api/v2/alarms` gelesen.
-- Mitglieder, Qualifikationen und Fahrzeugstammdaten werden über
-  `GET /api/v2/pull/all` gelesen.
-- Der Live-Fahrzeugstatus aus `pull/vehicle-status` wird ausdrücklich nicht
-  abgerufen, gespeichert oder angezeigt; er ist für Einsatzberichte nicht
-  relevant.
-- `cluster.vehicle` bestimmt die eigenen Fahrzeuge der konfigurierten Einheit.
-  Alle im Alarm enthaltenen Fahrzeuge werden importiert und als eigenes oder
-  fremdes Fahrzeug markiert. Nur eigene Fahrzeuge sind Besatzungsziele.
-- Die Besatzungs-Endpunkte von DIVERA werden niemals verwendet. Alle
-  Personal-Fahrzeug-Zuordnungen existieren ausschließlich lokal.
-- Ein lokaler POST-Import oder Sync schreibt nur in MySQL und ist kein
-  schreibender DIVERA-Aufruf.
+- Jede Einheit besitzt ihren eigenen DIVERA-Access-Key.
+- DIVERA ist strikt nur lesend angebunden. Externe DIVERA-Aufrufe verwenden ausschließlich HTTP `GET`.
+- Verwende niemals Endpunkte, die Alarme, Rückmeldungen, Status, Besatzungen, Dateien oder andere DIVERA-Daten erstellen, ändern, bestätigen, schließen oder löschen.
+- Lies Einsätze über `GET /api/v2/alarms` und Mitglieder, Qualifikationen sowie Fahrzeugstammdaten über `GET /api/v2/pull/all`.
+- Rufe `pull/vehicle-status` und DIVERA-Besatzungsendpunkte nicht auf.
+- `cluster.vehicle` definiert die eigenen Fahrzeuge einer Einheit. Importiere Alarmfahrzeuge als eigene oder fremde Fahrzeuge; nur eigene Fahrzeuge sind Besatzungsziele.
+- Lokale POST-Importe und Synchronisationen schreiben ausschließlich in MySQL.
+- Access-Keys werden nie protokolliert, an den Browser ausgegeben oder committed.
+- Ein DIVERA-Einsatz ist innerhalb einer Organisation über `divera_id` eindeutig. Wiederholter Import aktualisiert Einsatz und `incident_units`, statt sie zu duplizieren.
 
-## Oberfläche
+## Oberfläche und Barrierefreiheit
 
-- Hauptnavigation: Einsätze, Mitglieder & Fahrzeuge, rollenabhängig
-  Verwaltung, System und DIVERA sowie Abmelden.
-- Die Seite „System“ ist ausschließlich für die Wehrleitung sichtbar und zeigt eine read-only Übersicht zu Anwendung, Datenbank, E-Mail, Einheiten und Benutzern. DSN, Kennwörter, Einrichtungstoken und DIVERA-Schlüssel werden nie ausgegeben.
-- Der Tab „Mitglieder & Fahrzeuge“ zeigt je zugänglicher Einheit
-  synchronisierte Mitglieder und Qualifikationen sowie eigene und fremde
-  Fahrzeuge aus den letzten Einsatzimporten.
-- Die DIVERA-Seite konfiguriert den Access-Key, synchronisiert Mitglieder und
-  Qualifikationen und importiert Einsätze.
-- Bereits für die ausgewählte Einheit importierte DIVERA-Einsätze zeigen einen
-  deaktivierten Import-Button.
-- Einzelberichte zeigen Besatzungen nach Fahrzeug gruppiert; innerhalb des
-  Fahrzeugs stehen Einheitsführer, Maschinist und Besatzung.
-- Externe Kartenlinks verwenden OpenStreetMap und öffnen mit
-  `rel="noopener"`.
+- Hauptnavigation: Einsätze, Mitglieder & Fahrzeuge, rollenabhängig Verwaltung, System und DIVERA sowie Abmelden.
+- „System“ ist nur für die Wehrleitung sichtbar und zeigt ausschließlich kuratierte, nicht geheime Zustandsdaten. Gib niemals DSN, Kennwörter, Einrichtungstoken oder DIVERA-Schlüssel aus.
+- Die Oberfläche bleibt ohne Framework responsiv und mit Tastatur, Screenreader und Touch bedienbar.
+- Interaktive Ziele sind mindestens 44 Pixel groß, Tastaturfokus ist sichtbar und dynamische Fehler sowie Statusänderungen werden angekündigt.
+- Nutze native Eingabetypen, Labels, Fieldsets und mobil bedienbare Kontrollfelder.
+- Drag-and-drop ist nur eine optionale Mausbedienung. Auswahlfelder bleiben die gleichwertige Tastatur- und Touchbedienung.
+- Externe Kartenlinks verwenden OpenStreetMap, kündigen das neue Fenster an und setzen `rel="noopener"`.
 
-## Datenschutz und Sicherheit
+## Datenschutz und Geheimnisse
 
-- Passwörter werden mit `password_hash` gespeichert und mit
-  `password_verify` geprüft.
-- Die öffentliche Ersteinrichtung erfordert ein zufälliges, mindestens 32
-  Zeichen langes `SETUP_TOKEN`.
-- Sitzungscookies sind ausschließlich über HTTPS verfügbar und immer `Secure`, `HttpOnly` und `SameSite=Strict`.
-  Eine Passwortänderung widerruft alle Sitzungen des betroffenen Benutzers.
-- Das Sitzungscookie heißt `__Host-session`; in der Datenbank liegt ausschließlich sein SHA-256-Hash. Alle schreibenden API-Anfragen erfordern `application/json`; vorhandene `Origin`-Header müssen exakt der HTTPS-Anwendungsorigin entsprechen.
-- Eine Organisation muss immer mindestens einen Benutzer mit der Rolle `wehrleitung` behalten.
-- Ein Bericht kann nur einmal vom Status `draft` nach `released` wechseln; `released_at` wird danach nicht mehr überschrieben.
-- Passwort-Hashes, Sitzungswerte und DIVERA-Schlüssel werden nie über die API
-  ausgegeben.
-- Mandanten- und Einheitsgrenzen werden serverseitig geprüft; reine
-  UI-Ausblendung ist keine Berechtigungsprüfung.
-- Behalte die Größenbegrenzung für Request-Bodies und validiere IDs,
-  Koordinaten, Rollen und Freitextlängen.
+- Gib Passwort-Hashes, Sitzungswerte, Reset-Tokens, Konfigurationsgeheimnisse und DIVERA-Schlüssel niemals über die API aus oder in Logs aus.
+- Mandanten-, Rollen- und Einheitsgrenzen gelten auch für Systemübersichten, Exporte und neue Endpunkte.
+- Erweitere die Erfassung personenbezogener Daten nur auf ausdrücklichen Auftrag und aktualisiere dafür Datenmodell und Security Review.
 
-## Tests und CI
+## Tests, CI und Deployment
 
-- Tests verwenden PHP-, MySQL- und Shell-Bordmittel ohne Testframework.
-- GitHub Actions prüft PHP-Syntax, importiert `schema.sql` in MySQL 8 und
-  führt `test/smoke.sh` aus.
-- Ein unabhängiger CI-Job baut die Docker-Images und führt den Smoke-Test
-  gegen Apache/HTTPS und MySQL aus. Der Test-Workflow ist nur erfolgreich,
-  wenn beide Jobs bestehen.
-- Docker Compose führt denselben Smoke-Test gegen die lokale
-  HTTPS-/MySQL-Umgebung aus.
-- Pull Requests führen ausschließlich Tests aus und erhalten keinen Zugriff auf die Secrets des GitHub-Environments `hiba` oder zukünftiger Deployment-Environments.
-- Dependabot prüft GitHub Actions, Dockerfiles und Docker Compose wöchentlich.
-  Minor- und Patch-Updates werden je Ökosystem gruppiert; Major-Updates
-  bleiben einzeln prüfbar.
-- Ergänze für nicht triviale Änderungen einen fokussierten Test im bestehenden
-  End-to-End-Fluss, besonders für Mandantentrennung, Rollen,
-  Import-Idempotenz und externe Nur-Lese-Grenzen.
-- Führe kein Testframework ein, solange die fokussierten HTTP-Checks
-  ausreichen.
+- Verwende die vorhandenen PHP-, MySQL- und Shell-Checks ohne zusätzliches Testframework.
+- Ergänze für nicht triviale Änderungen einen fokussierten Check in `test/smoke.sh`, insbesondere für Mandantentrennung, Rollen, Zustandsübergänge, Import-Idempotenz und externe Nur-Lese-Grenzen.
+- `test/dev-migrations.sh` prüft Upgrades bestehender Dev-Volumes und die idempotente Wiederholung.
+- GitHub Actions prüft PHP-Syntax, Shellskripte, `schema.sql`, den HTTP-End-to-End-Fluss sowie Docker Compose gegen Apache/HTTPS und MySQL.
+- Pull Requests erhalten keinen Zugriff auf Deployment-Secrets.
+- Nach erfolgreichen Tests eines Pushs auf `main` lädt der Workflow nur `.htaccess`, `api.php`, `constants.php`, `support.php` und `public/index.html` per SFTP mit geprüftem Host-Key hoch. Lokale Konfiguration, Schema und Migrationen werden nie automatisch deployt.
+- Das produktive GitHub-Environment heißt `hiba`. Jedes weitere Ziel benötigt eigene Secrets, Schutzregeln und eine eigene Concurrency-Gruppe.
 
 ## Betrieb und Zurücksetzen
 
-- Es gibt absichtlich keine Lösch- oder Reset-Funktion in der Oberfläche.
-- Ein vollständiger einmaliger Reset erfolgt durch Löschen aller
-  MySQL-Tabellen und erneuten Import von `schema.sql`.
-- Ein Reset löscht alle Benutzer, Einsätze und Berichte endgültig.
+- Es gibt keine Lösch- oder Reset-Funktion in der Oberfläche.
+- Ein vollständiger Reset löscht alle MySQL-Tabellen und importiert `schema.sql` neu. Dabei gehen alle Benutzer, Einsätze und Berichte endgültig verloren.

@@ -1,7 +1,7 @@
 Options -Indexes
 DirectoryIndex public/index.html
 
-<FilesMatch "^(config(?:\..*)?\.php|support\.php|schema\.sql)$">
+<FilesMatch "^(config(?:\..*)?\.php|constants\.php|support\.php|schema\.sql)$">
   Require all denied
 </FilesMatch>
 

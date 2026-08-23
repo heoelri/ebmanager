@@ -13,8 +13,10 @@ API-Routen bleiben unabhängig davon `/api/...`, ob die Anwendung im Dokumentens
 werden vor dem Anwendungscode kontrolliert über die Datenbankverwaltung des
 Hosters eingespielt.
 
-Für lokale Entwicklung initialisiert der MySQL-Container dasselbe
-`schema.sql` nur beim Anlegen eines neuen Docker-Volumes. Die lokale
+Für lokale Entwicklung initialisiert der MySQL-Container `schema.sql` beim
+Anlegen eines neuen Docker-Volumes. Bei bestehenden Volumes führt der
+Compose-Dienst `migrate` alle noch nicht in `schema_migrations` vermerkten
+Dateien aus `migrations/` vor dem Start der Webanwendung aus. Die lokale
 Webanwendung ist ausschließlich an die Loopback-Adresse gebunden und erhält
 keine lokale Produktivkonfiguration.
 
@@ -29,9 +31,13 @@ erDiagram
     users ||--o{ user_units : gehoert_zu
     units ||--o{ user_units : hat
     users ||--o{ sessions : verwendet
+    users ||--o{ login_history : meldet_sich_an
     users ||--o{ password_resets : fordert_an
     incidents ||--o{ incident_units : alarmiert
     units ||--o{ incident_units : beteiligt
+    units ||--o{ divera_imports : importiert
+    incidents ||--o{ divera_imports : protokolliert
+    users ||--o{ divera_imports : startet
     members ||--o{ member_units : gehoert_zu
     units ||--o{ member_units : hat
     units ||--o{ qualifications : definiert
@@ -69,7 +75,7 @@ Sitzungen werden ausschließlich über HTTPS im `Secure`-, `HttpOnly`- und `Same
 | `name` | VARCHAR(200), NOT NULL | Innerhalb der Wehr eindeutiger Name |
 | `divera_access_key` | VARCHAR(500), NULL | Server-seitiger DIVERA-Schlüssel |
 
-Eindeutig ist `(organization_id, name)`.
+Eindeutig ist `(organization_id, name)`; durch die Datenbankkollation unterscheiden sich Namen dabei nicht allein durch Groß- und Kleinschreibung.
 
 ### `users`
 
@@ -108,6 +114,18 @@ Beide Fremdschlüssel werden beim Löschen ihres Elternsatzes kaskadiert.
 
 Der Klartext-Sitzungswert existiert nur im Browsercookie. Sitzungen werden beim Löschen des Benutzers mitgelöscht.
 
+### `login_history`
+
+Speichert ausschließlich erfolgreiche Anmeldungen. IP-Adresse, Browserdaten und fehlgeschlagene Versuche werden nicht erfasst.
+
+| Spalte | Typ | Bedeutung |
+|---|---|---|
+| `id` | BIGINT UNSIGNED, PK | Interne ID |
+| `user_id` | BIGINT UNSIGNED, FK | Angemeldeter Benutzer |
+| `logged_in_at` | DATETIME, NOT NULL | Anmeldezeitpunkt in UTC |
+
+Die Verwaltung zeigt der Wehrleitung die fünf neuesten Einträge pro Benutzer. Beim Löschen eines Benutzers wird seine Login-Historie mitgelöscht.
+
 ### `password_resets`
 
 Die Tabelle wird sowohl für Passwort-Wiederherstellungen als auch für Einladungen neuer Benutzer verwendet. In beiden Fällen setzt der Benutzer über denselben einmaligen Token selbst ein Passwort.
@@ -145,7 +163,8 @@ Der Klartexttoken wird nur per E-Mail versendet und nie gespeichert. Nach erfolg
 
 Ein importierter Einsatz ist über `(organization_id, divera_id)` eindeutig.
 Ein erneuter Import aktualisiert ihn. Manuelle Einsätze haben keine
-`divera_id`. Beim Import sendet der Browser nur diese ID; alle kanonischen
+`divera_id`; ihr Zeitpunkt wird als vollständiger UTC-ISO-Zeitwert validiert
+und normalisiert. Beim Import sendet der Browser nur diese ID; alle kanonischen
 Einsatzfelder werden unmittelbar danach serverseitig erneut aus DIVERA
 gelesen.
 
@@ -179,6 +198,22 @@ Einsatzes wird die Zuordnung mitgelöscht.
 `own` bestimmt, ob das Fahrzeug in diesem Einheitsbericht als
 Besatzungsziel verwendet werden darf. Ältere Datensätze können aus
 Kompatibilitätsgründen reine Fahrzeugnamen enthalten.
+
+### `divera_imports`
+
+Protokolliert jeden erfolgreichen DIVERA-Import einschließlich erneuter
+Importe eines bereits bekannten Einsatzes.
+
+| Spalte | Typ | Bedeutung |
+|---|---|---|
+| `id` | BIGINT UNSIGNED, PK | Interne ID |
+| `unit_id` | BIGINT UNSIGNED, FK | Importierende Einheit |
+| `incident_id` | BIGINT UNSIGNED, FK | Lokal angelegter oder aktualisierter Einsatz |
+| `imported_by` | BIGINT UNSIGNED, FK, NULL | Auslösender Benutzer |
+| `imported_at` | DATETIME, NOT NULL | Importzeitpunkt in UTC |
+
+Beim Löschen eines Benutzers bleibt der Eintrag mit leerem `imported_by`
+erhalten. Die Einsatzübersicht zeigt je Einheit den neuesten Importzeitpunkt.
 
 ### `members`
 
@@ -230,6 +265,11 @@ Viele-zu-viele-Zuordnung von Mitgliedern zu Qualifikationen.
 | `incident_id` | BIGINT UNSIGNED, FK | Zugehöriger Einsatz |
 | `unit_id` | BIGINT UNSIGNED, FK | Berichtende Einheit |
 | `author_id` | BIGINT UNSIGNED, FK | Erstellender Benutzer |
+| `report_year` | SMALLINT UNSIGNED, NULL | Kalenderjahr des Einsatzes in `Europe/Berlin`; bei Altbeständen leer |
+| `running_number` | VARCHAR(50), NULL | Manuell vergebene laufende Nummer der Einheit; bei Altbeständen leer |
+| `damaged_party` | JSON, NULL | Geschädigte Person mit Name, Telefon und Adresse |
+| `damaging_party` | JSON, NULL | Schädiger mit Name, Telefon und Adresse |
+| `incident_command` | JSON, NULL | Einsatzleitung und optionale weitere Führungskraft jeweils mit Dienstgrad und Name |
 | `narrative` | TEXT, NOT NULL | Freitext des Einheitsberichts |
 | `vehicles` | TEXT, NOT NULL | Abgeleitete, kommagetrennte Fahrzeugübersicht |
 | `personnel` | TEXT, NOT NULL | Abgeleitete, kommagetrennte Personalübersicht |
@@ -245,13 +285,15 @@ Viele-zu-viele-Zuordnung von Mitgliedern zu Qualifikationen.
 | `released_at` | DATETIME, NULL | Freigabezeit |
 
 Eindeutig ist `(incident_id, unit_id)`: Jede Einheit schreibt pro Einsatz
-genau einen Bericht. Die vier Einsatzzeiten müssen chronologisch sein.
+genau einen Bericht. Zusätzlich ist `(unit_id, report_year, running_number)`
+eindeutig, damit eine Einheit dieselbe laufende Nummer innerhalb eines
+Kalenderjahres nur einmal vergeben kann. Die vier Einsatzzeiten müssen chronologisch sein.
 `alarmed_at` wird nicht vom Client übernommen. Die Dauer wird bei der Abfrage
 als `duration_minutes` aus `alarmed_at` und `ended_at` berechnet und nicht
 gespeichert.
 
-`classification` hat drei Listen und enthält ausschließlich die in
-`.github/copilot-instructions.md` festgelegten Werte:
+`classification` enthält die in `constants.php` definierten Gruppen und
+ausschließlich deren dort festgelegte Werte:
 
 ```json
 {
@@ -290,7 +332,7 @@ mit zwei getrennten Datenbankverbindungen nach.
   aktiv.
 - Einsätze löschen ihre Einheitszuordnungen, Berichte und
   Besatzungszuordnungen kaskadierend.
-- Benutzer löschen ihre Sitzungen und Einheitszuordnungen kaskadierend.
+- Benutzer löschen ihre Sitzungen, Login-Historie und Einheitszuordnungen kaskadierend.
 - Mitglieder und Qualifikationen löschen ihre Zuordnungen kaskadierend.
 - Für Organisationen, Einheiten, Autoren und in Berichten verwendete
   Mitglieder gibt es bewusst keine allgemeine Löschfunktion.
@@ -301,5 +343,6 @@ mit zwei getrennten Datenbankverbindungen nach.
 
 `password_hash`, Klartext-Sitzungswerte und `units.divera_access_key` dürfen nicht
 über die API ausgegeben oder protokolliert werden. `incidents.patient` und
-`incidents.caller` sind sensible Einsatzdaten und müssen stets auf den
-aktuellen Mandanten begrenzt bleiben.
+`incidents.caller` sowie `reports.damaged_party` und
+`reports.damaging_party` sind sensible Einsatzdaten und müssen stets auf den
+aktuellen Mandanten und die bestehenden Berichtsrechte begrenzt bleiben.

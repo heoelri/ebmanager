@@ -18,10 +18,27 @@ elif mysql --help 2>&1 | grep -q -- '--skip-ssl'; then
   mysql_tls_args=(--skip-ssl)
 fi
 
+# Fehlende Datenbankkonfiguration wird bei Root-, Unterverzeichnis- und authentifizierten Anfragen gemeldet.
 DB_DSN='' REQUEST_METHOD=GET REQUEST_URI=/api/bootstrap php api.php | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
 DB_DSN='' php -r '$_SERVER["REQUEST_METHOD"]="GET"; $_SERVER["REQUEST_URI"]="/ebmanager/api/bootstrap"; $_SERVER["SCRIPT_NAME"]="/ebmanager/api.php"; require "api.php";' | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
 DB_DSN='' php -r '$_COOKIE["session"]=str_repeat("a",64); $_SERVER["REQUEST_METHOD"]="GET"; $_SERVER["REQUEST_URI"]="/api/me"; require "api.php";' | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
 
+# Das Frontend enthält die erwarteten Accessibility- und DIVERA-Elemente, aber keine duplizierten Fachoptionen.
+php -r '
+  $html=file_get_contents("public/index.html");
+  foreach (["viewport-fit=cover","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","min-height:44px",":focus-visible","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:"] as $required) {
+    if (!str_contains($html,$required)) exit(1);
+  }
+  foreach (["Kleinbrand","Wohngebäude","Menschen in Notlage"] as $duplicatedOption) {
+    if (str_contains($html,$duplicatedOption)) exit(1);
+  }
+  if (preg_match("/<select[^>]+multiple/i",$html)) exit(1);
+'
+
+# Fachoptionen sind vorhanden und ihre Klassifikationsschlüssel stimmen mit den Gruppenbezeichnungen überein.
+php -r 'require "constants.php"; assert(INCIDENT_TYPES!==[]); assert(array_keys(CLASSIFICATIONS)===array_keys(CLASSIFICATION_LABELS));'
+
+# Ohne externen Testserver werden lokale HTTP- und SMTP-Testserver gestartet.
 if [[ -z "${TEST_BASE_URL:-}" ]]; then
   openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost -addext subjectAltName=DNS:localhost \
     -keyout smtp-key.pem -out smtp-cert.pem >/dev/null 2>&1
@@ -33,6 +50,7 @@ if [[ -z "${TEST_BASE_URL:-}" ]]; then
   trap 'kill "$server_pid" "${smtp_pid:-}" 2>/dev/null || true; rm -f smtp-cert.pem smtp-key.pem; cat php-server.log smtp-server.log' EXIT
 fi
 
+# Das HTTPS-Deployment leitet HTTP um und sendet HSTS.
 if [[ "$base_url" == https://* ]]; then
   http_url="http://${base_url#https://}"
   test "$(curl --silent --output /dev/null --write-out '%{http_code}' "$http_url/")" = 301
@@ -44,25 +62,30 @@ for _ in {1..20}; do
   sleep 0.25
 done
 
+# Setup-Anfragen ohne JSON-Content-Type werden abgelehnt.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --data '{"organization":"Testwehr"}' \
   "$base_url/api/setup")" = 415
 
+# Ein ungültiges Setup-Token wird abgelehnt.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --header 'Content-Type: application/json' \
   --data '{"organization":"Testwehr","unit":"Löschzug","name":"Admin","email":"admin@example.test","password":"geheimes-passwort","setupToken":"falsch"}' \
   "$base_url/api/setup")" = 403
 
+# Das Setup validiert die E-Mail-Adresse.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --header 'Content-Type: application/json' \
   --data "{\"organization\":\"Testwehr\",\"unit\":\"Löschzug\",\"name\":\"Admin\",\"email\":\"ungültig\",\"password\":\"geheimes-passwort\",\"setupToken\":\"$SETUP_TOKEN\"}" \
   "$base_url/api/setup")" = 400
 
+# Ein gültiges Setup legt Organisation, Einheit und erste Wehrleitung an.
 curl --insecure --silent --fail \
   --header 'Content-Type: application/json' \
   --data "{\"organization\":\"Testwehr\",\"unit\":\"Löschzug\",\"name\":\"Admin\",\"email\":\"admin@example.test\",\"password\":\"geheimes-passwort\",\"setupToken\":\"$SETUP_TOKEN\"}" \
   "$base_url/api/setup" | grep --quiet '"ok":true'
 
+# Die Session-Migration hasht vorhandene Klartext-Tokens, ohne gültige Sitzungen zu verlieren.
 migration_token='eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="INSERT INTO sessions(token,user_id,expires_at) SELECT '$migration_token',id,UTC_TIMESTAMP()+INTERVAL 1 HOUR FROM users WHERE email='admin@example.test'"
@@ -73,6 +96,7 @@ curl --insecure --silent --fail --cookie "$session_cookie=$migration_token" \
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="DELETE FROM sessions WHERE token=SHA2('$migration_token',256)"
 
+# Der Login erzeugt eine nutzbare Sitzung und speichert ausschließlich deren SHA-256-Hash.
 curl --insecure --silent --fail --cookie-jar cookies.txt \
   --header 'Content-Type: application/json' \
   --header "Origin: $base_url" \
@@ -86,6 +110,32 @@ test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-characte
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" \
   "$base_url/api/me" | grep --quiet '"role":"wehrleitung"'
 
+# Der Options-Endpunkt liefert exakt die zentral konfigurierten Einsatzarten und Klassifikationen.
+options_json=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/options")
+printf '%s' "$options_json" | php -r '
+  require "constants.php";
+  $options=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+  assert($options["incidentTypes"]===INCIDENT_TYPES);
+  assert($options["classifications"]===CLASSIFICATIONS);
+  assert($options["classificationLabels"]===CLASSIFICATION_LABELS);
+'
+
+# Apache verhindert den direkten HTTP-Zugriff auf die zentrale Konstantendatei.
+if [[ "$base_url" == https://* ]]; then
+  test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' "$base_url/constants.php")" = 403
+fi
+
+# Wiederholte Anmeldungen erscheinen vollständig und absteigend sortiert in der Login-Historie.
+curl --insecure --silent --fail --cookie-jar second-login-cookies.txt \
+  --header 'Content-Type: application/json' \
+  --header "Origin: $base_url" \
+  --data '{"email":"admin@example.test","password":"geheimes-passwort"}' \
+  "$base_url/api/login" | grep --quiet '"ok":true'
+users_json=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/users")
+printf '%s' "$users_json" | php -r '$users=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($users[0]["loginHistory"])===2); assert($users[0]["loginHistory"][0]>=$users[0]["loginHistory"][1]);'
+rm -f second-login-cookies.txt
+
+# Die Systemübersicht enthält erwartete Statusdaten, aber keine Zugangsdaten oder Tokens.
 system_json=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/system")
 printf '%s' "$system_json" | php -r '
   $data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
@@ -99,6 +149,15 @@ printf '%s' "$system_json" | php -r '
   $check($data);
 '
 
+# Ein fehlender Schemateil wird als unvollständige Datenbank erkannt.
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DROP TABLE divera_imports"
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/system" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(str_contains($data["database"]["status"],"unvollständig"));'
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  <migrations/005-divera-imports.sql
+
+# Führungskräfte ohne Wehrleitungsrolle dürfen die Systemübersicht nicht aufrufen.
 regular_token='dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
 regular_hash=$(php -r "echo hash('sha256', '$regular_token');")
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
@@ -108,6 +167,7 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="DELETE FROM users WHERE email='testkraft@example.test'"
 
+# Die letzte Wehrleitung eines Mandanten kann nicht herabgestuft werden.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
@@ -115,6 +175,7 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --data '{"name":"Admin","email":"admin@example.test","role":"fuehrungskraft","unitIds":[1]}' \
   "$base_url/api/users/1")" = 409
 
+# Zustandsändernde Anfragen mit fremdem Origin werden abgewehrt.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
@@ -122,15 +183,42 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --request POST \
   "$base_url/api/logout")" = 403
 
+# Einheitsnamen sind innerhalb einer Wehr ohne Beachtung der Groß-/Kleinschreibung eindeutig.
+second_unit_id=$(curl --insecure --silent --fail \
+  --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' \
+  --data '{"name":"Löschgruppe"}' \
+  "$base_url/api/units" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' \
+  --data '{"name":"löschgruppe"}' \
+  "$base_url/api/units")" = 409
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT COUNT(*) FROM units WHERE organization_id=1 AND name='Löschgruppe'")" = 1
+
+# Einladungen erzeugen einen Reset-Eintrag; Nutzer können mehreren Einheiten zugeordnet und neu zugeordnet werden.
 invite_status=$(curl --insecure --silent --output invite.json --write-out '%{http_code}' \
   --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
-  --data '{"name":"Eingeladene Person","email":"invite@example.test","role":"fuehrungskraft","unitIds":[1]}' \
+  --data "{\"name\":\"Eingeladene Person\",\"email\":\"invite@example.test\",\"role\":\"fuehrungskraft\",\"unitIds\":[1,$second_unit_id]}" \
   "$base_url/api/users")
 case "$invite_status" in
   201)
     test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
       einsatzberichte --execute="SELECT COUNT(*) FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE u.email='invite@example.test'")" = 1
+    invited_user_id=$(php -r '$data=json_decode(file_get_contents("invite.json"),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
+    test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+      einsatzberichte --execute="SELECT COUNT(*) FROM user_units WHERE user_id=$invited_user_id")" = 2
+    curl --insecure --silent --fail \
+      --cookie "$session_cookie=$session_token" \
+      --header 'Content-Type: application/json' \
+      --request PUT \
+      --data "{\"name\":\"Eingeladene Person\",\"email\":\"invite@example.test\",\"role\":\"fuehrungskraft\",\"unitIds\":[$second_unit_id]}" \
+      "$base_url/api/users/$invited_user_id" | grep --quiet '"ok":true'
+    test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+      einsatzberichte --execute="SELECT GROUP_CONCAT(unit_id ORDER BY unit_id) FROM user_units WHERE user_id=$invited_user_id")" = "$second_unit_id"
     MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
       --execute="DELETE FROM users WHERE email='invite@example.test'"
     ;;
@@ -147,14 +235,31 @@ if [[ -z "${TEST_BASE_URL:-}" ]]; then
 fi
 rm -f invite.json
 
+# Einsätze akzeptieren ausschließlich gültige ISO-Zeitpunkte.
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' \
+  --data '{"title":"Ungültiger Einsatz","startedAt":"morgen","address":"","unitIds":[1]}' \
+  "$base_url/api/incidents")" = 400
+
+# Einsatzzuordnungen werden vollständig und stabil nach Einheit sortiert ausgegeben.
 incident_id=$(curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
-  --data '{"title":"Testeinsatz","startedAt":"2026-08-22T18:00:00.000Z","address":"","unitIds":[1]}' \
+  --data "{\"title\":\"Testeinsatz\",\"startedAt\":\"2026-08-22T18:00:00.000Z\",\"address\":\"\",\"unitIds\":[$second_unit_id,1]}" \
   "$base_url/api/incidents" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
+  SECOND_UNIT_ID="$second_unit_id" php -r '$incidents=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $assignments=json_decode($incidents[0]["assignments"],true,512,JSON_THROW_ON_ERROR); $expected=[1,(int)getenv("SECOND_UNIT_ID")]; sort($expected); assert(array_column($assignments,"unitId")===$expected);'
 
-report_payload='{"unitId":1,"narrative":"Ursprünglich","departedAt":"2026-08-22T18:05:00.000Z","arrivedAt":"2026-08-22T18:10:00.000Z","endedAt":"2026-08-22T19:00:00.000Z","incidentType":"Technische Hilfe","classification":{"site":[],"cause":[],"technical":[]},"crew":[]}'
+# Der letzte erfolgreiche DIVERA-Import wird je Einheit als UTC-Zeitpunkt ausgegeben.
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="INSERT INTO divera_imports(unit_id,incident_id,imported_by,imported_at) VALUES(1,$incident_id,1,'2026-08-23 09:00:00')"
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/units" |
+  php -r '$units=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $unit=array_values(array_filter($units,fn($item)=>$item["id"]===1))[0]; assert($unit["last_divera_import_at"]==="2026-08-23T09:00:00.000Z");'
+
+# Berichte speichern laufende Nummer, Beteiligte, Einsatzleitung und Berichtsjahr korrekt.
+report_payload='{"unitId":1,"runningNumber":"69/2026","damagedParty":{"name":"Max Mustermann","phone":"02733 123","address":"Musterweg 1"},"damagingParty":{"name":"Erika Beispiel","phone":"","address":"Beispielweg 2"},"incidentCommand":{"rank":"BOI","name":"D. Gerlach","additionalRank":"BI","additionalName":"A. Busch"},"narrative":"Ursprünglich","departedAt":"2026-08-22T18:05:00.000Z","arrivedAt":"2026-08-22T18:10:00.000Z","endedAt":"2026-08-22T19:00:00.000Z","incidentType":"Technische Hilfe","classification":{"site":[],"cause":[],"technical":[]},"crew":[]}'
 report_id=$(curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
@@ -166,7 +271,29 @@ report_id=$(curl --insecure --silent --fail \
   exit 1
 }
 report_id_int=$((report_id))
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT CONCAT(report_year,'|',running_number,'|',JSON_UNQUOTE(JSON_EXTRACT(damaged_party,'$.name')),'|',JSON_UNQUOTE(JSON_EXTRACT(damaging_party,'$.name')),'|',JSON_UNQUOTE(JSON_EXTRACT(incident_command,'$.name'))) FROM reports WHERE id=$report_id_int")" = '2026|69/2026|Max Mustermann|Erika Beispiel|D. Gerlach'
 
+# Besatzungsmitglieder werden unabhängig von der Einfügereihenfolge stabil sortiert ausgegeben.
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="INSERT INTO members(id,organization_id,divera_id,name) VALUES(101,1,'test-101','Person 101'),(102,1,'test-102','Person 102'); INSERT INTO member_units(member_id,unit_id) VALUES(101,1),(102,1); INSERT INTO report_crew(report_id,member_id) VALUES($report_id_int,102),($report_id_int,101)"
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$incident_id/reports" |
+  php -r '$reports=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $crew=json_decode($reports[0]["crew"],true,512,JSON_THROW_ON_ERROR); assert(array_column($crew,"memberId")===[101,102]);'
+
+# Laufende Nummern sind pro Einheit und Kalenderjahr eindeutig.
+duplicate_incident_id=$(curl --insecure --silent --fail \
+  --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' \
+  --data '{"title":"Zweiter Testeinsatz","startedAt":"2026-08-22T18:00:00.000Z","address":"","unitIds":[1]}' \
+  "$base_url/api/incidents" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' \
+  --data "$report_payload" \
+  "$base_url/api/incidents/$duplicate_incident_id/reports")" = 409
+
+# Eine konkurrierende Bearbeitung kann einen inzwischen freigegebenen Bericht nicht überschreiben.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="START TRANSACTION; UPDATE reports SET status='released' WHERE id=$report_id_int; DO SLEEP(2); COMMIT;" &
 release_pid=$!
@@ -181,6 +308,8 @@ wait "$release_pid"
 test "$edit_status" = 409
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT CONCAT(status, ':', narrative) FROM reports WHERE id=$report_id_int")" = 'released:Ursprünglich'
+
+# Eine zweite Freigabe wird abgelehnt und verändert den ursprünglichen Freigabezeitpunkt nicht.
 released_at=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT released_at FROM reports WHERE id=$report_id_int")
 sleep 1
@@ -192,6 +321,7 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT released_at FROM reports WHERE id=$report_id_int")" = "$released_at"
 
+# Das Zurücksetzen des Passworts verbraucht das Token, beendet bestehende Sitzungen und erlaubt den neuen Login.
 reset_token='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 reset_hash=$(php -r "echo hash('sha256', '$reset_token');")
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \

@@ -142,7 +142,7 @@ function required(mixed $value, string $name, int $max = 10_000): string
 
 function optional(mixed $value, string $name, int $max = 10_000): string
 {
-    $text = trim(is_scalar($value ?? '') ? (string)($value ?? '') : '');
+    $text = trim(is_scalar($value) ? (string)$value : '');
     if (textLength($text) > $max) throw new ApiError(400, "$name ist zu lang");
     return $text;
 }
@@ -230,7 +230,7 @@ function smtpSend(array $settings, string $to, string $subject, string $message)
         $body = str_replace(["\r\n", "\r"], "\n", $message);
         // SMTP ends DATA on a lone dot, so leading dots must be escaped.
         $body = str_replace("\n", "\r\n", preg_replace('/^\./m', '..', $body));
-        $headers = "From: {$settings['from']}\r\nTo: $to\r\nSubject: $subject\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n";
+        $headers = 'Date: ' . gmdate(DATE_RFC2822) . "\r\nFrom: {$settings['from']}\r\nTo: $to\r\nSubject: $subject\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n";
         $ok = smtpWrite($socket, "$headers\r\n$body\r\n.\r\n") && smtpReply($socket, 250);
     }
     if ($ok) smtpCommand($socket, 'QUIT', 221);

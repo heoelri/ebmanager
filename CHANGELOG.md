@@ -6,6 +6,10 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Added
 
+- `constants.php` bündelt Rollen, Einsatzarten, Klassifikationsgruppen und deren UI-Bezeichnungen; die Oberfläche lädt anpassbare Fachoptionen aus derselben Backend-Quelle.
+- Erfolgreiche DIVERA-Importe werden mit Einheit, Einsatz, Benutzer und UTC-Zeitpunkt protokolliert; die Einsatzübersicht zeigt den letzten Import je Einheit.
+- Erfolgreiche Anmeldungen werden pro Benutzer gespeichert; die Wehrleitung sieht in der Verwaltung die fünf neuesten Anmeldezeitpunkte.
+- Einheitsberichte erfassen eine manuelle, je Einheit und Kalenderjahr eindeutige laufende Nummer, Geschädigte und Schädiger mit Name, Telefon und Adresse sowie die Einsatzleitung und eine optionale weitere Führungskraft.
 - Die nur für die Wehrführung sichtbare Seite „System“ zeigt den Zustand von Anwendung, Datenbank und E-Mail sowie angelegte Einheiten und Benutzer, ohne Kennwörter oder Schlüssel auszugeben.
 - Optionaler SMTP-Versand mit Authentifizierung und STARTTLS unterstützt Hoster, bei denen PHP `mail()` nicht verfügbar oder unzuverlässig ist.
 - Neue Benutzer erhalten eine Einladungs-E-Mail und aktivieren ihr Konto über einen einmaligen Link, statt ein von der Wehrführung vergebenes Startpasswort zu verwenden.
@@ -14,8 +18,24 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 - Die Startseite prüft Datenbankkonfiguration, Verbindung und Schema und zeigt bei Problemen eine konkrete Betriebsseite statt eines allgemeinen internen Fehlers.
 - Eine zentrale Schritt-für-Schritt-Anleitung dokumentiert Erstinstallation, manuelles und automatisches Deployment, Updates, Rollback und Fehlerbehebung auf Webspace.
 
+### Fixed
+
+- Der Dev-Migrations-Test wartet nach dem Healthcheck zusätzlich auf die endgültige MySQL-Instanz, da der Healthcheck kurzzeitig während des internen Neustarts als „healthy“ gilt und Folgebefehle sonst zufällig mit einem Socket-Verbindungsfehler abbrachen.
+- Die lokale Baseline erkennt eine bereits vorhandene DIVERA-Importhistorie auch dann, wenn einem älteren Dev-Volume noch `schema_migrations` fehlt.
+- Der Compose-End-to-End-Test behandelt den erfolgreichen Abschluss des einmaligen Migrationsdienstes nicht mehr als Abbruchsignal.
+- Die Systemübersicht liefert bei Datenbank- oder Schemafehlern wieder einen kuratierten Status statt eines unstrukturierten Serverfehlers.
+
 ### Changed
 
+- Die Einsatzübersicht weist Wehr- und Einheitsleitungen auf neuere, noch nicht importierte DIVERA-Einsätze hin und bietet dort den direkten Import an.
+- Einsatz- und Berichtslisten vermeiden N+1-Abfragen und liefern Zuordnungen sowie Besatzungen stabil sortiert; die Besatzungsvalidierung lädt zulässige Mitglieder einmalig.
+- Manuelle Einsatzzeitpunkte werden strikt als UTC-ISO-Zeit validiert, fehlende DIVERA-Zeitpunkte werden abgelehnt und SMTP-Nachrichten enthalten einen RFC-konformen `Date`-Header.
+- Nur echte MySQL-Duplikatfehler liefern HTTP 409; andere Integritätsfehler werden nicht mehr irreführend als vorhandener Datensatz gemeldet.
+- Die Copilot-Instruktionen bündeln dauerhafte Projektregeln ohne wiederholte Sicherheits-, Architektur-, UI- und Testvorgaben.
+- Docker Compose führt ausstehende Datenbankmigrationen vor dem Start des lokalen Webcontainers automatisch und genau einmal aus; ein CI-Test simuliert dafür ein bestehendes Dev-Volume.
+- Die Oberfläche verwendet mindestens 44 Pixel große Touch-Ziele, sichtbare Tastaturfokusse, Screenreader-Livebereiche, Fokusführung bei Seitenwechseln, mobil bedienbare Kontrollfelder statt Mehrfach-Selects sowie bildschirmfüllende Dialoge auf kleinen Geräten.
+- Einheiten mit demselben Namen können innerhalb einer Wehr nicht mehrfach angelegt werden; die Datenbank-Eindeutigkeit ist durch einen Smoke-Test abgesichert.
+- In der Verwaltung werden beim Anlegen und Bearbeiten von Benutzern eine oder mehrere Einheiten über eindeutige Kontrollfelder ausgewählt.
 - HTTP wird wieder dauerhaft auf HTTPS umgeleitet und HSTS ist aktiv.
 - Sitzungstoken werden nur noch als SHA-256-Hash gespeichert und verglichen.
 - Eine Rollenänderung wird abgelehnt, wenn sie den Mandanten ohne Wehrführung zurücklassen würde.
@@ -34,6 +54,10 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Breaking Changes
 
+- Deployments müssen `constants.php` zusammen mit `api.php` hochladen. Ohne die Datei startet die API nicht.
+- Bestehende Installationen müssen vor dem neuen Anwendungscode einmal `migrations/005-divera-imports.sql` importieren. Die Historie beginnt mit dem ersten DIVERA-Import nach dem Update.
+- Bestehende Installationen müssen vor dem neuen Anwendungscode einmal `migrations/004-login-history.sql` importieren. Die Historie beginnt mit der ersten erfolgreichen Anmeldung nach dem Update.
+- Bestehende Installationen müssen vor dem neuen Anwendungscode einmal `migrations/003-report-details.sql` importieren. Bestehende Berichte bleiben lesbar und erhalten laufende Nummer und Zusatzangaben bei der nächsten Bearbeitung.
 - Bestehende Installationen müssen vor dem neuen Anwendungscode einmal `migrations/002-hash-session-tokens.sql` importieren. Die Migration hasht bestehende Sitzungstoken in-place und erhält dadurch aktive Anmeldungen.
 - Deployments müssen `support.php` zusammen mit `api.php` hochladen. Ohne die neue Datei startet die API nicht.
 - Bestehende Installationen müssen vor dem neuen Anwendungscode einmal `migrations/001-password-resets.sql` importieren.
@@ -46,9 +70,12 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 1. Datenbank und `config.local.php` sichern.
 2. `migrations/001-password-resets.sql` über die Datenbankverwaltung importieren.
 3. `migrations/002-hash-session-tokens.sql` genau einmal importieren.
-4. `app_url` und `mail_from` in `config.local.php` ergänzen.
-5. `.htaccess`, `api.php`, `support.php` und `public/index.html` aktualisieren.
-6. Anmeldung und Passwort-Wiederherstellung prüfen.
-7. Für das automatische Deployment im Environment `hiba` die neuen `SFTP_*`-Secrets hinterlegen und die alten `FTP_*`-Secrets löschen. `SFTP_KNOWN_HOSTS` wird mit `ssh-keyscan -p <Port> <Host>` ermittelt.
+4. `migrations/003-report-details.sql` genau einmal importieren.
+5. `migrations/004-login-history.sql` genau einmal importieren.
+6. `migrations/005-divera-imports.sql` genau einmal importieren.
+7. `app_url` und `mail_from` in `config.local.php` ergänzen.
+8. `.htaccess`, `api.php`, `constants.php`, `support.php` und `public/index.html` aktualisieren.
+9. Anmeldung, Benutzerverwaltung, Passwort-Wiederherstellung und Einheitsberichte prüfen.
+10. Für das automatische Deployment im Environment `hiba` die neuen `SFTP_*`-Secrets hinterlegen und die alten `FTP_*`-Secrets löschen. `SFTP_KNOWN_HOSTS` wird mit `ssh-keyscan -p <Port> <Host>` ermittelt.
 
 Die Datenbankmigration kann beim generischen SFTP-Deployment nicht sicher automatisiert werden, weil der Workflow absichtlich keine Datenbankzugangsdaten besitzt und Shared-Hosting-Anbieter unterschiedliche Verwaltungswege bereitstellen.
