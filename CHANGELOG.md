@@ -25,7 +25,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 ### Changed
 
 - Die Einsatzübersicht weist Wehr- und Einheitsleitungen auf neuere, noch nicht importierte DIVERA-Einsätze hin und bietet dort den direkten Import an.
-- Einsatz- und Berichtslisten vermeiden N+1-Abfragen, die Besatzungsvalidierung lädt zulässige Mitglieder einmalig und die Systemübersicht wiederholt keine vollständige Schemaprüfung.
+- Einsatz- und Berichtslisten vermeiden N+1-Abfragen und liefern Zuordnungen sowie Besatzungen stabil sortiert; die Besatzungsvalidierung lädt zulässige Mitglieder einmalig und die Systemübersicht wiederholt keine vollständige Schemaprüfung.
 - Manuelle Einsatzzeitpunkte werden strikt als UTC-ISO-Zeit validiert, fehlende DIVERA-Zeitpunkte werden abgelehnt und SMTP-Nachrichten enthalten einen RFC-konformen `Date`-Header.
 - Nur echte MySQL-Duplikatfehler liefern HTTP 409; andere Integritätsfehler werden nicht mehr irreführend als vorhandener Datensatz gemeldet.
 - Die Copilot-Instruktionen bündeln dauerhafte Projektregeln ohne wiederholte Sicherheits-, Architektur-, UI- und Testvorgaben.

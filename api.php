@@ -608,15 +608,26 @@ try {
         $params = $user['role'] === 'wehrleitung' ? [$user['organization_id']] : [$user['organization_id'], $user['id']];
         $rows = query(
             "SELECT i.*,
-             (SELECT GROUP_CONCAT(u.name ORDER BY u.name SEPARATOR ', ') FROM incident_units x JOIN units u ON u.id=x.unit_id WHERE x.incident_id=i.id) units,
-             COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT(
-               'unitId',iu.unit_id,'vehicles',CAST(iu.vehicles AS CHAR),
-               'hasReport',EXISTS(SELECT 1 FROM reports r WHERE r.incident_id=iu.incident_id AND r.unit_id=iu.unit_id)
-             )) FROM incident_units iu WHERE iu.incident_id=i.id),JSON_ARRAY()) assignments
+             (SELECT GROUP_CONCAT(u.name ORDER BY u.name SEPARATOR ', ') FROM incident_units x JOIN units u ON u.id=x.unit_id WHERE x.incident_id=i.id) units
              FROM incidents i WHERE $where ORDER BY i.started_at DESC",
             $params
         )->fetchAll();
+        $assignments = [];
+        foreach (query(
+            "SELECT iu.incident_id,iu.unit_id unitId,iu.vehicles,
+             EXISTS(SELECT 1 FROM reports r WHERE r.incident_id=iu.incident_id AND r.unit_id=iu.unit_id) hasReport
+             FROM incident_units iu JOIN incidents i ON i.id=iu.incident_id
+             WHERE $where ORDER BY iu.incident_id,iu.unit_id",
+            $params
+        )->fetchAll() as $assignment) {
+            $incidentId = (int)$assignment['incident_id'];
+            unset($assignment['incident_id']);
+            $assignment['unitId'] = (int)$assignment['unitId'];
+            $assignment['hasReport'] = (int)$assignment['hasReport'];
+            $assignments[$incidentId][] = $assignment;
+        }
         foreach ($rows as &$row) {
+            $row['assignments'] = json_encode($assignments[(int)$row['id']] ?? [], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
             foreach (['id', 'organization_id', 'divera_date'] as $key) if ($row[$key] !== null) $row[$key] = (int)$row[$key];
             foreach (['lat', 'lng'] as $key) if ($row[$key] !== null) $row[$key] = (float)$row[$key];
         }
@@ -659,16 +670,25 @@ try {
             $params[] = $user['id'];
         }
         $rows = query(
-            "SELECT r.*,u.name author_name,un.name unit_name,
-             COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT(
-               'memberId',rc.member_id,'name',m.name,'vehicle',rc.vehicle,'role',rc.role
-             )) FROM report_crew rc JOIN members m ON m.id=rc.member_id WHERE rc.report_id=r.id),JSON_ARRAY()) crew
-             FROM reports r
+            "SELECT r.*,u.name author_name,un.name unit_name FROM reports r
              JOIN users u ON u.id=r.author_id JOIN units un ON un.id=r.unit_id
              WHERE r.incident_id=?$where ORDER BY r.created_at",
             $params
         )->fetchAll();
+        $crew = [];
+        foreach (query(
+            "SELECT rc.report_id reportId,rc.member_id memberId,m.name,rc.vehicle,rc.role
+             FROM report_crew rc JOIN members m ON m.id=rc.member_id JOIN reports r ON r.id=rc.report_id
+             WHERE r.incident_id=?$where ORDER BY rc.report_id,rc.member_id",
+            $params
+        )->fetchAll() as $person) {
+            $reportId = (int)$person['reportId'];
+            unset($person['reportId']);
+            $person['memberId'] = (int)$person['memberId'];
+            $crew[$reportId][] = $person;
+        }
         foreach ($rows as &$row) {
+            $row['crew'] = json_encode($crew[(int)$row['id']] ?? [], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
             $row['duration_minutes'] = (int)round((strtotime($row['ended_at']) - strtotime($row['alarmed_at'])) / 60);
             foreach (['id', 'incident_id', 'unit_id', 'author_id', 'report_year'] as $key) if ($row[$key] !== null) $row[$key] = (int)$row[$key];
         }

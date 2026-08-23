@@ -195,9 +195,11 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
 incident_id=$(curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
-  --data '{"title":"Testeinsatz","startedAt":"2026-08-22T18:00:00.000Z","address":"","unitIds":[1]}' \
+  --data "{\"title\":\"Testeinsatz\",\"startedAt\":\"2026-08-22T18:00:00.000Z\",\"address\":\"\",\"unitIds\":[$second_unit_id,1]}" \
   "$base_url/api/incidents" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
+  php -r '$incidents=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $assignments=json_decode($incidents[0]["assignments"],true,512,JSON_THROW_ON_ERROR); assert(array_column($assignments,"unitId")===[1,2]);'
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="INSERT INTO divera_imports(unit_id,incident_id,imported_by,imported_at) VALUES(1,$incident_id,1,'2026-08-23 09:00:00')"
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/units" |
@@ -217,6 +219,10 @@ report_id=$(curl --insecure --silent --fail \
 report_id_int=$((report_id))
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT CONCAT(report_year,'|',running_number,'|',JSON_UNQUOTE(JSON_EXTRACT(damaged_party,'$.name')),'|',JSON_UNQUOTE(JSON_EXTRACT(damaging_party,'$.name')),'|',JSON_UNQUOTE(JSON_EXTRACT(incident_command,'$.name'))) FROM reports WHERE id=$report_id_int")" = '2026|69/2026|Max Mustermann|Erika Beispiel|D. Gerlach'
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="INSERT INTO members(id,organization_id,divera_id,name) VALUES(101,1,'test-101','Person 101'),(102,1,'test-102','Person 102'); INSERT INTO member_units(member_id,unit_id) VALUES(101,1),(102,1); INSERT INTO report_crew(report_id,member_id) VALUES($report_id_int,102),($report_id_int,101)"
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$incident_id/reports" |
+  php -r '$reports=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $crew=json_decode($reports[0]["crew"],true,512,JSON_THROW_ON_ERROR); assert(array_column($crew,"memberId")===[101,102]);'
 
 duplicate_incident_id=$(curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" \
