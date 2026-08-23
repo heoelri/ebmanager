@@ -141,6 +141,11 @@ Die zugehörigen Links werden standardmäßig über PHP `mail()` oder bei vorhan
 
 Der Klartexttoken wird nur per E-Mail versendet und nie gespeichert. Nach erfolgreichem Zurücksetzen werden der Token und alle Sitzungen des Benutzers gelöscht. Beim Löschen des Benutzers wird auch sein Token mitgelöscht.
 
+Workflow-Benachrichtigungen werden nach dem erfolgreichen Speichern eines
+Einsatzes, Berichts oder einer Freigabe unmittelbar versendet. Sie benötigen
+keine eigene Tabelle: Versandstatus und Wiederholungsversuche werden in der
+ersten Umsetzung bewusst nicht persistiert.
+
 ### `incidents`
 
 | Spalte | Typ | Bedeutung |

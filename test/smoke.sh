@@ -12,9 +12,9 @@ session_cookie='session'
 [[ "$base_url" == https://* ]] && session_cookie='__Host-session'
 db_host="${TEST_DB_HOST:-127.0.0.1}"
 mysql_tls_args=()
-if mysql --help 2>&1 | grep -q -- '--ssl-mode'; then
+if mysql --help 2>&1 | grep -- '--ssl-mode' >/dev/null; then
   mysql_tls_args=(--ssl-mode=DISABLED)
-elif mysql --help 2>&1 | grep -q -- '--skip-ssl'; then
+elif mysql --help 2>&1 | grep -- '--skip-ssl' >/dev/null; then
   mysql_tls_args=(--skip-ssl)
 fi
 
@@ -26,7 +26,7 @@ DB_DSN='' php -r '$_COOKIE["session"]=str_repeat("a",64); $_SERVER["REQUEST_METH
 # Das Frontend enthält die erwarteten Accessibility- und DIVERA-Elemente, aber keine duplizierten Fachoptionen.
 php -r '
   $html=file_get_contents("public/index.html");
-  foreach (["viewport-fit=cover","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","min-height:44px",":focus-visible","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:","rankOptions","<select name=\"commandRank\">","<select name=\"additionalCommandRank\">"] as $required) {
+  foreach (["viewport-fit=cover","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","min-height:44px",":focus-visible","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:","rankOptions","pendingWarning","initialView","<select name=\"commandRank\">","<select name=\"additionalCommandRank\">"] as $required) {
     if (!str_contains($html,$required)) exit(1);
   }
   foreach (["Kleinbrand","Wohngebäude","Menschen in Notlage","Feuerwehrmann-Anwärter"] as $duplicatedOption) {
@@ -42,7 +42,8 @@ php -r 'require "constants.php"; assert(RANKS["BM"]==="Brandmeister"); assert(IN
 if [[ -z "${TEST_BASE_URL:-}" ]]; then
   openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost -addext subjectAltName=DNS:localhost \
     -keyout smtp-key.pem -out smtp-cert.pem >/dev/null 2>&1
-  php test/fake-smtp.php smtp-cert.pem smtp-key.pem >smtp-server.log 2>&1 &
+  rm -f smtp-messages.log
+  php test/fake-smtp.php smtp-cert.pem smtp-key.pem 1 smtp-messages.log >smtp-server.log 2>&1 &
   smtp_pid=$!
   export SMTP_HOST=localhost SMTP_PORT=2525 SMTP_USERNAME=test SMTP_PASSWORD=test SMTP_CA_FILE="$PWD/smtp-cert.pem"
   php -S 127.0.0.1:8080 api.php >php-server.log 2>&1 &
@@ -222,6 +223,9 @@ if [[ -z "${TEST_BASE_URL:-}" ]]; then
   test "$invite_status" = 201
   wait "$smtp_pid"
   smtp_pid=''
+  grep --quiet 'Recipient: invite@example.test' smtp-messages.log
+  grep --quiet 'Subject: Konto aktivieren' smtp-messages.log
+  grep --quiet '?invite=' smtp-messages.log
 fi
 rm -f invite.json
 
@@ -310,6 +314,88 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   "$base_url/api/reports/$report_id/release")" = 409
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT released_at FROM reports WHERE id=$report_id_int")" = "$released_at"
+
+# Workflow-Benachrichtigungen erreichen dedupliziert die zuständigen Einheits- und Wehrführungen.
+leader_token='eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+leader_hash=$(php -r "echo hash('sha256', '$leader_token');")
+force_token='ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
+force_hash=$(php -r "echo hash('sha256', '$force_token');")
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) SELECT organization_id,unit_id,'Einheitsleitung Eins','leitung1@example.test',password_hash,'einheitsleitung' FROM users WHERE email='admin@example.test';
+    SET @leader_id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@leader_id,1),(@leader_id,$second_unit_id); INSERT INTO sessions(token,user_id,expires_at) VALUES('$leader_hash',@leader_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR);
+    INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) SELECT organization_id,unit_id,'Einheitsleitung Zwei','leitung2@example.test',password_hash,'einheitsleitung' FROM users WHERE email='admin@example.test';
+    SET @leader_two_id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@leader_two_id,1);
+    INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) SELECT organization_id,unit_id,'Führungskraft Test','fuehrungskraft@example.test',password_hash,'fuehrungskraft' FROM users WHERE email='admin@example.test';
+    SET @force_id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@force_id,1); INSERT INTO sessions(token,user_id,expires_at) VALUES('$force_hash',@force_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR)"
+if [[ -z "${TEST_BASE_URL:-}" ]]; then
+  rm -f notification-messages.log
+  php test/fake-smtp.php smtp-cert.pem smtp-key.pem 5 notification-messages.log >>smtp-server.log 2>&1 &
+  smtp_pid=$!
+  sleep 0.25
+fi
+notification_incident_response=$(curl --insecure --silent --fail \
+  --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' \
+  --data "{\"title\":\"Benachrichtigungstest\",\"startedAt\":\"2026-08-22T18:00:00.000Z\",\"address\":\"Teststraße 1\",\"unitIds\":[1,$second_unit_id]}" \
+  "$base_url/api/incidents")
+notification_incident_id=$(printf '%s' "$notification_incident_response" | php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
+notification_report_payload='{"unitId":1,"runningNumber":"70/2026","damagedParty":{},"damagingParty":{},"incidentCommand":{},"narrative":"Bericht der Führungskraft","departedAt":"2026-08-22T18:05:00.000Z","arrivedAt":"2026-08-22T18:10:00.000Z","endedAt":"2026-08-22T19:00:00.000Z","incidentType":"Technische Hilfe","classification":{"site":[],"cause":[],"technical":[]},"crew":[]}'
+notification_report_response=$(curl --insecure --silent --fail \
+  --cookie "$session_cookie=$force_token" \
+  --header 'Content-Type: application/json' \
+  --data "$notification_report_payload" \
+  "$base_url/api/incidents/$notification_incident_id/reports")
+notification_report_id=$(printf '%s' "$notification_report_response" | php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
+notification_release_response=$(curl --insecure --silent --fail \
+  --cookie "$session_cookie=$leader_token" \
+  --header 'Content-Type: application/json' \
+  --request POST \
+  "$base_url/api/reports/$notification_report_id/release")
+if [[ -z "${TEST_BASE_URL:-}" ]]; then
+  printf '%s\n%s\n%s\n' "$notification_incident_response" "$notification_report_response" "$notification_release_response" |
+    php -r 'foreach(file("php://stdin",FILE_IGNORE_NEW_LINES) as $response) assert(!isset(json_decode($response,true,512,JSON_THROW_ON_ERROR)["warning"]));'
+  wait "$smtp_pid"
+  smtp_pid=''
+  test "$(grep --count '^Recipient: leitung1@example.test' notification-messages.log)" = 2
+  test "$(grep --count '^Recipient: leitung2@example.test' notification-messages.log)" = 2
+  test "$(grep --count '^Recipient: admin@example.test' notification-messages.log)" = 1
+  test "$(tr -d '\r' <notification-messages.log | grep --count '^Subject: Neuer Einsatz$')" = 2
+  test "$(tr -d '\r' <notification-messages.log | grep --count '^Subject: Neuer Einsatzbericht$')" = 2
+  test "$(tr -d '\r' <notification-messages.log | grep --count '^Subject: Einsatzbericht freigegeben$')" = 1
+  grep --quiet 'Feuerwehr: Testwehr' notification-messages.log
+  grep --quiet 'Einheit: Löschgruppe, Löschzug' notification-messages.log
+  grep --quiet "Einsatznummer: $notification_incident_id" notification-messages.log
+  grep --quiet 'Stichwort: Benachrichtigungstest' notification-messages.log
+  grep --quiet 'Datum und Uhrzeit: 22.08.2026 20:00 Uhr (Europe/Berlin)' notification-messages.log
+  grep --quiet 'Ausgelöst durch: Führungskraft Test' notification-messages.log
+  test "$(grep --count "Link: $APP_URL/?incident=$notification_incident_id" notification-messages.log)" = 5
+
+  # Einheitsführungen lösen beim Erstellen und Wehrführungen beim Freigeben keine Benachrichtigung aus.
+  quiet_incident_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+    einsatzberichte --execute="INSERT INTO incidents(organization_id,title,started_at,address,message,remark,patient,caller,consolidated_text) VALUES(1,'Stiller Test','2026-08-22T18:00:00.000Z','','','','','',''); SET @incident_id=LAST_INSERT_ID(); INSERT INTO incident_units(incident_id,unit_id,vehicles) VALUES(@incident_id,1,'[]'); SELECT @incident_id")
+  quiet_report_response=$(curl --insecure --silent --fail \
+    --cookie "$session_cookie=$leader_token" \
+    --header 'Content-Type: application/json' \
+    --data "${notification_report_payload/70\/2026/71\/2026}" \
+    "$base_url/api/incidents/$quiet_incident_id/reports")
+  quiet_report_id=$(printf '%s' "$quiet_report_response" | php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(!isset($data["warning"])); echo $data["id"];')
+  curl --insecure --silent --fail \
+    --cookie "$session_cookie=$session_token" \
+    --header 'Content-Type: application/json' \
+    --request POST \
+    "$base_url/api/reports/$quiet_report_id/release" |
+    php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(($data["ok"]??false)===true); assert(!isset($data["warning"]));'
+
+  # Ein Versandfehler wird sichtbar gemeldet, ohne den bereits gespeicherten Einsatz zurückzurollen.
+  failed_notification_response=$(curl --insecure --silent --fail \
+    --cookie "$session_cookie=$session_token" \
+    --header 'Content-Type: application/json' \
+    --data '{"title":"Gespeichert trotz Mailfehler","startedAt":"2026-08-22T18:00:00.000Z","address":"","unitIds":[1]}' \
+    "$base_url/api/incidents")
+  failed_notification_id=$(printf '%s' "$failed_notification_response" | php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(str_contains($data["warning"],"gespeichert")); echo $data["id"];')
+  test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+    einsatzberichte --execute="SELECT COUNT(*) FROM incidents WHERE id=$failed_notification_id AND title='Gespeichert trotz Mailfehler'")" = 1
+fi
 
 # Das Zurücksetzen des Passworts verbraucht das Token, beendet bestehende Sitzungen und erlaubt den neuen Login.
 reset_token='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'

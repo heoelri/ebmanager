@@ -204,7 +204,7 @@ function smtpSend(array $settings, string $to, string $subject, string $message)
     $ssl = ['verify_peer' => true, 'verify_peer_name' => true, 'peer_name' => $settings['smtpHost']];
     if ($settings['smtpCaFile'] !== '') $ssl['cafile'] = $settings['smtpCaFile'];
     $context = stream_context_create(['ssl' => $ssl]);
-    $socket = stream_socket_client(
+    $socket = @stream_socket_client(
         "tcp://{$settings['smtpHost']}:{$settings['smtpPort']}",
         $errorCode,
         $errorMessage,
@@ -236,6 +236,13 @@ function smtpSend(array $settings, string $to, string $subject, string $message)
     if ($ok) smtpCommand($socket, 'QUIT', 221);
     fclose($socket);
     return $ok;
+}
+
+function sendEmail(array $settings, string $to, string $subject, string $message): bool
+{
+    return $settings['smtpHost'] !== ''
+        ? smtpSend($settings, $to, $subject, $message)
+        : @mail($to, $subject, $message, "From: {$settings['from']}\r\nContent-Type: text/plain; charset=UTF-8");
 }
 
 function finiteNumber(mixed $value, string $name): int|float|null

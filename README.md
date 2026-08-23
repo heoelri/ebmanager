@@ -39,6 +39,7 @@ allgemein freigegeben.
 - Mitglieder und Qualifikationen aus DIVERA
 - idempotenter, serverseitig verifizierter DIVERA-Einsatzimport
 - Hinweis, Direktimport und letzter Importzeitpunkt für neue DIVERA-Einsätze in der Einsatzübersicht
+- E-Mail-Benachrichtigungen an Einheits- und Wehrführungen bei neuen Einsätzen, erstellten Berichten und Freigaben
 - lokale Docker-Umgebung, GitHub-Tests und SFTP-Deployment
 
 ## Rollen
@@ -144,6 +145,15 @@ DIVERA wird je Einheit unter **DIVERA** mit dem Access-Key aus
 Anbindung liest ausschließlich Einsätze, Mitglieder, Qualifikationen und
 Fahrzeugstammdaten per HTTPS `GET`; lokale Importe verändern keine Daten in
 DIVERA.
+
+## Benachrichtigungen
+
+Einheitsführungen werden über neue Einsätze ihrer Einheiten sowie über durch
+Führungskräfte erstellte Berichte informiert. Gibt eine Einheitsführung einen
+Bericht frei, erhalten die Wehrführungen der Organisation eine E-Mail. Die
+Nachrichten enthalten die Eckdaten und einen direkten, aus `APP_URL`
+gebildeten Link zum Einsatz. Versandfehler ändern den gespeicherten Vorgang
+nicht und werden in der Oberfläche als Warnung angezeigt.
 
 ## Aktualisierung
 

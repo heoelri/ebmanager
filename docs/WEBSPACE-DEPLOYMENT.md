@@ -79,7 +79,13 @@ return [
 
 ### E-Mail-Versand konfigurieren
 
-Die Anwendung versendet Einladungen und Links für vergessene Passwörter standardmäßig mit der PHP-Standardfunktion `mail()`. Ist `mail()` beim Hoster nicht verfügbar oder unzuverlässig, kann alternativ authentifiziertes SMTP mit verpflichtendem STARTTLS konfiguriert werden.
+Die Anwendung versendet Einladungen, Links für vergessene Passwörter und
+Workflow-Benachrichtigungen standardmäßig mit der PHP-Standardfunktion
+`mail()`. Einheitsführungen erhalten Nachrichten über neue Einsätze ihrer
+Einheiten und durch Führungskräfte erstellte Berichte; Wehrführungen werden
+über von Einheitsführungen freigegebene Berichte informiert. Ist `mail()` beim
+Hoster nicht verfügbar oder unzuverlässig, kann alternativ authentifiziertes
+SMTP mit verpflichtendem STARTTLS konfiguriert werden.
 
 1. Beim Hoster eine Absenderadresse unter der eigenen Domain anlegen oder eine dafür freigegebene Adresse auswählen, beispielsweise `ebmanager@feuerwehr-dahlbruch.com`.
 2. Diese vollständige Adresse als `mail_from` beziehungsweise `MAIL_FROM` konfigurieren. Eine fremde oder nicht freigegebene Absenderdomain wird von vielen Hostern abgewiesen.
@@ -100,6 +106,11 @@ Für STRATO oder vergleichbare Hoster kann `config.local.php` um folgende Werte 
 `smtp_username` ist bei STRATO die vollständige E-Mail-Adresse; `smtp_password` ist das Passwort dieses Postfachs. Sobald `smtp_host` gesetzt ist, verwendet die Anwendung SMTP statt `mail()`. Alle SMTP-Werte müssen dann vollständig sein. Die entsprechenden Umgebungsvariablen heißen `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME` und `SMTP_PASSWORD`. Das optionale `SMTP_CA_FILE` ist nur für Server mit einer privaten Zertifizierungsstelle vorgesehen; öffentliche Hoster wie STRATO benötigen es nicht.
 
 Kann weder PHP `mail()` noch der konfigurierte SMTP-Server eine Nachricht annehmen, wird ein neu angelegter Benutzer wieder entfernt und die Oberfläche meldet den Versandfehler. Die Passwort-Wiederherstellung bleibt ebenfalls nicht verfügbar.
+
+Bei Workflow-Benachrichtigungen bleibt der Einsatz, Bericht oder die Freigabe
+dagegen gespeichert. Die Oberfläche zeigt eine Warnung; Details ohne
+Empfängeradresse, Zugangsdaten oder Einsatzinhalt stehen im PHP-Fehlerlog.
+Eine automatische Wiederholung findet nicht statt.
 
 ## 6. Dateien hochladen
 
@@ -168,7 +179,8 @@ Die Ersteinrichtung ist nach dem ersten Benutzer dauerhaft geschlossen.
 2. Auf der Seite „System“ Datenbank- und E-Mail-Status prüfen; dort dürfen keine Kennwörter oder Schlüssel erscheinen.
 3. In der Verwaltung einen Testbenutzer anlegen und prüfen, dass die Einladung ankommt, der Link die Anwendung öffnet und der Benutzer sein Passwort selbst setzen kann.
 4. Einen manuellen Einsatz und einen Bericht anlegen.
-5. Über „Passwort vergessen“ prüfen, dass der Webhoster E-Mails mit dem korrekten HTTPS-Link versendet.
+5. Über „Passwort vergessen“ sowie einen neuen Einsatz und Bericht prüfen,
+   dass der Webhoster E-Mails mit dem korrekten HTTPS-Link versendet.
 6. Optional pro Einheit einen DIVERA-Access-Key hinterlegen und einen lesenden Abruf durchführen.
 7. Serverprotokolle auf PHP-, Apache- oder Mailfehler prüfen, ohne Zugangsdaten oder DIVERA-Schlüssel weiterzugeben.
 

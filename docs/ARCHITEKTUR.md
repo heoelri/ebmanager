@@ -19,6 +19,7 @@ flowchart LR
     Migrate[Compose-Migrationen<br>docker/migrate.sh]
     DB[(MySQL 8)]
     Divera[DIVERA 24/7]
+    Mail[Mailserver]
 
     Browser -->|HTTPS /api/*| Apache
     Apache --> API
@@ -27,6 +28,7 @@ flowchart LR
     API -->|PDO, vorbereitete Statements| DB
     Migrate -->|ausstehende SQL-Dateien| DB
     API -->|HTTPS GET| Divera
+    API -->|mail oder SMTP/STARTTLS| Mail
 ```
 
 - `public/index.html` enthält die responsive Oberfläche und verwendet native
@@ -70,6 +72,18 @@ muss exakt der HTTPS-Origin der Anwendung entsprechen.
 6. Freigegebene Berichte sind unveränderlich. Bearbeitung und Freigabe werden
    durch eine Datenbank-Zeilensperre koordiniert.
 7. Die Wehrführung konsolidiert die Einzelberichte.
+
+Nach dem erfolgreichen Speichern versendet die API die fachlich vorgesehenen
+E-Mail-Benachrichtigungen direkt über die bestehende Mail-Infrastruktur.
+Empfänger werden serverseitig anhand von Organisation, Rolle und
+Einheitszuordnung ermittelt. Ein Versandfehler wird protokolliert und als
+Warnung an die Oberfläche zurückgegeben, rollt den fachlichen Vorgang aber
+nicht zurück. Eine Queue oder automatische Wiederholung gibt es nicht.
+
+E-Mail-Links verwenden ausschließlich die konfigurierte `APP_URL` und die
+interne Einsatz-ID. Das Frontend öffnet `?incident=<ID>` nach einer
+gegebenenfalls erforderlichen Anmeldung nur dann, wenn der Einsatz in der
+rollenbegrenzten Einsatzliste des Benutzers enthalten ist.
 
 ## DIVERA-Grenze
 
