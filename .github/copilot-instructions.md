@@ -52,6 +52,8 @@
 - Passwörter werden mit `password_hash` gespeichert und mit `password_verify` geprüft.
 - Die öffentliche Ersteinrichtung erfordert ein zufälliges `SETUP_TOKEN` mit mindestens 32 Zeichen.
 - E-Mails werden über PHP `mail()` oder optional per authentifiziertem SMTP mit STARTTLS versendet. Zugangsdaten bleiben in Umgebungsvariablen oder der nicht versionierten `config.local.php`.
+- Workflow-Benachrichtigungen werden erst nach erfolgreichem Speichern versendet. Empfänger ergeben sich serverseitig aus Organisation, Rolle und `user_units`; Fehler werden sichtbar gemeldet und ohne personenbezogene Inhalte protokolliert, dürfen den fachlichen Vorgang aber nicht zurückrollen.
+- Direkte E-Mail-Links werden ausschließlich aus `APP_URL` und der internen Einsatz-ID gebildet. Eine Queue, persistenter Versandstatus oder automatische Wiederholung ist derzeit nicht vorgesehen.
 
 ## Einsätze und Berichte
 

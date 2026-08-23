@@ -29,16 +29,86 @@ function databaseConfigurationError(): ?string
 function sendPasswordEmail(array $user, string $token, bool $invitation = false): bool
 {
     $settings = mailSettings();
-    ['url' => $url, 'from' => $from] = $settings;
+    ['url' => $url] = $settings;
     $link = "$url/?" . ($invitation ? 'invite' : 'reset') . "=$token";
     $subject = $invitation ? 'Konto aktivieren' : 'Passwort zuruecksetzen';
     $message = $invitation
         ? "Hallo {$user['name']},\n\nüber diesen Link können Sie innerhalb von 30 Minuten Ihr Konto aktivieren und ein Passwort vergeben:\n$link\n\nNach Ablauf können Sie über „Passwort vergessen“ einen neuen Link anfordern."
         : "Hallo {$user['name']},\n\nüber diesen Link können Sie innerhalb von 30 Minuten ein neues Passwort vergeben:\n$link\n\nFalls Sie dies nicht angefordert haben, ignorieren Sie diese Nachricht.";
-    return $settings['smtpHost'] !== ''
-        ? smtpSend($settings, $user['email'], $subject, $message)
-        // mail() failures are returned as 503 instead of leaking a PHP warning into the JSON response.
-        : @mail($user['email'], $subject, $message, "From: $from\r\nContent-Type: text/plain; charset=UTF-8");
+    return sendEmail($settings, $user['email'], $subject, $message);
+}
+
+function sendWorkflowNotification(string $event, int $incidentId, array $unitIds, array $actor): ?string
+{
+    $events = [
+        'incident_created' => ['subject' => 'Neuer Einsatz', 'label' => 'Einsatz wurde manuell angelegt', 'role' => 'einheitsleitung'],
+        'incident_imported' => ['subject' => 'Neuer DIVERA-Einsatz', 'label' => 'DIVERA-Einsatz wurde erstmals importiert', 'role' => 'einheitsleitung'],
+        'report_created' => ['subject' => 'Neuer Einsatzbericht', 'label' => 'Führungskraft hat einen Einsatzbericht erstellt', 'role' => 'einheitsleitung'],
+        'report_released' => ['subject' => 'Einsatzbericht freigegeben', 'label' => 'Einheitsführung hat einen Einsatzbericht freigegeben', 'role' => 'wehrleitung'],
+    ];
+    if (!isset($events[$event])) throw new LogicException('Unbekanntes Benachrichtigungsereignis');
+
+    try {
+        $incident = one('SELECT * FROM incidents WHERE id=? AND organization_id=?', [$incidentId, $actor['organization_id']]);
+        if (!$incident) throw new RuntimeException('Einsatz nicht gefunden');
+        $placeholders = implode(',', array_fill(0, count($unitIds), '?'));
+        $unitNames = query(
+            "SELECT name FROM units WHERE organization_id=? AND id IN ($placeholders) ORDER BY name",
+            array_merge([$actor['organization_id']], $unitIds)
+        )->fetchAll(PDO::FETCH_COLUMN);
+        $eventDetails = $events[$event];
+        if ($eventDetails['role'] === 'einheitsleitung') {
+            $recipients = query(
+                "SELECT u.id,u.name,u.email,GROUP_CONCAT(DISTINCT un.name ORDER BY un.name SEPARATOR ', ') unit_names
+                 FROM users u JOIN user_units uu ON uu.user_id=u.id JOIN units un ON un.id=uu.unit_id
+                 WHERE u.organization_id=? AND u.role='einheitsleitung' AND u.id<>? AND uu.unit_id IN ($placeholders)
+                 GROUP BY u.id,u.name,u.email ORDER BY u.id",
+                array_merge([$actor['organization_id'], $actor['id']], $unitIds)
+            )->fetchAll();
+        } else {
+            $recipients = query(
+                "SELECT id,name,email FROM users
+                 WHERE organization_id=? AND role='wehrleitung' AND id<>? ORDER BY id",
+                [$actor['organization_id'], $actor['id']]
+            )->fetchAll();
+        }
+        if (!$recipients) return null;
+
+        $settings = mailSettings();
+        $number = trim((string)($incident['foreign_id'] ?: ($incident['divera_id'] ?: $incident['id'])));
+        $when = (new DateTimeImmutable($incident['started_at']))
+            ->setTimezone(new DateTimeZone('Europe/Berlin'))
+            ->format('d.m.Y H:i');
+        $failed = 0;
+        foreach ($recipients as $recipient) {
+            $recipientUnits = $recipient['unit_names'] ?? implode(', ', $unitNames);
+            $message = "Hallo {$recipient['name']},\n\n"
+                . "{$eventDetails['label']}.\n\n"
+                . "Feuerwehr: {$actor['organization_name']}\n"
+                . "Einheit: $recipientUnits\n"
+                . "Einsatznummer: $number\n"
+                . "Stichwort: {$incident['title']}\n"
+                . "Datum und Uhrzeit: $when Uhr (Europe/Berlin)\n"
+                . "Ereignis: {$eventDetails['label']}\n"
+                . "Ausgelöst durch: {$actor['name']}\n"
+                . "Link: {$settings['url']}/?incident=$incidentId";
+            try {
+                if (sendEmail($settings, $recipient['email'], $eventDetails['subject'], $message)) continue;
+                $reason = 'Transport hat die Nachricht abgelehnt';
+            } catch (Throwable $error) {
+                $reason = $error::class;
+            }
+            $failed++;
+            error_log("Benachrichtigung fehlgeschlagen: event=$event incident_id=$incidentId error=$reason");
+        }
+        if (!$failed) return null;
+        return $failed === 1
+            ? 'Der Vorgang wurde gespeichert, aber eine Benachrichtigungs-E-Mail konnte nicht versendet werden.'
+            : "Der Vorgang wurde gespeichert, aber $failed Benachrichtigungs-E-Mails konnten nicht versendet werden.";
+    } catch (Throwable $error) {
+        error_log("Benachrichtigung fehlgeschlagen: event=$event incident_id=$incidentId error=" . $error::class);
+        return 'Der Vorgang wurde gespeichert, aber die Benachrichtigungs-E-Mails konnten nicht versendet werden.';
+    }
 }
 
 function isoDate(mixed $value): string
@@ -638,7 +708,8 @@ try {
             foreach ($unitIds as $unitId) query('INSERT INTO incident_units(incident_id,unit_id,vehicles) VALUES(?,?,?)', [$id, $unitId, '[]']);
             return $id;
         });
-        respond(201, ['id' => $id]);
+        $warning = sendWorkflowNotification('incident_created', $id, $unitIds, $user);
+        respond(201, ['id' => $id] + ($warning ? ['warning' => $warning] : []));
     }
 
     if ($method === 'GET' && preg_match('#^/api/incidents/(\d+)/reports$#', $path, $match)) {
@@ -703,7 +774,10 @@ try {
             query('UPDATE reports SET vehicles=?,personnel=? WHERE id=?', [$summary['vehicles'], $summary['personnel'], $id]);
             return $id;
         });
-        respond(201, ['id' => $id]);
+        $warning = $user['role'] === 'fuehrungskraft'
+            ? sendWorkflowNotification('report_created', $incidentId, [$unitId], $user)
+            : null;
+        respond(201, ['id' => $id] + ($warning ? ['warning' => $warning] : []));
     }
 
     if ($method === 'PUT' && preg_match('#^/api/reports/(\d+)$#', $path, $match)) {
@@ -740,7 +814,10 @@ try {
         assertOwnUnit($user, (int)$foundReport['unit_id']);
         $released = query("UPDATE reports SET status='released',released_at=UTC_TIMESTAMP() WHERE id=? AND status='draft'", [$foundReport['id']]);
         if ($released->rowCount() !== 1) throw new ApiError(409, 'Der Bericht wurde bereits freigegeben');
-        respond(200, ['ok' => true]);
+        $warning = $user['role'] === 'einheitsleitung'
+            ? sendWorkflowNotification('report_released', (int)$foundReport['incident_id'], [(int)$foundReport['unit_id']], $user)
+            : null;
+        respond(200, ['ok' => true] + ($warning ? ['warning' => $warning] : []));
     }
 
     if ($method === 'PUT' && preg_match('#^/api/incidents/(\d+)/consolidation$#', $path, $match)) {
@@ -834,7 +911,7 @@ try {
             if ($alarm['id'] === $requestedId) { $verified = $alarm; break; }
         }
         if (!$verified) throw new ApiError(404, 'DIVERA-Einsatz nicht gefunden');
-        $id = transaction(function () use ($verified, $unitId, $user) {
+        [$id, $newAssignment] = transaction(function () use ($verified, $unitId, $user) {
             query(
                 'INSERT INTO incidents(organization_id,divera_id,foreign_id,divera_date,title,started_at,message,address,lat,lng,remark,patient,caller,consolidated_text)
                  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -850,7 +927,7 @@ try {
                  optional($verified['caller'], 'Meldende Person'), '']
             );
             $incidentId = (int)db()->lastInsertId();
-            query(
+            $assignment = query(
                 'INSERT INTO incident_units(incident_id,unit_id,vehicles) VALUES(?,?,?)
                  ON DUPLICATE KEY UPDATE vehicles=VALUES(vehicles)',
                 [$incidentId, $unitId, json_encode(vehicleSnapshots($verified['vehicles']), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)]
@@ -859,9 +936,12 @@ try {
                 'INSERT INTO divera_imports(unit_id,incident_id,imported_by,imported_at) VALUES(?,?,?,UTC_TIMESTAMP())',
                 [$unitId, $incidentId, $user['id']]
             );
-            return $incidentId;
+            return [$incidentId, $assignment->rowCount() === 1];
         });
-        respond(201, ['id' => $id]);
+        $warning = $newAssignment
+            ? sendWorkflowNotification('incident_imported', $id, [$unitId], $user)
+            : null;
+        respond(201, ['id' => $id] + ($warning ? ['warning' => $warning] : []));
     }
 
     respond(404, ['error' => 'Nicht gefunden']);

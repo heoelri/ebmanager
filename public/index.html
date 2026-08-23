@@ -16,21 +16,23 @@
 <dialog id="dialog" aria-labelledby="dialogTitle"></dialog>
 <script>
 const app=document.querySelector('#app'),nav=document.querySelector('#nav'),dialog=document.querySelector('#dialog'),announcer=document.querySelector('#announcer');
-let me,units=[],incidents=[],pendingDivera=[],incidentTypes=[],ranks={},reportClassifications={},classificationLabels={};
+let me,units=[],incidents=[],pendingDivera=[],incidentTypes=[],ranks={},reportClassifications={},classificationLabels={},pendingWarning='';
 const dragEnabled=matchMedia('(pointer:fine)').matches;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function api(path,options={}){const r=await fetch(path.replace(/^\/api(?=\/|$)/,'api'),{...options,headers:{'content-type':'application/json',...options.headers}}),data=await r.json();if(!r.ok)throw Error(data.error);return data}
+async function api(path,options={}){const r=await fetch(path.replace(/^\/api(?=\/|$)/,'api'),{...options,headers:{'content-type':'application/json',...options.headers}}),data=await r.json();if(!r.ok)throw Error(data.error);if(data.warning)pendingWarning=data.warning;return data}
 function formData(form){return Object.fromEntries(new FormData(form))}
 function showError(e){const root=dialog.open?dialog:app;root.querySelector('[role=alert]')?.remove();root.insertAdjacentHTML('afterbegin',`<p class="error" role="alert" tabindex="-1">${esc(e.message)}</p>`);root.querySelector('[role=alert]').focus()}
-function focusMain(){const heading=app.querySelector('h1');if(!heading)return;heading.tabIndex=-1;heading.focus({preventScroll:true});document.title=`${heading.textContent} – Einsatzberichte`}
+function focusMain(){if(pendingWarning){app.insertAdjacentHTML('afterbegin',`<p class="error" role="alert">${esc(pendingWarning)}</p>`);announcer.textContent=pendingWarning;pendingWarning=''}const heading=app.querySelector('h1');if(!heading)return;heading.tabIndex=-1;heading.focus({preventScroll:true});document.title=`${heading.textContent} – Einsatzberichte`}
 function bindForm(id,handler){document.querySelector(id).onsubmit=async e=>{e.preventDefault();const button=e.submitter;button?.setAttribute('disabled','');e.target.setAttribute('aria-busy','true');announcer.textContent='Wird verarbeitet';try{await handler(formData(e.target))}catch(x){showError(x)}finally{button?.removeAttribute('disabled');e.target.removeAttribute('aria-busy');announcer.textContent=''}}}
+function setIncidentLocation(id){const url=new URL(location.href);url.searchParams.delete('incident');if(id)url.searchParams.set('incident',id);history.replaceState({},'',url)}
+async function initialView(){const value=new URLSearchParams(location.search).get('incident'),id=/^[1-9]\d*$/.test(value||'')?Number(value):0;if(id&&incidents.some(item=>item.id===id))await incident(id);else home()}
 async function start(){
   let state;
   try{state=await api('/api/bootstrap')}catch(e){return databaseUnavailable(e.message)}
   if(state.needsSetup)return setup();
   const parameters=new URLSearchParams(location.search),invite=parameters.get('invite'),resetToken=invite||parameters.get('reset');
   if(resetToken)return resetPassword(resetToken,Boolean(invite));
-  try{me=await api('/api/me');await load();home()}catch{login()}
+  try{me=await api('/api/me');await load();await initialView()}catch{login()}
 }
 function databaseUnavailable(message){nav.innerHTML='';app.innerHTML=`<section class="card"><h1>Datenbank nicht verfügbar</h1><p class="error" role="alert">${esc(message)}</p><p>Prüfen Sie die Datenbankwerte in <code>config.local.php</code> oder den Umgebungsvariablen und importieren Sie fehlende SQL-Migrationen.</p><button onclick="location.reload()">Erneut prüfen</button></section>`;focusMain()}
 function setup(){nav.innerHTML='';app.innerHTML=`<section class="card"><h1>Ersteinrichtung</h1><form id="setup" class="grid">
@@ -41,14 +43,14 @@ function setup(){nav.innerHTML='';app.innerHTML=`<section class="card"><h1>Erste
   </form></section>`;focusMain();bindForm('#setup',async d=>{await api('/api/setup',{method:'POST',body:JSON.stringify(d)});login()})}
 function login(){nav.innerHTML='';app.innerHTML=`<section class="card"><h1>Anmelden</h1><form id="login" class="grid">
   <label>E-Mail<input name="email" type="email" autocomplete="email" required></label><label>Passwort<input name="password" type="password" autocomplete="current-password" required></label><button>Anmelden</button>
-  </form><p><button type="button" class="secondary" onclick="forgotPassword()">Passwort vergessen</button></p></section>`;focusMain();bindForm('#login',async d=>{await api('/api/login',{method:'POST',body:JSON.stringify(d)});me=await api('/api/me');await load();home()})}
+  </form><p><button type="button" class="secondary" onclick="forgotPassword()">Passwort vergessen</button></p></section>`;focusMain();bindForm('#login',async d=>{await api('/api/login',{method:'POST',body:JSON.stringify(d)});me=await api('/api/me');await load();await initialView()})}
 function forgotPassword(){nav.innerHTML='';app.innerHTML=`<section class="card"><h1>Passwort vergessen</h1><p>Wir senden einen Wiederherstellungslink an die hinterlegte Adresse.</p><form id="forgot" class="grid"><label>E-Mail<input name="email" type="email" autocomplete="email" required></label><button>Link anfordern</button><button type="button" class="secondary" onclick="login()">Zurück</button></form></section>`;focusMain();bindForm('#forgot',async d=>{await api('/api/password-reset/request',{method:'POST',body:JSON.stringify(d)});app.innerHTML='<section class="card"><h1>E-Mail prüfen</h1><p>Falls ein Konto mit dieser Adresse existiert, wurde ein Wiederherstellungslink versendet.</p><button onclick="login()">Zur Anmeldung</button></section>';focusMain()})}
 function resetPassword(token,invitation=false){nav.innerHTML='';app.innerHTML=`<section class="card"><h1>${invitation?'Konto aktivieren':'Neues Passwort'}</h1><form id="reset" class="grid"><label>Neues Passwort (min. 10 Zeichen)<input name="password" type="password" autocomplete="new-password" minlength="10" required></label><label>Passwort wiederholen<input name="confirmation" type="password" autocomplete="new-password" minlength="10" required></label><button>${invitation?'Konto aktivieren':'Passwort speichern'}</button></form></section>`;focusMain();bindForm('#reset',async d=>{if(d.password!==d.confirmation)throw Error('Passwörter stimmen nicht überein');await api('/api/password-reset/confirm',{method:'POST',body:JSON.stringify({token,password:d.password})});history.replaceState({},'',location.pathname);login()})}
 async function load(){[units,incidents,{incidentTypes,ranks,classifications:reportClassifications,classificationLabels}]=await Promise.all([api('/api/units'),api('/api/incidents'),api('/api/options')]);nav.innerHTML=`
   <button type="button" onclick="home()">Einsätze</button><button type="button" onclick="resources()">Mitglieder & Fahrzeuge</button>${me.role==='wehrleitung'?'<button type="button" onclick="admin()">Verwaltung</button><button type="button" onclick="systemOverview()">System</button>':''}
   ${me.role!=='fuehrungskraft'?'<button type="button" onclick="divera()">DIVERA</button>':''}<button type="button" class="secondary" onclick="logout()">Abmelden</button>`}
 async function logout(){await api('/api/logout',{method:'POST'});me=null;login()}
-function home(){app.innerHTML=`<h1>${esc(me.organization_name)}</h1><p class="muted">${esc(me.name)} · ${esc(me.role)}</p>
+function home(){setIncidentLocation();app.innerHTML=`<h1>${esc(me.organization_name)}</h1><p class="muted">${esc(me.name)} · ${esc(me.role)}</p>
   <section class="card"><h2>Einsatz anlegen</h2><form id="incident" class="grid">
   <label>Stichwort<input name="title" required></label><label>Zeitpunkt<input name="startedAt" type="datetime-local" required></label>
   <label>Adresse<input name="address" autocomplete="street-address"></label><fieldset><legend>Einheiten</legend><div class="check-grid">${units.filter(u=>me.role==='wehrleitung'||me.unitIds.includes(u.id)).map(u=>`<label><input type="checkbox" name="unitIds" value="${u.id}">${esc(u.name)}</label>`).join('')}</div></fieldset><button>Anlegen</button></form></section>
@@ -76,7 +78,7 @@ async function importPendingDivera(index,button){
 }
 async function incident(id){
   try{
-    const item=incidents.find(i=>i.id===id),reports=await api(`/api/incidents/${id}/reports`);
+    const item=incidents.find(i=>i.id===id);if(!item)return home();const reports=await api(`/api/incidents/${id}/reports`);setIncidentLocation(id);
     window.currentIncident=item;
     window.currentReports=reports;
     const assignments=JSON.parse(item.assignments||'[]');

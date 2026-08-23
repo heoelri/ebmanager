@@ -1,5 +1,21 @@
 # Security Review
 
+## Workflow-Benachrichtigungen vom 23. August 2026
+
+Empfänger werden ausschließlich serverseitig über `organization_id`, Rolle
+und `user_units` bestimmt und je Benutzer nur einmal angeschrieben. Der
+auslösende Benutzer wird aus der Empfängergruppe entfernt. Direkte
+Einsatzlinks entstehen aus der konfigurierten HTTPS-`APP_URL` und der
+internen Einsatz-ID, niemals aus dem Host-Header oder aus externen
+DIVERA-Daten. Nach der Anmeldung öffnet das Frontend den Einsatz nur, wenn er
+in der rollenbegrenzten Einsatzliste des Benutzers enthalten ist.
+
+Der Versand erfolgt erst nach erfolgreichem Speichern. Fehler rollen den
+fachlichen Vorgang nicht zurück, werden sichtbar an den Browser gemeldet und
+ohne Empfängeradresse, Mailzugangsdaten, DIVERA-Schlüssel oder Einsatzinhalt
+protokolliert. Es gibt bewusst keine Queue und keine automatische
+Wiederholung.
+
 ## Login-Historie vom 23. August 2026
 
 Die Historie erfasst ausschließlich die Benutzer-ID und den UTC-Zeitpunkt erfolgreicher Anmeldungen. IP-Adressen, User-Agents, Kennwörter und fehlgeschlagene Versuche werden nicht gespeichert. Die Ausgabe erfolgt nur über die bereits auf `wehrleitung` und den aktuellen Mandanten begrenzte Benutzerverwaltung; pro Benutzer werden höchstens fünf Zeitpunkte ausgegeben. Beim Löschen eines Benutzers werden die Einträge kaskadierend entfernt.

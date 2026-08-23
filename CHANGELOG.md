@@ -7,6 +7,12 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 ### Added
 
 - Konfigurierbare Dienstgrade aus `constants.php` stehen in beiden Feldern der Einsatzleitung als Drop-down mit Abkürzung und vollständiger Bezeichnung bereit.
+- Einheitsführungen werden über neue Einsätze ihrer Einheiten und durch Führungskräfte erstellte Berichte informiert; Wehrführungen erhalten nach Freigaben durch Einheitsführungen eine E-Mail mit Einsatzdetails und direktem Link.
+
+### Changed
+
+- Fehlgeschlagene Workflow-Benachrichtigungen rollen den gespeicherten Vorgang nicht zurück und werden als sichtbare Warnung sowie datenschutzarm im Serverlog gemeldet.
+- Direkte Links mit `?incident=<ID>` öffnen den berechtigten Einsatz auch nach einer erforderlichen Anmeldung.
 
 ## 2026-08-23
 
