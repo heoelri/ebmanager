@@ -60,7 +60,7 @@
 - Ein Einsatz kann mehreren Einheiten zugeordnet sein. `(incident_id, unit_id)` ist eindeutig; jede beteiligte Einheit schreibt genau einen Bericht.
 - Die Wehrleitung konsolidiert Einzelberichte in `incidents.consolidated_text`.
 - Eine manuelle laufende Nummer ist je Einheit und lokalem Kalenderjahr eindeutig.
-- Einheitsberichte enthalten Geschädigte und Schädiger mit optionalem Namen, Telefon und Adresse sowie Einsatzleitung und eine optionale weitere Führungskraft mit Dienstgrad und Name.
+- Einheitsberichte enthalten Geschädigte und Schädiger mit optionalem Namen, Telefon und Adresse, die optionale Gesamteinsatzleitung sowie die Einsatzleitung der eigenen Einheit mit Dienstgrad und Name.
 - Alarmierungszeit, Ausrückezeit, Eintreffzeit und Einsatzende müssen vollständig und chronologisch sein. Die Alarmierungszeit stammt aus dem Einsatz und ist im Bericht unveränderlich; die Dauer wird berechnet.
 - Rollen, Dienstgrade, Einsatzarten, Gruppenbezeichnungen und Aufgliederungen liegen zentral in `constants.php`. Die Oberfläche lädt die fachlichen Optionen über `GET /api/options`; dupliziere sie nicht im Frontend.
 - Die Aufgliederung entspricht dem Feuerwehrformular und besteht aus den Mehrfachauswahlgruppen `site`, `cause` und `technical`.
@@ -96,6 +96,9 @@
 - Die Oberfläche bleibt ohne Framework responsiv und mit Tastatur, Screenreader und Touch bedienbar.
 - Interaktive Ziele sind mindestens 44 Pixel groß, Tastaturfokus ist sichtbar und dynamische Fehler sowie Statusänderungen werden angekündigt.
 - Nutze native Eingabetypen, Labels, Fieldsets und mobil bedienbare Kontrollfelder.
+- Gruppiere optionale Berichtsbereiche mit nativen `<details>` und `<summary>`. Vorhandene Werte öffnen den jeweiligen Bereich beim Bearbeiten automatisch.
+- Halte den Fokus in Bearbeitungsdialogen stabil und gib ihn beim Schließen an das auslösende Element zurück; nur sichtbare Fehlermeldungen erhalten gezielt den Fokus.
+- Stelle Alarmierung, Ausrücken, Eintreffen, Einsatzende und Dauer in der Einzelbericht-Übersicht als getrennte semantische Zeilen dar.
 - Drag-and-drop ist nur eine optionale Mausbedienung. Auswahlfelder bleiben die gleichwertige Tastatur- und Touchbedienung.
 - Externe Kartenlinks verwenden OpenStreetMap, kündigen das neue Fenster an und setzen `rel="noopener"`.
 

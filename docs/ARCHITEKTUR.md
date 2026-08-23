@@ -32,7 +32,9 @@ flowchart LR
 ```
 
 - `public/index.html` enthält die responsive Oberfläche und verwendet native
-  Browserfunktionen einschließlich Drag-and-Drop.
+  Browserfunktionen einschließlich Dialog, aufklappbarer Formularbereiche und
+  Drag-and-Drop. Der Bearbeitungsdialog erhält den Fokus einmalig beim Öffnen
+  und gibt ihn beim Schließen an das auslösende Element zurück.
 - `.htaccess` erzwingt HTTPS, schützt Konfigurationsdateien und leitet
   `/api/*` an `api.php` weiter.
 - `api.php` enthält Routing, Authentifizierung, Berechtigungsprüfung und fachliche Transaktionen.
@@ -68,10 +70,13 @@ muss exakt der HTTPS-Origin der Anwendung entsprechen.
 3. Jede alarmierte Einheit kann genau einen Bericht erstellen.
 4. Führungskräfte ordnen Mitglieder den eigenen Fahrzeugen und den Funktionen
    Einheitsführer, Maschinist oder Besatzung zu.
-5. Die Einheitsführung kann einen Entwurf bearbeiten und freigeben.
-6. Freigegebene Berichte sind unveränderlich. Bearbeitung und Freigabe werden
+5. Das Berichtsformular zeigt die fachliche DIVERA-Einsatznummer nur lesend,
+   trennt Gesamt- und Einheitseinsatzleitung und gliedert optionale Angaben in
+   native aufklappbare Bereiche.
+6. Die Einheitsführung kann einen Entwurf bearbeiten und freigeben.
+7. Freigegebene Berichte sind unveränderlich. Bearbeitung und Freigabe werden
    durch eine Datenbank-Zeilensperre koordiniert.
-7. Die Wehrführung konsolidiert die Einzelberichte.
+8. Die Wehrführung konsolidiert die Einzelberichte.
 
 Nach dem erfolgreichen Speichern versendet die API die fachlich vorgesehenen
 E-Mail-Benachrichtigungen direkt über die bestehende Mail-Infrastruktur.
