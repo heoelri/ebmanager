@@ -123,6 +123,7 @@ assert.match(html, /Abgeschickt\$\{submitted\?` am/);
 assert.match(html, /Der Einsatzbericht ist für Sie jetzt nur noch lesbar/);
 assert.match(html, /jede alarmierte Einheit einen Bericht an die Wehrführung gesendet hat/);
 assert.match(html, /Noch nicht bereit:/);
+assert.match(html, /if\(me\.role==='wehrleitung'&&mayConsolidate\)bindForm\('#consolidate'/);
 const authorNoticeSource = html.match(/function authorReportNotice[^\n]+/)?.[0];
 assert(authorNoticeSource, 'authorReportNotice fehlt');
 const authorReportNotice = new Function(
@@ -138,6 +139,15 @@ assert.match(authorReportNotice({
   history: [{from_status: 'author_draft', to_status: 'unit_review', created_at: '2026-08-23T18:00:00Z'}]
 }), /Abgeschickt am 2026-08-23T18:00:00Z.*nur noch lesbar/);
 assert.equal(authorReportNotice({status: 'author_draft', history: []}), '');
+const reportActionsSource = html.match(/function reportActions[^\n]+/)?.[0];
+assert(reportActionsSource, 'reportActions fehlt');
+for (const me of [
+  {id: 1, role: 'fuehrungskraft', unitIds: [1]},
+  {id: 2, role: 'einheitsleitung', unitIds: [1]}
+]) {
+  const reportActions = new Function('me', `${reportActionsSource}; return reportActions;`)(me);
+  assert.equal(reportActions({id: 1, unit_id: 1, author_id: 1, status: 'wehr_review', editable: false, history: []}, 1), '');
+}
 assert.doesNotMatch(html, /\/release/);
 assert.match(html, /type="\$\{type\}" name="unitIds"/);
 assert.match(html, /role==='einheitsleitung'\?'radio':'checkbox'/);
