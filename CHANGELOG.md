@@ -6,6 +6,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Added
 
+- `constants.php` bündelt Rollen, Einsatzarten, Klassifikationsgruppen und deren UI-Bezeichnungen; die Oberfläche lädt anpassbare Fachoptionen aus derselben Backend-Quelle.
 - Erfolgreiche DIVERA-Importe werden mit Einheit, Einsatz, Benutzer und UTC-Zeitpunkt protokolliert; die Einsatzübersicht zeigt den letzten Import je Einheit.
 - Erfolgreiche Anmeldungen werden pro Benutzer gespeichert; die Wehrleitung sieht in der Verwaltung die fünf neuesten Anmeldezeitpunkte.
 - Einheitsberichte erfassen eine manuelle, je Einheit und Kalenderjahr eindeutige laufende Nummer, Geschädigte und Schädiger mit Name, Telefon und Adresse sowie die Einsatzleitung und eine optionale weitere Führungskraft.
@@ -53,6 +54,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Breaking Changes
 
+- Deployments müssen `constants.php` zusammen mit `api.php` hochladen. Ohne die Datei startet die API nicht.
 - Bestehende Installationen müssen vor dem neuen Anwendungscode einmal `migrations/005-divera-imports.sql` importieren. Die Historie beginnt mit dem ersten DIVERA-Import nach dem Update.
 - Bestehende Installationen müssen vor dem neuen Anwendungscode einmal `migrations/004-login-history.sql` importieren. Die Historie beginnt mit der ersten erfolgreichen Anmeldung nach dem Update.
 - Bestehende Installationen müssen vor dem neuen Anwendungscode einmal `migrations/003-report-details.sql` importieren. Bestehende Berichte bleiben lesbar und erhalten laufende Nummer und Zusatzangaben bei der nächsten Bearbeitung.
@@ -72,7 +74,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 5. `migrations/004-login-history.sql` genau einmal importieren.
 6. `migrations/005-divera-imports.sql` genau einmal importieren.
 7. `app_url` und `mail_from` in `config.local.php` ergänzen.
-8. `.htaccess`, `api.php`, `support.php` und `public/index.html` aktualisieren.
+8. `.htaccess`, `api.php`, `constants.php`, `support.php` und `public/index.html` aktualisieren.
 9. Anmeldung, Benutzerverwaltung, Passwort-Wiederherstellung und Einheitsberichte prüfen.
 10. Für das automatische Deployment im Environment `hiba` die neuen `SFTP_*`-Secrets hinterlegen und die alten `FTP_*`-Secrets löschen. `SFTP_KNOWN_HOSTS` wird mit `ssh-keyscan -p <Port> <Host>` ermittelt.
 

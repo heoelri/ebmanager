@@ -48,6 +48,7 @@ services:
       - 127.0.0.1:${HTTPS_PORT:-8443}:443
     volumes:
       - ./api.php:/var/www/html/api.php:ro
+      - ./constants.php:/var/www/html/constants.php:ro
       - ./support.php:/var/www/html/support.php:ro
       - ./.htaccess:/var/www/html/.htaccess:ro
       - ./public:/var/www/html/public:ro

@@ -49,6 +49,22 @@ allgemein freigegeben.
 | `einheitsleitung` | Sieht und bearbeitet Entwürfe ihrer Einheiten und gibt sie frei. |
 | `wehrleitung` | Verwaltet Wehr, Einheiten und Benutzer, sieht die Systemübersicht, alle Berichte und konsolidiert sie. |
 
+## Fachliche Anpassung
+
+`constants.php` ist die zentrale Quelle für fachlich anpassbare Listen. Dort
+können `INCIDENT_TYPES`, `CLASSIFICATIONS` und die zugehörigen
+`CLASSIFICATION_LABELS` geändert oder um eigene Einträge und Gruppen ergänzt
+werden. Backend und Oberfläche lesen dieselben Werte; eine doppelte Anpassung
+im JavaScript ist nicht erforderlich.
+
+Die Schlüssel in `CLASSIFICATIONS` und `CLASSIFICATION_LABELS` müssen
+übereinstimmen und dauerhaft stabil bleiben, weil Berichte sie im
+Klassifikations-JSON speichern. Entfernte Einsatzarten und Klassifikationen
+bleiben in bestehenden Berichten lesbar, können beim nächsten Bearbeiten aber
+nicht erneut ausgewählt werden. `ROLES` liegt ebenfalls in `constants.php`,
+ist jedoch mit Datenbankschema und Berechtigungslogik gekoppelt und darf nicht
+ohne entsprechende Code- und Schemaänderung angepasst werden.
+
 ## Dokumentation
 
 - [Dokumentationsübersicht](docs/README.md)
@@ -138,9 +154,10 @@ Docker-Image und führt denselben End-to-End-Test gegen Apache, HTTPS und MySQL
 aus.
 
 Nach einem erfolgreichen Testlauf eines Pushs auf `main` lädt
-`.github/workflows/deploy.yml` ausschließlich `.htaccess`, `api.php`, `support.php` und
-`public/index.html` per **SFTP** hoch. `config.local.php`, Datenbankdateien und
-`schema.sql` werden niemals automatisch übertragen.
+`.github/workflows/deploy.yml` ausschließlich `.htaccess`, `api.php`,
+`constants.php`, `support.php` und `public/index.html` per **SFTP** hoch.
+`config.local.php`, Datenbankdateien und `schema.sql` werden niemals
+automatisch übertragen.
 
 Die Einrichtung des Environments `hiba`, alle Secrets und die Trennung zukünftiger Ziele wie `devpreview` sind unter [Automatisches Deployment mit GitHub Actions einrichten](docs/WEBSPACE-DEPLOYMENT.md#9-automatisches-deployment-mit-github-actions-einrichten) dokumentiert.
 

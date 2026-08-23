@@ -102,6 +102,6 @@ Secrets, HTTPS und externe DIVERA-Aufrufe.
   Entwicklungsumgebung bestimmt.
 - Die Docker-Webports sind ausdrücklich an `127.0.0.1` gebunden; MySQL wird
   nicht auf dem Host veröffentlicht.
-- Der Webcontainer bindet nur `api.php`, `support.php`, `.htaccess` und `public/`
-  schreibgeschützt ein; eine vorhandene `config.local.php` gelangt nicht in
-  den Container.
+- Der Webcontainer bindet nur `api.php`, `constants.php`, `support.php`,
+  `.htaccess` und `public/` schreibgeschützt ein; eine vorhandene
+  `config.local.php` gelangt nicht in den Container.

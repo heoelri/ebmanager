@@ -292,8 +292,8 @@ Kalenderjahres nur einmal vergeben kann. Die vier Einsatzzeiten müssen chronolo
 als `duration_minutes` aus `alarmed_at` und `ended_at` berechnet und nicht
 gespeichert.
 
-`classification` hat drei Listen und enthält ausschließlich die in
-`.github/copilot-instructions.md` festgelegten Werte:
+`classification` enthält die in `constants.php` definierten Gruppen und
+ausschließlich deren dort festgelegte Werte:
 
 ```json
 {

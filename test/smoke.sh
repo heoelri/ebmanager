@@ -26,8 +26,12 @@ php -r '
   foreach (["viewport-fit=cover","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","min-height:44px",":focus-visible","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:"] as $required) {
     if (!str_contains($html,$required)) exit(1);
   }
+  foreach (["Kleinbrand","Wohngebäude","Menschen in Notlage"] as $duplicatedOption) {
+    if (str_contains($html,$duplicatedOption)) exit(1);
+  }
   if (preg_match("/<select[^>]+multiple/i",$html)) exit(1);
 '
+php -r 'require "constants.php"; assert(INCIDENT_TYPES!==[]); assert(array_keys(CLASSIFICATIONS)===array_keys(CLASSIFICATION_LABELS));'
 
 if [[ -z "${TEST_BASE_URL:-}" ]]; then
   openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost -addext subjectAltName=DNS:localhost \
@@ -92,6 +96,17 @@ test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-characte
   einsatzberichte --execute="SELECT token=SHA2('$session_token',256) FROM sessions LIMIT 1")" = 1
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" \
   "$base_url/api/me" | grep --quiet '"role":"wehrleitung"'
+options_json=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/options")
+printf '%s' "$options_json" | php -r '
+  require "constants.php";
+  $options=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+  assert($options["incidentTypes"]===INCIDENT_TYPES);
+  assert($options["classifications"]===CLASSIFICATIONS);
+  assert($options["classificationLabels"]===CLASSIFICATION_LABELS);
+'
+if [[ "$base_url" == https://* ]]; then
+  test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' "$base_url/constants.php")" = 403
+fi
 
 curl --insecure --silent --fail --cookie-jar second-login-cookies.txt \
   --header 'Content-Type: application/json' \
