@@ -140,6 +140,17 @@ CREATE TABLE member_qualifications (
   CONSTRAINT member_qualifications_qualification_fk FOREIGN KEY (qualification_id) REFERENCES qualifications(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE vehicles (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  unit_id BIGINT UNSIGNED NOT NULL,
+  divera_id VARCHAR(200) NOT NULL,
+  name VARCHAR(200) NOT NULL,
+  shortname VARCHAR(100) NOT NULL DEFAULT '',
+  fullname VARCHAR(200) NOT NULL DEFAULT '',
+  UNIQUE KEY vehicles_unit_divera (unit_id, divera_id),
+  CONSTRAINT vehicles_unit_fk FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE reports (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   incident_id BIGINT UNSIGNED NOT NULL,
@@ -159,7 +170,7 @@ CREATE TABLE reports (
   ended_at VARCHAR(100),
   incident_type VARCHAR(100) NOT NULL DEFAULT '',
   classification JSON NOT NULL,
-  status ENUM('draft','released') NOT NULL DEFAULT 'draft',
+  status ENUM('author_draft','unit_review','wehr_review') NOT NULL DEFAULT 'author_draft',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   released_at DATETIME,
@@ -168,6 +179,21 @@ CREATE TABLE reports (
   CONSTRAINT reports_incident_fk FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE CASCADE,
   CONSTRAINT reports_unit_fk FOREIGN KEY (unit_id) REFERENCES units(id),
   CONSTRAINT reports_author_fk FOREIGN KEY (author_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE report_transitions (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  report_id BIGINT UNSIGNED NOT NULL,
+  from_status ENUM('author_draft','unit_review','wehr_review'),
+  to_status ENUM('author_draft','unit_review','wehr_review') NOT NULL,
+  actor_id BIGINT UNSIGNED,
+  actor_name VARCHAR(200) NOT NULL,
+  actor_role ENUM('wehrleitung','einheitsleitung','fuehrungskraft') NOT NULL,
+  comment VARCHAR(2000) NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL,
+  KEY report_transitions_report_time (report_id, created_at, id),
+  CONSTRAINT report_transitions_report_fk FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE,
+  CONSTRAINT report_transitions_actor_fk FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE report_crew (
@@ -184,3 +210,5 @@ CREATE TABLE schema_migrations (
   name VARCHAR(255) PRIMARY KEY,
   applied_at DATETIME NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO schema_migrations(name,applied_at) VALUES('001-report-workflow-and-vehicles.sql',UTC_TIMESTAMP());

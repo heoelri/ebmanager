@@ -41,11 +41,14 @@ erDiagram
     members ||--o{ member_units : gehoert_zu
     units ||--o{ member_units : hat
     units ||--o{ qualifications : definiert
+    units ||--o{ vehicles : besitzt
     members ||--o{ member_qualifications : besitzt
     qualifications ||--o{ member_qualifications : wird_zugeordnet
     incidents ||--o{ reports : hat
     units ||--o{ reports : verfasst
     users ||--o{ reports : erstellt
+    reports ||--o{ report_transitions : durchlaeuft
+    users ||--o{ report_transitions : startet
     reports ||--o{ report_crew : enthaelt
     members ||--o{ report_crew : nimmt_teil
 ```
@@ -91,7 +94,7 @@ Anmeldebenutzer sind von den in Einsätzen verwendeten Mitgliedern getrennt.
 | `password_hash` | VARCHAR(255), NOT NULL | Durch `password_hash` erzeugter Hash; bis zur Annahme einer Einladung ist ein unbekannter Zufallswert gespeichert |
 | `role` | ENUM, NOT NULL | `wehrleitung`, `einheitsleitung` oder `fuehrungskraft` |
 
-Nur die Wehrleitung darf ohne Einheitszuordnung existieren.
+Die Wehrleitung hat keine Einheitszuordnung, eine Einheitsführung gehört exakt einer Einheit an und eine Führungskraft mindestens einer, optional mehreren Einheiten.
 
 ### `user_units`
 
@@ -262,6 +265,21 @@ Viele-zu-viele-Zuordnung von Mitgliedern zu Qualifikationen.
 | `member_id` | BIGINT UNSIGNED, FK, PK | Mitglied |
 | `qualification_id` | BIGINT UNSIGNED, FK, PK | Qualifikation |
 
+### `vehicles`
+
+Die Tabelle enthält den aktuellen, einheitsspezifischen Fahrzeugstamm aus DIVERA. Sie ist von den historischen Fahrzeug-Snapshots in `incident_units.vehicles` getrennt.
+
+| Spalte | Typ | Bedeutung |
+|---|---|---|
+| `id` | BIGINT UNSIGNED, PK | Interne Fahrzeug-ID |
+| `unit_id` | BIGINT UNSIGNED, FK | Zugehörige Einheit |
+| `divera_id` | VARCHAR(200), NOT NULL | DIVERA-Fahrzeug-ID |
+| `name` | VARCHAR(200), NOT NULL | Anzeigename |
+| `shortname` | VARCHAR(100), NOT NULL | Kurzbezeichnung |
+| `fullname` | VARCHAR(200), NOT NULL | Vollständige Typbezeichnung |
+
+Eindeutig ist `(unit_id, divera_id)`. Ein Stammdatenabgleich ersetzt den aktuellen Bestand der Einheit vollständig; bereits importierte Einsatz-Snapshots bleiben unverändert.
+
 ### `reports`
 
 | Spalte | Typ | Bedeutung |
@@ -284,7 +302,7 @@ Viele-zu-viele-Zuordnung von Mitgliedern zu Qualifikationen.
 | `ended_at` | VARCHAR(100), NULL | Einsatzende |
 | `incident_type` | VARCHAR(100), NOT NULL | Validierte Einsatzart |
 | `classification` | JSON, NOT NULL | Aufgliederung |
-| `status` | ENUM, NOT NULL | `draft` oder `released` |
+| `status` | ENUM, NOT NULL | `author_draft`, `unit_review` oder `wehr_review` |
 | `created_at` | DATETIME, NOT NULL | Erstellungszeit |
 | `updated_at` | DATETIME, NOT NULL | Letzte Änderung |
 | `released_at` | DATETIME, NULL | Freigabezeit |
@@ -311,6 +329,24 @@ ausschließlich deren dort festgelegte Werte:
 Die Spalten `vehicles` und `personnel` sind nur lesbare Zusammenfassungen aus
 `report_crew`; die strukturierte Zuordnung ist maßgeblich.
 
+### `report_transitions`
+
+Die Tabelle bildet die unveränderliche Historie jedes Berichts ab. Auch der Initialstatus wird als Eintrag ohne `from_status` gespeichert.
+
+| Spalte | Typ | Bedeutung |
+|---|---|---|
+| `id` | BIGINT UNSIGNED, PK | Interne Übergangs-ID |
+| `report_id` | BIGINT UNSIGNED, FK | Zugehöriger Bericht |
+| `from_status` | ENUM, NULL | Vorheriger Status; beim Initialeintrag leer |
+| `to_status` | ENUM, NOT NULL | Neuer Status |
+| `actor_id` | BIGINT UNSIGNED, FK, NULL | Auslösender Benutzer; bleibt nach einer späteren Löschung leer erhalten |
+| `actor_name` | VARCHAR(200), NOT NULL | Anzeigename zum Übergangszeitpunkt |
+| `actor_role` | ENUM, NOT NULL | Rolle zum Übergangszeitpunkt |
+| `comment` | VARCHAR(2000), NOT NULL | Pflichtkommentar bei einer Rückgabe, sonst leer |
+| `created_at` | DATETIME, NOT NULL | Übergangszeitpunkt |
+
+Die erlaubten Richtungen sind `author_draft → unit_review`, `unit_review → author_draft`, `unit_review → wehr_review` und `wehr_review → unit_review`. Frühere Prüfstufen behalten nach einer Rückgabe Leserechte über die Historie. Eine Rückgabe aus `wehr_review` oder die nachträgliche DIVERA-Zuordnung einer weiteren Einheit leert `incidents.consolidated_at`, bewahrt aber `consolidated_text`.
+
 ### `report_crew`
 
 | Spalte | Typ | Bedeutung |
@@ -326,10 +362,7 @@ unbegrenzt. Ohne Fahrzeug ist nur die Rolle `besatzung` erlaubt. Diese Regeln
 und die Zugehörigkeit des Mitglieds zur Einheit werden von der Anwendung
 validiert.
 
-Bearbeitung und Freigabe eines Berichts werden über eine Zeilensperre
-koordiniert. Nach der Freigabe kann auch eine bereits begonnene parallele
-Bearbeitung keine Daten mehr ändern. Der HTTP-Smoke-Test bildet dieses Race
-mit zwei getrennten Datenbankverbindungen nach.
+Bearbeitung und Statusübergang eines Berichts werden über eine Zeilensperre koordiniert. Status und Historieneintrag entstehen in derselben Transaktion; doppelte oder veraltete Übergänge werden mit HTTP 409 abgelehnt.
 
 ## Lösch- und Konsistenzverhalten
 

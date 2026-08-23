@@ -59,8 +59,10 @@ jobs:
       - name: Migrationen idempotent ausführen
         run: bash test/migrations.sh
       - name: Images bauen und End-to-End-Test ausführen
+        env:
+          DIVERA_API_BASE_URL: http://divera:8090
         run: |
-          docker compose up --build --detach --wait web
+          docker compose --profile test up --build --detach --wait divera web
           docker compose --profile test run --rm test
       - name: Container und Volumes entfernen
         if: always()

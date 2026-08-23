@@ -25,12 +25,28 @@ function config(): array
         'DB_DSN' => 'dsn', 'DB_USER' => 'user', 'DB_PASSWORD' => 'password', 'SETUP_TOKEN' => 'setup_token',
         'APP_URL' => 'app_url', 'MAIL_FROM' => 'mail_from', 'SMTP_HOST' => 'smtp_host',
         'SMTP_PORT' => 'smtp_port', 'SMTP_USERNAME' => 'smtp_username', 'SMTP_PASSWORD' => 'smtp_password',
-        'SMTP_CA_FILE' => 'smtp_ca_file'
+        'SMTP_CA_FILE' => 'smtp_ca_file', 'DIVERA_API_BASE_URL' => 'divera_api_base_url'
     ] as $environment => $key) {
         $value = getenv($environment);
         if ($value !== false) $config[$key] = $value;
     }
     return $config;
+}
+
+function diveraBaseUrl(): string
+{
+    $base = rtrim((string)(config()['divera_api_base_url'] ?? 'https://app.divera247.com'), '/');
+    $parts = parse_url($base);
+    $host = $parts['host'] ?? '';
+    $hostname = trim($host, '[]');
+    if ($parts === false
+        || !in_array($parts['scheme'] ?? '', ['http', 'https'], true)
+        || $host === ''
+        || (!filter_var($hostname, FILTER_VALIDATE_IP) && !filter_var($hostname, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME))
+        || isset($parts['path']) || isset($parts['query']) || isset($parts['fragment']) || isset($parts['user']) || isset($parts['pass'])) {
+        throw new ApiError(503, 'DIVERA-Basisadresse ist ungültig');
+    }
+    return $parts['scheme'] . '://' . $host . (isset($parts['port']) ? ':' . $parts['port'] : '');
 }
 
 function db(): PDO

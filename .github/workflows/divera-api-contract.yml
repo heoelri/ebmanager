@@ -1,0 +1,19 @@
+name: DIVERA API contract
+
+on:
+  schedule:
+    - cron: '17 6 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    name: Compare official API
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compare fake with official OpenAPI
+        run: bash test/divera-api-contract.sh

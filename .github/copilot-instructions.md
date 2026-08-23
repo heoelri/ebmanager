@@ -34,10 +34,10 @@
 ## Mandanten, Rollen und Benutzer
 
 - Begrenze jede fachliche Abfrage serverseitig auf die `organization_id` des aktuellen Benutzers. UI-Ausblendung ersetzt keine Berechtigungsprüfung.
-- `wehrleitung` verwaltet Einheiten und Benutzer, sieht alle Einsätze und Berichte ihrer Organisation, sieht die Systemübersicht und schreibt den Gesamtbericht.
-- `einheitsleitung` kann mehreren Einheiten angehören, deren Entwürfe sehen und bearbeiten sowie Berichte freigeben.
-- `fuehrungskraft` kann für alle ihr zugeordneten Einheiten Berichte schreiben, sieht aber nur selbst verfasste Berichte.
-- Benutzer gehören über `user_units` zu beliebig vielen Einheiten. `users.unit_id` bleibt nur als kompatible Primärzuordnung bestehen.
+- `wehrleitung` hat keine Einheitszuordnung, verwaltet Einheiten und Benutzer, sieht nach der Übergabe an sie alle Berichte ihrer Organisation, sieht die Systemübersicht und schreibt den Gesamtbericht. Fremde Einheitsberichte bearbeitet sie nicht.
+- `einheitsleitung` gehört exakt einer Einheit an, sieht deren Berichte nach der ersten Übergabe an die Einheitsführung und bearbeitet sie ausschließlich in `unit_review`.
+- `fuehrungskraft` gehört mindestens einer und optional mehreren Einheiten an, schreibt dort Berichte und sieht ausschließlich ihre eigenen Berichte.
+- `user_units` enthält die rollenabhängigen Einheitszuordnungen. `users.unit_id` bleibt als kompatible Primärzuordnung für Einheitsführung und Führungskräfte bestehen.
 - Eine Organisation muss immer mindestens eine `wehrleitung` behalten.
 - Neue Benutzer erhalten kein Startpasswort, sondern einen 30 Minuten gültigen Einmallink zur Aktivierung. Vergessene Passwörter verwenden denselben gehashten Tokenmechanismus; Anforderungen sind pro Benutzer fünf Minuten gesperrt.
 - Eine Passwortänderung widerruft alle Sitzungen des Benutzers.
@@ -65,7 +65,10 @@
 - Rollen, Dienstgrade, Einsatzarten, Gruppenbezeichnungen und Aufgliederungen liegen zentral in `constants.php`. Die Oberfläche lädt die fachlichen Optionen über `GET /api/options`; dupliziere sie nicht im Frontend.
 - Die Aufgliederung entspricht dem Feuerwehrformular und besteht aus den Mehrfachauswahlgruppen `site`, `cause` und `technical`.
 - Strukturierte meldende Person, detaillierte Einsatzortfelder, Kostenpflicht, Schadenssumme, Geräte, Löschmittel, Brandwache, Personal am Gerätehaus und Verwaltungsvermerke werden derzeit bewusst nicht erfasst.
-- Berichte wechseln genau einmal von `draft` nach `released`. Freigegebene Berichte und `released_at` sind unveränderlich; Wiederholungen liefern HTTP 409.
+- Berichte verwenden `author_draft`, `unit_review` und `wehr_review`. Die Initialstufe folgt der Erstellerrolle; Übergaben und kommentarpflichtige Rückgaben sind atomar, sperren den Datensatz und werden unveränderlich in `report_transitions` protokolliert.
+- Frühere Prüfstufen behalten nach einer Rückgabe Leserechte. Bearbeiten darf nur der ursprüngliche Autor in `author_draft` beziehungsweise die zuständige Einheitsführung in `unit_review`; in `wehr_review` ist der Einheitsbericht unveränderlich.
+- Eine Rückgabe durch die Wehrführung oder die nachträgliche Zuordnung einer weiteren Einheit leert `incidents.consolidated_at`, erhält den bisherigen Text aber als Arbeitsstand. Wiederholte oder veraltete Statusübergänge liefern HTTP 409.
+- Die Wehrführung darf erst konsolidieren, wenn jede alarmierte Einheit einen Bericht in `wehr_review` hat. Führungskräfte sehen nach dem Absenden dessen Zeitpunkt, den aktuellen Status und einen ausdrücklichen Nur-Lese-Hinweis.
 - `patient`, `caller`, Geschädigte, Schädiger und Berichtstexte sind sensible, mandantengebundene Einsatzdaten. Protokolliere sie nicht.
 
 ## Mitglieder, Fahrzeuge und Besatzung
@@ -73,6 +76,8 @@
 - Mitglieder sind fachliche Personen und keine Anmeldebenutzer.
 - Eine Person wird anhand ihrer DIVERA-ID organisationsweit einmal in `members` gespeichert und über `member_units` mehreren Einheiten zugeordnet.
 - Qualifikationen sind einheitsspezifisch und werden aus `cluster.qualification` sowie `cluster.consumer[*].qualifications` synchronisiert.
+- `vehicles` enthält den aktuellen einheitsspezifischen Fahrzeugstamm aus `cluster.vehicle`; `incident_units.vehicles` bleibt der unveränderliche Einsatz-Snapshot.
+- Ein vollständiger Stammdatenabgleich ersetzt die aktuellen Mitglieds-, Qualifikations- und Fahrzeugzuordnungen der Einheit. Historisch in `report_crew` verwendete Mitglieder bleiben erhalten, auch wenn DIVERA sie nicht mehr liefert.
 - `report_crew` ist die maßgebliche strukturierte Besatzung. Ein Mitglied kommt pro Bericht höchstens einmal vor.
 - Zulässige Funktionen sind `maschinist`, `einheitsfuehrer` und `besatzung`. Pro Fahrzeug gibt es höchstens einen Maschinisten und einen Einheitsführer; die Besatzung ist unbegrenzt.
 - Nur eigene Fahrzeuge der berichtenden Einheit oder „Ohne Fahrzeug“ sind Besatzungsziele. Der Server erzwingt diese Regel.
@@ -88,6 +93,8 @@
 - Lokale POST-Importe und Synchronisationen schreiben ausschließlich in MySQL.
 - Access-Keys werden nie protokolliert, an den Browser ausgegeben oder committed.
 - Ein DIVERA-Einsatz ist innerhalb einer Organisation über `divera_id` eindeutig. Wiederholter Import aktualisiert Einsatz und `incident_units`, statt sie zu duplizieren.
+- Führungskräfte dürfen für ihre Einheiten Einsätze erkennen und einzeln importieren. Nur Einheits- und Wehrführung dürfen Access-Keys ändern oder Mitglieder, Qualifikationen und Fahrzeuge synchronisieren.
+- „Alles synchronisieren“ ruft `pull/all` und `alarms` je höchstens einmal ab, ersetzt die Stammdaten und importiert beziehungsweise aktualisiert alle gelieferten Einsätze.
 
 ## Oberfläche und Barrierefreiheit
 
@@ -114,6 +121,7 @@
 - Verwende die vorhandenen PHP-, MySQL- und Shell-Checks ohne zusätzliches Testframework.
 - Ergänze für nicht triviale Änderungen einen fokussierten Check in `test/smoke.sh`, insbesondere für Mandantentrennung, Rollen, Zustandsübergänge, Import-Idempotenz und externe Nur-Lese-Grenzen.
 - `test/migrations.sh` prüft, dass spätere Migrationen in Dev-Volumes genau einmal ausgeführt werden.
+- `test/fake-divera.php` verweist auf die offiziellen OpenAPI-Dokumente. Halte seine GET-Antworten damit konsistent; `.github/workflows/divera-api-contract.yml` prüft Pfade und dokumentierte Felder monatlich, während undokumentierte Antwortdetails vor Änderungen manuell mit einer separaten DIVERA-Testeinheit geprüft werden müssen.
 - GitHub Actions prüft PHP- und JavaScript-Syntax, Shellskripte, `schema.sql`, den HTTP-End-to-End-Fluss sowie Docker Compose gegen Apache/HTTPS und MySQL.
 - Pull Requests erhalten keinen Zugriff auf Deployment-Secrets.
 - Nach erfolgreichen Tests eines Pushs auf `main` lädt der Workflow nur `.htaccess`, `api.php`, `constants.php`, `support.php`, `public/index.html` und `public/styles.css` per SFTP mit geprüftem Host-Key hoch. Lokale Konfiguration, Schema und Migrationen werden nie automatisch deployt.
