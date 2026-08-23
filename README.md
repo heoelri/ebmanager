@@ -138,7 +138,7 @@ docker compose --profile demo run --rm demo-seed
 docker compose up --build
 ```
 
-Der Seed setzt nur die Organisation **Freiwillige Feuerwehr Musterstadt** auf ihren definierten Demo-Stand zurück und verändert keine anderen Organisationen. Wiederholtes Ausführen erzeugt daher keine Duplikate. Ein kompletter Neustart ist mit `docker compose down --volumes` möglich.
+Der Seed erkennt seine Organisation ausschließlich über das reservierte Konto `wehrleitung@demo.local`, setzt nur diese auf ihren definierten Demo-Stand zurück und verändert keine anderen Organisationen. Wiederholtes Ausführen erzeugt daher keine Duplikate. Ein kompletter Neustart ist mit `docker compose down --volumes` möglich.
 
 Alle Demo-Konten verwenden ausschließlich lokal das Kennwort `Demo-Feuerwehr-2026!`:
 

@@ -2,7 +2,7 @@ SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 START TRANSACTION;
 
 SET @demo_name = 'Freiwillige Feuerwehr Musterstadt';
-SET @old_org = (SELECT id FROM organizations WHERE name=@demo_name ORDER BY id LIMIT 1);
+SET @old_org = (SELECT organization_id FROM users WHERE email='wehrleitung@demo.local');
 
 DELETE rc FROM report_crew rc JOIN reports r ON r.id=rc.report_id JOIN incidents i ON i.id=r.incident_id WHERE i.organization_id=@old_org;
 DELETE rt FROM report_transitions rt JOIN reports r ON r.id=rt.report_id JOIN incidents i ON i.id=r.incident_id WHERE i.organization_id=@old_org;
@@ -168,23 +168,23 @@ SELECT
   IF(d.status='wehr_review',STR_TO_DATE(i.started_at,'%Y-%m-%dT%H:%i:%s.000Z')+INTERVAL 5 HOUR,NULL)
 FROM incidents i
 JOIN (
-  SELECT 'demo-001' incident_key,@mitte unit_id,@fuehrung_mitte author_id,'1/2026' running_number,'Der Kleinbrand wurde mit einem Kleinlöschgerät abgelöscht. Nachkontrolle ohne Feststellung.' narrative,'Brandeinsatz' incident_type,'Brand im Freien' classification,'author_draft' status,'Martin Berger' command_name
-  UNION ALL SELECT 'demo-002',@nord,@fuehrung_nord,'1/2026','Das Wasser wurde mit einer Tauchpumpe aus dem Keller entfernt.','Technische Hilfe','Wasserschaden','unit_review','Nora Hansen'
-  UNION ALL SELECT 'demo-003',@sued,@fuehrung_sued,'1/2026','Die Anlage wurde kontrolliert. Ursache war Wasserdampf; kein Feuer feststellbar.','Brandeinsatz','Brandmeldeanlage','wehr_review','Stefan Krüger'
-  UNION ALL SELECT 'demo-004',@mitte,@fuehrung_mitte,'2/2026','Ein Trupp ging unter Atemschutz zur Brandbekämpfung vor. Die Wohnung wurde belüftet.','Brandeinsatz','Wohngebäude','wehr_review','Martin Berger'
-  UNION ALL SELECT 'demo-004',@nord,@fuehrung_nord,'2/2026','Die Einheit stellte die Wasserversorgung her und kontrollierte die Nachbarwohnung.','Brandeinsatz','Wohngebäude','wehr_review','Nora Hansen'
-  UNION ALL SELECT 'demo-005',@mitte,@fuehrung_springer,'3/2026','Brandbekämpfung über den Innenhof und Koordination der Einsatzabschnitte.','Brandeinsatz','Landwirtschaftliches Gebäude','wehr_review','Martin Berger'
-  UNION ALL SELECT 'demo-005',@nord,@fuehrung_nord,'3/2026','Aufbau einer unabhängigen Wasserversorgung und Riegelstellung an der Nordseite.','Brandeinsatz','Landwirtschaftliches Gebäude','wehr_review','Nora Hansen'
-  UNION ALL SELECT 'demo-005',@sued,@fuehrung_sued,'2/2026','Ausleuchten der Einsatzstelle und Unterstützung bei den Nachlöscharbeiten.','Brandeinsatz','Landwirtschaftliches Gebäude','wehr_review','Stefan Krüger'
+  SELECT 'demo-001' incident_key,@mitte unit_id,@fuehrung_mitte author_id,'1/2026' running_number,'Der Kleinbrand wurde mit einem Kleinlöschgerät abgelöscht. Nachkontrolle ohne Feststellung.' narrative,'Kleinbrand' incident_type,'Sonstige' classification,'author_draft' status,'Martin Berger' command_name
+  UNION ALL SELECT 'demo-002',@nord,@fuehrung_nord,'1/2026','Das Wasser wurde mit einer Tauchpumpe aus dem Keller entfernt.','Technische Hilfe','Wohngebäude','unit_review','Nora Hansen'
+  UNION ALL SELECT 'demo-003',@sued,@fuehrung_sued,'1/2026','Die Anlage wurde kontrolliert. Ursache war Wasserdampf; kein Feuer feststellbar.','BMA','Gewerbebetrieb','wehr_review','Stefan Krüger'
+  UNION ALL SELECT 'demo-004',@mitte,@fuehrung_mitte,'2/2026','Ein Trupp ging unter Atemschutz zur Brandbekämpfung vor. Die Wohnung wurde belüftet.','Mittelbrand','Wohngebäude','wehr_review','Martin Berger'
+  UNION ALL SELECT 'demo-004',@nord,@fuehrung_nord,'2/2026','Die Einheit stellte die Wasserversorgung her und kontrollierte die Nachbarwohnung.','Mittelbrand','Wohngebäude','wehr_review','Nora Hansen'
+  UNION ALL SELECT 'demo-005',@mitte,@fuehrung_springer,'3/2026','Brandbekämpfung über den Innenhof und Koordination der Einsatzabschnitte.','Großbrand','Landwirtschaftlicher Betrieb','wehr_review','Martin Berger'
+  UNION ALL SELECT 'demo-005',@nord,@fuehrung_nord,'3/2026','Aufbau einer unabhängigen Wasserversorgung und Riegelstellung an der Nordseite.','Großbrand','Landwirtschaftlicher Betrieb','wehr_review','Nora Hansen'
+  UNION ALL SELECT 'demo-005',@sued,@fuehrung_sued,'2/2026','Ausleuchten der Einsatzstelle und Unterstützung bei den Nachlöscharbeiten.','Großbrand','Landwirtschaftlicher Betrieb','wehr_review','Stefan Krüger'
   UNION ALL SELECT 'demo-006',@mitte,@fuehrung_mitte,'4/2026','Die Einsatzstelle wurde abgesichert, auslaufende Betriebsstoffe wurden aufgenommen.','Technische Hilfe','Verkehrsfläche','wehr_review','Martin Berger'
-  UNION ALL SELECT 'demo-008',@mitte,@fuehrung_springer,'5/2026','Die Böschung wurde mit zwei Rohren abgelöscht und abschließend gewässert.','Brandeinsatz','Brand im Freien','author_draft','Martin Berger'
-  UNION ALL SELECT 'demo-009',@sued,@fuehrung_sued,'3/2026','Der Rettungsdienst wurde beim schonenden Transport aus dem Obergeschoss unterstützt.','Technische Hilfe','Menschen in Notlage','unit_review','Stefan Krüger'
-  UNION ALL SELECT 'demo-010',@mitte,@fuehrung_mitte,'6/2026','Ein Trupp löschte den Entstehungsbrand in der Garage.','Brandeinsatz','Nebengebäude','wehr_review','Martin Berger'
-  UNION ALL SELECT 'demo-010',@sued,@fuehrung_sued,'4/2026','Die Einheit stellte den Sicherheitstrupp und belüftete das Gebäude.','Brandeinsatz','Nebengebäude','unit_review','Stefan Krüger'
-  UNION ALL SELECT 'demo-012',@nord,@fuehrung_nord,'4/2026','Das Tier wurde aus der Umzäunung befreit und unverletzt übergeben.','Technische Hilfe','Tierrettung','wehr_review','Nora Hansen'
-  UNION ALL SELECT 'demo-013',@mitte,@fuehrung_mitte,'7/2026','Die Rauchentwicklung stammte aus einer genehmigten Feuerstelle.','Erkundung','Brand im Freien','unit_review','Martin Berger'
-  UNION ALL SELECT 'demo-014',@nord,@fuehrung_nord,'5/2026','Die Wasserzufuhr wurde abgestellt und das ausgetretene Wasser aufgenommen.','Technische Hilfe','Wasserschaden','author_draft','Nora Hansen'
-  UNION ALL SELECT 'demo-015',@mitte,@fuehrung_mitte,'8/2026','Die Brandstelle wurde mit der Wärmebildkamera kontrolliert. Keine Glutnester vorhanden.','Brandeinsatz','Wohngebäude','wehr_review','Martin Berger'
+  UNION ALL SELECT 'demo-008',@mitte,@fuehrung_springer,'5/2026','Die Böschung wurde mit zwei Rohren abgelöscht und abschließend gewässert.','Wald- und Flächenbrand','Wald, Heide, Moor, Feldflur','author_draft','Martin Berger'
+  UNION ALL SELECT 'demo-009',@sued,@fuehrung_sued,'3/2026','Der Rettungsdienst wurde beim schonenden Transport aus dem Obergeschoss unterstützt.','Technische Hilfe','Wohngebäude','unit_review','Stefan Krüger'
+  UNION ALL SELECT 'demo-010',@mitte,@fuehrung_mitte,'6/2026','Ein Trupp löschte den Entstehungsbrand in der Garage.','Mittelbrand','Sonstige','wehr_review','Martin Berger'
+  UNION ALL SELECT 'demo-010',@sued,@fuehrung_sued,'4/2026','Die Einheit stellte den Sicherheitstrupp und belüftete das Gebäude.','Mittelbrand','Sonstige','unit_review','Stefan Krüger'
+  UNION ALL SELECT 'demo-012',@nord,@fuehrung_nord,'4/2026','Das Tier wurde aus der Umzäunung befreit und unverletzt übergeben.','Technische Hilfe','Wald, Heide, Moor, Feldflur','wehr_review','Nora Hansen'
+  UNION ALL SELECT 'demo-013',@mitte,@fuehrung_mitte,'7/2026','Die Rauchentwicklung stammte aus einer genehmigten Feuerstelle.','Sonstiges','Industriebetrieb','unit_review','Martin Berger'
+  UNION ALL SELECT 'demo-014',@nord,@fuehrung_nord,'5/2026','Die Wasserzufuhr wurde abgestellt und das ausgetretene Wasser aufgenommen.','Technische Hilfe','Wohngebäude','author_draft','Nora Hansen'
+  UNION ALL SELECT 'demo-015',@mitte,@fuehrung_mitte,'8/2026','Die Brandstelle wurde mit der Wärmebildkamera kontrolliert. Keine Glutnester vorhanden.','Kleinbrand','Wohngebäude','wehr_review','Martin Berger'
 ) d ON d.incident_key=i.divera_id
 WHERE i.organization_id=@org;
 
@@ -246,4 +246,4 @@ SELECT CONCAT_WS('|',
   (SELECT COUNT(*) FROM incidents i WHERE i.organization_id=o.id AND i.consolidated_at IS NOT NULL),
   (SELECT COUNT(*) FROM report_transitions rt JOIN reports r ON r.id=rt.report_id JOIN incidents i ON i.id=r.incident_id
     WHERE i.organization_id=o.id AND rt.from_status='wehr_review' AND rt.to_status='unit_review')
-) FROM organizations o WHERE o.name=@demo_name;
+) FROM organizations o WHERE o.id=@org;

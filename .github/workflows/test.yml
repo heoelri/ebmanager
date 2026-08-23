@@ -38,7 +38,7 @@ jobs:
       - name: PHP-Syntax prüfen
         run: find . -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Testskripte prüfen
-        run: bash -n test/smoke.sh test/migrations.sh docker/migrate.sh
+        run: bash -n test/smoke.sh test/migrations.sh test/demo-seed.sh docker/migrate.sh docker/demo-seed.sh
       - name: Frontend prüfen
         run: node test/frontend.mjs
       - name: Schema und API prüfen
@@ -64,6 +64,8 @@ jobs:
         run: |
           docker compose --profile test up --build --detach --wait divera web
           docker compose --profile test run --rm test
+      - name: Demo-Seed prüfen
+        run: bash test/demo-seed.sh
       - name: Container und Volumes entfernen
         if: always()
         run: docker compose --profile test down --volumes
