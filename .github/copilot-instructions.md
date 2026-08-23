@@ -60,7 +60,7 @@
 - Eine manuelle laufende Nummer ist je Einheit und lokalem Kalenderjahr eindeutig.
 - Einheitsberichte enthalten Geschädigte und Schädiger mit optionalem Namen, Telefon und Adresse sowie Einsatzleitung und eine optionale weitere Führungskraft mit Dienstgrad und Name.
 - Alarmierungszeit, Ausrückezeit, Eintreffzeit und Einsatzende müssen vollständig und chronologisch sein. Die Alarmierungszeit stammt aus dem Einsatz und ist im Bericht unveränderlich; die Dauer wird berechnet.
-- Rollen, Einsatzarten, Gruppenbezeichnungen und Aufgliederungen liegen zentral in `constants.php`. Die Oberfläche lädt die fachlichen Optionen über `GET /api/options`; dupliziere sie nicht im Frontend.
+- Rollen, Dienstgrade, Einsatzarten, Gruppenbezeichnungen und Aufgliederungen liegen zentral in `constants.php`. Die Oberfläche lädt die fachlichen Optionen über `GET /api/options`; dupliziere sie nicht im Frontend.
 - Die Aufgliederung entspricht dem Feuerwehrformular und besteht aus den Mehrfachauswahlgruppen `site`, `cause` und `technical`.
 - Strukturierte meldende Person, detaillierte Einsatzortfelder, Kostenpflicht, Schadenssumme, Geräte, Löschmittel, Brandwache, Personal am Gerätehaus und Verwaltungsvermerke werden derzeit bewusst nicht erfasst.
 - Berichte wechseln genau einmal von `draft` nach `released`. Freigegebene Berichte und `released_at` sind unveränderlich; Wiederholungen liefern HTTP 409.
@@ -108,7 +108,7 @@
 - Verwende die vorhandenen PHP-, MySQL- und Shell-Checks ohne zusätzliches Testframework.
 - Ergänze für nicht triviale Änderungen einen fokussierten Check in `test/smoke.sh`, insbesondere für Mandantentrennung, Rollen, Zustandsübergänge, Import-Idempotenz und externe Nur-Lese-Grenzen.
 - `test/migrations.sh` prüft, dass spätere Migrationen in Dev-Volumes genau einmal ausgeführt werden.
-- GitHub Actions prüft PHP-Syntax, Shellskripte, `schema.sql`, den HTTP-End-to-End-Fluss sowie Docker Compose gegen Apache/HTTPS und MySQL.
+- GitHub Actions prüft PHP- und JavaScript-Syntax, Shellskripte, `schema.sql`, den HTTP-End-to-End-Fluss sowie Docker Compose gegen Apache/HTTPS und MySQL.
 - Pull Requests erhalten keinen Zugriff auf Deployment-Secrets.
 - Nach erfolgreichen Tests eines Pushs auf `main` lädt der Workflow nur `.htaccess`, `api.php`, `constants.php`, `support.php` und `public/index.html` per SFTP mit geprüftem Host-Key hoch. Lokale Konfiguration, Schema und Migrationen werden nie automatisch deployt.
 - Das produktive GitHub-Environment heißt `hiba`. Jedes weitere Ziel benötigt eigene Secrets, Schutzregeln und eine eigene Concurrency-Gruppe.

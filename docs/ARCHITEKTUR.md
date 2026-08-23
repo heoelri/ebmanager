@@ -34,9 +34,9 @@ flowchart LR
 - `.htaccess` erzwingt HTTPS, schützt Konfigurationsdateien und leitet
   `/api/*` an `api.php` weiter.
 - `api.php` enthält Routing, Authentifizierung, Berechtigungsprüfung und fachliche Transaktionen.
-- `constants.php` definiert Rollen, Einsatzarten und frei anpassbare
-  Klassifikationsgruppen. `GET /api/options` stellt die UI-relevanten Werte
-  authentifiziert bereit.
+- `constants.php` definiert Rollen sowie frei anpassbare Dienstgrade,
+  Einsatzarten und Klassifikationsgruppen. `GET /api/options` stellt die
+  UI-relevanten Werte authentifiziert bereit.
 - `support.php` enthält die wiederverwendbaren HTTP-, Datenbank-, Validierungs- und Mailfunktionen und ist nicht direkt öffentlich abrufbar.
 - `GET /api/system` liefert ausschließlich der Wehrleitung eine kuratierte, read-only Systemübersicht ohne Zugangsdaten oder Schlüssel.
 - `schema.sql` ist die maßgebliche Definition des MySQL-Schemas.

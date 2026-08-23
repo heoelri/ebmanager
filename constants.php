@@ -3,6 +3,19 @@ declare(strict_types=1);
 
 const ROLES = ['wehrleitung', 'einheitsleitung', 'fuehrungskraft'];
 
+const RANKS = [
+    'FMA' => 'Feuerwehrmann-Anwärter',
+    'FM' => 'Feuerwehrmann',
+    'OFM' => 'Oberfeuerwehrmann',
+    'HFM' => 'Hauptfeuerwehrmann',
+    'UBM' => 'Unterbrandmeister',
+    'BM' => 'Brandmeister',
+    'OBM' => 'Oberbrandmeister',
+    'HBM' => 'Hauptbrandmeister',
+    'BI' => 'Brandinspektor',
+    'BOI' => 'Brandoberinspektor'
+];
+
 const INCIDENT_TYPES = [
     'Kleinbrand', 'Mittelbrand', 'Großbrand', 'Wald- und Flächenbrand',
     'Schornsteinbrand', 'Kfz-Brand', 'Verkehrsunfall', 'Oelunfall/Oelspur',
