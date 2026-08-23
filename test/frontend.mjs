@@ -40,6 +40,14 @@ assert.match(rankOptions(''), /^<option value="">Keine Angabe<\/option>/);
 assert.match(rankOptions('ALT'), /value="ALT" selected>ALT/);
 assert.equal((rankOptions('ALT').match(/value="ALT"/g) ?? []).length, 1);
 
+const incidentStatusSource = html.match(/function incidentStatus[^\n]+/)?.[0];
+assert(incidentStatusSource, 'incidentStatus fehlt');
+const incidentStatus = new Function('esc', `${incidentStatusSource}; return incidentStatus;`)(value => String(value));
+for (const label of ['Bericht erforderlich', 'Prüfung erforderlich', 'Bereit zur Konsolidierung', 'Abgeschlossen']) {
+  assert.match(incidentStatus({reportStatus: {label}}), new RegExp(`<b>Status:</b> ${label}`));
+}
+assert.match(css, /\.incident-status\s*\{[\s\S]*?border-inline-start:\s*4px solid/);
+
 const reportFieldsSource = html.match(/function contactFields[\s\S]*?(?=\nfunction bindDuration)/)?.[0];
 assert(reportFieldsSource, 'Berichtsdetails fehlen');
 const {reportDetailsFields} = new Function(

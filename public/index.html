@@ -48,12 +48,13 @@ async function load(){[units,incidents,{incidentTypes,ranks,classifications:repo
   <button type="button" onclick="home()">Einsätze</button><button type="button" onclick="resources()">Mitglieder & Fahrzeuge</button>${me.role==='wehrleitung'?'<button type="button" onclick="admin()">Verwaltung</button><button type="button" onclick="systemOverview()">System</button>':''}
   <button type="button" onclick="divera()">DIVERA</button><button type="button" class="secondary" onclick="logout()">Abmelden</button>`}
 async function logout(){await api('/api/logout',{method:'POST'});me=null;login()}
+function incidentStatus(incident){return `<p class="incident-status"><b>Status:</b> ${esc(incident.reportStatus.label)}</p>`}
 function home(){setIncidentLocation();app.innerHTML=`<h1>${esc(me.organization_name)}</h1><p class="muted">${esc(me.name)} · ${esc(me.role)}</p>
   <section class="card"><h2>Einsatz anlegen</h2><form id="incident" class="grid">
   <label>Stichwort<input name="title" required></label><label>Zeitpunkt<input name="startedAt" type="datetime-local" required></label>
   <label>Adresse<input name="address" autocomplete="street-address"></label><fieldset><legend>Einheiten</legend><div class="check-grid">${units.filter(u=>me.role==='wehrleitung'||me.unitIds.includes(u.id)).map(u=>`<label><input type="checkbox" name="unitIds" value="${u.id}">${esc(u.name)}</label>`).join('')}</div></fieldset><button>Anlegen</button></form></section>
   <section id="pendingDivera" class="card" hidden aria-live="polite"></section>
-  <section><h2>Einsätze</h2>${incidents.map(i=>`<article class="card"><h3>${esc(i.title)}</h3><p>${esc(new Date(i.started_at).toLocaleString('de-DE'))} · ${esc(i.address)}<br><span class="muted">${esc(i.foreign_id||'')} ${esc(i.units)}</span></p><button onclick="incident(${i.id})">Öffnen</button></article>`).join('')||'<p>Noch keine Einsätze.</p>'}</section>`;
+  <section><h2>Einsätze</h2>${incidents.map(i=>`<article class="card"><h3>${esc(i.title)}</h3>${incidentStatus(i)}<p>${esc(new Date(i.started_at).toLocaleString('de-DE'))} · ${esc(i.address)}<br><span class="muted">${esc(i.foreign_id||'')} ${esc(i.units)}</span></p><button onclick="incident(${i.id})">Öffnen</button></article>`).join('')||'<p>Noch keine Einsätze.</p>'}</section>`;
   focusMain();bindForm('#incident',async d=>{d.unitIds=[...document.querySelectorAll('#incident [name=unitIds]:checked')].map(o=>o.value);d.startedAt=new Date(d.startedAt).toISOString();await api('/api/incidents',{method:'POST',body:JSON.stringify(d)});await load();home()});checkPendingDivera().catch(showError)}
 async function checkPendingDivera(){
   const out=document.querySelector('#pendingDivera'),allowed=units.filter(unit=>unit.divera_configured&&(me.role==='wehrleitung'||me.unitIds.includes(unit.id)));
