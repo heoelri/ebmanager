@@ -26,6 +26,12 @@ DB_DSN='' REQUEST_METHOD=GET REQUEST_URI=/api/bootstrap php api.php | grep --qui
 DB_DSN='' php -r '$_SERVER["REQUEST_METHOD"]="GET"; $_SERVER["REQUEST_URI"]="/ebmanager/api/bootstrap"; $_SERVER["SCRIPT_NAME"]="/ebmanager/api.php"; require "api.php";' | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
 DB_DSN='' php -r '$_COOKIE["session"]=str_repeat("a",64); $_SERVER["REQUEST_METHOD"]="GET"; $_SERVER["REQUEST_URI"]="/api/me"; require "api.php";' | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
 
+# Die testweise überschreibbare DIVERA-Basisadresse enthält ausschließlich Schema, Host und optionalen Port.
+DIVERA_API_BASE_URL='http://divera:8090/' php -r 'require "support.php"; if (diveraBaseUrl()!=="http://divera:8090") exit(1);'
+for invalid_divera_url in 'https://host?x=1' 'https://user@host' 'https://host/path' 'https://host#fragment'; do
+  DIVERA_API_BASE_URL="$invalid_divera_url" php -r 'require "support.php"; try { diveraBaseUrl(); exit(1); } catch (ApiError $error) { if ($error->status!==503) exit(1); }'
+done
+
 # Das Frontend enthält die erwarteten Accessibility- und DIVERA-Elemente, aber keine duplizierten Fachoptionen.
 php -r '
   $html=file_get_contents("public/index.html");

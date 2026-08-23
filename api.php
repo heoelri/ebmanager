@@ -447,9 +447,7 @@ function diveraGet(string $url, string $error): array
 
 function diveraUrl(string $path, string $key): string
 {
-    $base = rtrim((string)(config()['divera_api_base_url'] ?? 'https://app.divera247.com'), '/');
-    if (!preg_match('#^https?://[^/]+(?::\d+)?$#', $base)) throw new ApiError(503, 'DIVERA-Basisadresse ist ungültig');
-    return "$base$path?accesskey=" . rawurlencode($key);
+    return diveraBaseUrl() . "$path?accesskey=" . rawurlencode($key);
 }
 
 function diveraCluster(array $unit): array

@@ -33,6 +33,22 @@ function config(): array
     return $config;
 }
 
+function diveraBaseUrl(): string
+{
+    $base = rtrim((string)(config()['divera_api_base_url'] ?? 'https://app.divera247.com'), '/');
+    $parts = parse_url($base);
+    $host = $parts['host'] ?? '';
+    $hostname = trim($host, '[]');
+    if ($parts === false
+        || !in_array($parts['scheme'] ?? '', ['http', 'https'], true)
+        || $host === ''
+        || (!filter_var($hostname, FILTER_VALIDATE_IP) && !filter_var($hostname, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME))
+        || isset($parts['path']) || isset($parts['query']) || isset($parts['fragment']) || isset($parts['user']) || isset($parts['pass'])) {
+        throw new ApiError(503, 'DIVERA-Basisadresse ist ungültig');
+    }
+    return $parts['scheme'] . '://' . $host . (isset($parts['port']) ? ':' . $parts['port'] : '');
+}
+
 function db(): PDO
 {
     static $pdo;
