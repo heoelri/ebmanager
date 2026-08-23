@@ -205,7 +205,7 @@ incident_id=$(curl --insecure --silent --fail \
   "$base_url/api/incidents" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
-  php -r '$incidents=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $assignments=json_decode($incidents[0]["assignments"],true,512,JSON_THROW_ON_ERROR); assert(array_column($assignments,"unitId")===[1,2]);'
+  SECOND_UNIT_ID="$second_unit_id" php -r '$incidents=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $assignments=json_decode($incidents[0]["assignments"],true,512,JSON_THROW_ON_ERROR); $expected=[1,(int)getenv("SECOND_UNIT_ID")]; sort($expected); assert(array_column($assignments,"unitId")===$expected);'
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="INSERT INTO divera_imports(unit_id,incident_id,imported_by,imported_at) VALUES(1,$incident_id,1,'2026-08-23 09:00:00')"
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/units" |
