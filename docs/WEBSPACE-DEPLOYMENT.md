@@ -90,7 +90,7 @@ public/
 ```
 
 1. Das gewählte Zielverzeichnis anlegen und `.htaccess`, `api.php`, `config.local.php` sowie `public/index.html` per SFTP dorthin hochladen.
-2. Prüfen, dass `.htaccess` tatsächlich vorhanden ist; einige FTP-Programme blenden versteckte Dateien aus.
+2. Prüfen, dass `.htaccess` tatsächlich vorhanden ist; einige Dateiübertragungsprogramme blenden versteckte Dateien aus.
 3. Für Verzeichnisse Berechtigungen wie `755` und für öffentliche Dateien `644` verwenden, sofern der Hoster keine anderen Vorgaben macht.
 4. `config.local.php` so restriktiv wie vom Hoster unterstützt auf `600` oder `640` setzen.
 5. `schema.sql`, `migrations/`, Tests, Dokumentation und Repository-Metadaten nicht in das öffentliche Zielverzeichnis hochladen.
@@ -155,10 +155,13 @@ Der derzeitige GitHub-Workflow unterstützt explizites FTPS. Bietet der Webspace
 
 | Secret | Inhalt |
 |---|---|
-| `FTP_SERVER` | FTPS-Hostname, optional mit Port, ohne Protokollpräfix |
-| `FTP_USERNAME` | FTPS-Benutzer |
-| `FTP_PASSWORD` | FTPS-Passwort |
-| `FTP_PATH` | Zielverzeichnis relativ zum FTP-Stamm; leer für dessen Dokumentenstamm oder beispielsweise `ebmanager` für ein Unterverzeichnis |
+| `SFTP_SERVER` | SFTP-Hostname ohne Protokollpräfix und ohne Port |
+| `SFTP_PORT` | Optionaler SSH-Port, Standard `22` |
+| `SFTP_USERNAME` | SFTP-Benutzer |
+| `SFTP_PRIVATE_KEY` | Privater SSH-Schlüssel im OpenSSH-Format, bevorzugte Anmeldung |
+| `SFTP_PASSWORD` | SFTP-Passwort, nur falls kein Schlüssel hinterlegt ist |
+| `SFTP_KNOWN_HOSTS` | Pflicht: `known_hosts`-Zeilen des Servers, ermittelt mit `ssh-keyscan -p <Port> <Host>` |
+| `SFTP_PATH` | Optionales, bereits vorhandenes Zielverzeichnis relativ zum SFTP-Stamm |
 
 4. Prüfen, dass der Server SFTP über SSH anbietet und der ermittelte Host-Key mit der Angabe des Hosters übereinstimmt.
 5. Einen Push auf `main` durchführen und zuerst den Workflow `Tests`, danach den Workflow `Deployment` beobachten.
@@ -200,8 +203,7 @@ Migrationen dürfen nicht auf Verdacht rückgängig gemacht werden. Maßgeblich 
 | HTTPS-Weiterleitung funktioniert nicht | Zertifikat, Domainzuordnung und Apache-Unterstützung prüfen |
 | Passwort-E-Mail kommt nicht an | `app_url`, `mail_from`, PHP `mail()`, Spamordner und Mailprotokoll des Hosters prüfen |
 | GitHub-Deployment findet Secrets nicht | Environment-Name `hiba`, Secret-Namen und Environment-Freigabe prüfen |
-| FTPS-Deployment schlägt fehl | explizites FTPS, Hostname, Port, Benutzer, Passwort und `FTP_PATH` prüfen |
-| SFTP-Verbindung schlägt fehl | Protokoll SFTP, Port, Passwortauthentifizierung, Zielpfad und den verifizierten SSH-Host-Key prüfen |
+| SFTP-Deployment schlägt fehl | Hostname, `SFTP_PORT`, Benutzer, Schlüssel oder Passwort, aktuellen `SFTP_KNOWN_HOSTS`-Eintrag und ein vorhandenes `SFTP_PATH` prüfen |
 
 Zugangsdaten, Einrichtungstoken, Sitzungstoken und DIVERA-Schlüssel dürfen bei der Fehlersuche nicht in Issues oder Protokollauszüge kopiert werden.
 
