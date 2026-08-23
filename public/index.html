@@ -104,7 +104,7 @@ async function incident(id){
     focusMain();
     const reportUnit=document.querySelector('#reportUnit');
     if(reportUnit){const form=document.querySelector('#report');bindForm('#report',async d=>{Object.assign(d,reportDetailsPayload(form));d.crew=selectedCrew('#reportCrew');await api(`/api/incidents/${id}/reports`,{method:'POST',body:JSON.stringify(d)});await load();incident(id)});bindDuration(form);reportUnit.onchange=()=>loadReportCrew(form,'#reportCrew',reportUnit.value,assignments,[],reportUnit);await loadReportCrew(form,'#reportCrew',reportUnit.value,assignments,[],reportUnit);if(!form.isConnected)return}
-    if(mayConsolidate)bindForm('#consolidate',async d=>{await api(`/api/incidents/${id}/consolidation`,{method:'PUT',body:JSON.stringify(d)});await load();incident(id)})
+    if(me.role==='wehrleitung'&&mayConsolidate)bindForm('#consolidate',async d=>{await api(`/api/incidents/${id}/consolidation`,{method:'PUT',body:JSON.stringify(d)});await load();incident(id)})
   }catch(e){showError(e)}
 }
 function localDateTime(value){if(!value)return'';const date=new Date(value);return Number.isNaN(date.getTime())?'':new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16)}

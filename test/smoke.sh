@@ -394,6 +394,14 @@ test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-characte
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request PUT \
   --data '{"text":"Zu früh"}' "$base_url/api/incidents/$incident_id/consolidation")" = 409
+curl --insecure --silent --fail \
+  --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request POST --data '{}' \
+  "$base_url/api/reports/$report_id/submit-to-command" >/dev/null
+for previous_reviewer_token in "$force_token" "$leader_token"; do
+  curl --insecure --silent --fail \
+    --cookie "$session_cookie=$previous_reviewer_token" "$base_url/api/incidents/$incident_id/reports" |
+    php -r '$reports=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($reports)===1); assert($reports[0]["status"]==="wehr_review"); assert($reports[0]["editable"]===false); assert(count($reports[0]["history"])===7);'
+done
 
 # Workflow-Benachrichtigungen erreichen dedupliziert die zuständigen Einheits- und Wehrführungen.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
