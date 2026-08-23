@@ -68,6 +68,7 @@
 - Berichte verwenden `author_draft`, `unit_review` und `wehr_review`. Die Initialstufe folgt der Erstellerrolle; Übergaben und kommentarpflichtige Rückgaben sind atomar, sperren den Datensatz und werden unveränderlich in `report_transitions` protokolliert.
 - Frühere Prüfstufen behalten nach einer Rückgabe Leserechte. Bearbeiten darf nur der ursprüngliche Autor in `author_draft` beziehungsweise die zuständige Einheitsführung in `unit_review`; in `wehr_review` ist der Einheitsbericht unveränderlich.
 - Eine Rückgabe durch die Wehrführung oder die nachträgliche Zuordnung einer weiteren Einheit leert `incidents.consolidated_at`, erhält den bisherigen Text aber als Arbeitsstand. Wiederholte oder veraltete Statusübergänge liefern HTTP 409.
+- Die Wehrführung darf erst konsolidieren, wenn jede alarmierte Einheit einen Bericht in `wehr_review` hat. Führungskräfte sehen nach dem Absenden dessen Zeitpunkt, den aktuellen Status und einen ausdrücklichen Nur-Lese-Hinweis.
 - `patient`, `caller`, Geschädigte, Schädiger und Berichtstexte sind sensible, mandantengebundene Einsatzdaten. Protokolliere sie nicht.
 
 ## Mitglieder, Fahrzeuge und Besatzung

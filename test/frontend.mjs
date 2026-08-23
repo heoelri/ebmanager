@@ -118,6 +118,26 @@ assert.match(html, /submit-to-command/);
 assert.match(html, /return-to-unit/);
 assert.match(html, /name="comment" maxlength="2000" required/);
 assert.match(html, /Prüfverlauf \(\$\{report\.history\.length\}\)/);
+assert.match(html, /roleLabels=\{fuehrungskraft:'Führungskraft',einheitsleitung:'Einheitsführung',wehrleitung:'Wehrführung'\}/);
+assert.match(html, /Abgeschickt\$\{submitted\?` am/);
+assert.match(html, /Der Einsatzbericht ist für Sie jetzt nur noch lesbar/);
+assert.match(html, /jede alarmierte Einheit einen Bericht an die Wehrführung gesendet hat/);
+assert.match(html, /Noch nicht bereit:/);
+const authorNoticeSource = html.match(/function authorReportNotice[^\n]+/)?.[0];
+assert(authorNoticeSource, 'authorReportNotice fehlt');
+const authorReportNotice = new Function(
+  'me', 'formatDateTime', 'esc',
+  `${authorNoticeSource}; return authorReportNotice;`
+)(
+  {role: 'fuehrungskraft'},
+  value => value,
+  value => String(value ?? '')
+);
+assert.match(authorReportNotice({
+  status: 'unit_review',
+  history: [{from_status: 'author_draft', to_status: 'unit_review', created_at: '2026-08-23T18:00:00Z'}]
+}), /Abgeschickt am 2026-08-23T18:00:00Z.*nur noch lesbar/);
+assert.equal(authorReportNotice({status: 'author_draft', history: []}), '');
 assert.doesNotMatch(html, /\/release/);
 assert.match(html, /type="\$\{type\}" name="unitIds"/);
 assert.match(html, /role==='einheitsleitung'\?'radio':'checkbox'/);

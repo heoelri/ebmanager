@@ -70,6 +70,8 @@ muss exakt der HTTPS-Origin der Anwendung entsprechen.
 8. In `wehr_review` bleibt der Einheitsbericht unveränderlich. Die Wehrführung konsolidiert ihn oder gibt ihn mit Pflichtkommentar zurück; dadurch wird eine bestehende Konsolidierung als veraltet markiert.
 9. Jeder Übergang sperrt den Bericht mit `SELECT ... FOR UPDATE`, prüft den erwarteten Zustand erneut und schreibt Status und `report_transitions` atomar.
 
+Die Konsolidierung ist nur für die Wehrführung und nur dann freigeschaltet, wenn jede in `incident_units` alarmierte Einheit einen Bericht im Status `wehr_review` besitzt. API und Oberfläche prüfen dieselbe Regel. Rückgaben und neu hinzugekommene Einheiten leeren `consolidated_at`; der bisherige Text bleibt als sichtbarer Arbeitsstand erhalten.
+
 Nach dem erfolgreichen Speichern versendet die API die fachlich vorgesehenen
 E-Mail-Benachrichtigungen direkt über die bestehende Mail-Infrastruktur.
 Empfänger werden serverseitig anhand von Organisation, Rolle und

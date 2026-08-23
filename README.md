@@ -52,6 +52,8 @@ allgemein freigegeben.
 | `einheitsleitung` | Gehört exakt einer Einheit an, prüft und bearbeitet eingereichte Berichte, gibt sie kommentiert zurück oder sendet sie an die Wehrführung. |
 | `wehrleitung` | Hat wehrweiten Zugriff ohne Einheitszuordnung, verwaltet Wehr, Einheiten und Benutzer, prüft Berichte, gibt sie kommentiert zurück und konsolidiert sie. |
 
+Die Wehrführung kann einen Gesamtbericht erst speichern, wenn für jede dem Einsatz zugeordnete Einheit ein Einzelbericht im Status „Prüfung durch Wehrführung“ vorliegt. Eine Rückgabe oder eine später ergänzte Einheitenzuordnung macht eine bestehende Konsolidierung wieder ungültig. Führungskräfte sehen nach ihrer Abgabe den Zeitpunkt, den aktuellen Prüfstatus und den ausdrücklichen Hinweis, dass der Bericht für sie nur noch lesbar ist.
+
 ## Fachliche Anpassung
 
 `constants.php` ist die zentrale Quelle für fachlich anpassbare Listen. Dort

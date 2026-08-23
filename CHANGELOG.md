@@ -18,6 +18,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 - Wehrführungen benötigen keine Einheitszuordnung, Einheitsführungen gehören exakt einer Einheit an und Führungskräfte dürfen DIVERA-Einsätze ihrer zugeordneten Einheiten selbst erkennen und importieren.
 - Nicht mehr von DIVERA gelieferte Stammdatenzuordnungen werden einheitsspezifisch entfernt; historische Einsatz- und Besatzungssnapshots bleiben erhalten.
+- Führungskräfte sehen nach dem Absenden den Übergabezeitpunkt und einen eindeutigen Nur-Lese-Hinweis; die Wehrführung sieht vor der Konsolidierung, welche alarmierten Einheiten noch keinen prüfbereiten Bericht geliefert haben.
 - Fehlgeschlagene Workflow-Benachrichtigungen rollen den gespeicherten Vorgang nicht zurück und werden als sichtbare Warnung sowie datenschutzarm im Serverlog gemeldet.
 - Direkte Links mit `?incident=<ID>` öffnen den berechtigten Einsatz auch nach einer erforderlichen Anmeldung.
 - Bearbeitungsdialoge halten den Fokus während asynchroner Aktualisierungen stabil und geben ihn beim Schließen kontrolliert zurück; die Zeitwerte der Einzelberichte stehen für bessere Lesbarkeit untereinander.
