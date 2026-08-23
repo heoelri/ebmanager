@@ -2,6 +2,29 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const html = fs.readFileSync('public/index.html', 'utf8');
+const css = fs.readFileSync('public/styles.css', 'utf8');
+const deployment = fs.readFileSync('.github/workflows/deploy.yml', 'utf8');
+assert.match(html, /<link rel="stylesheet" href="public\/styles\.css">/);
+assert.doesNotMatch(html, /<style(?:\s|>)/);
+assert.doesNotMatch(html, /\sstyle="/);
+assert.match(css, /--control-height:\s*44px/);
+assert.match(css, /font-size:\s*1rem/);
+assert.match(css, /env\(safe-area-inset-bottom\)/);
+assert.match(css, /@media \(forced-colors: active\)/);
+assert.match(css, /@media \(forced-colors: active\)[\s\S]*?\.error\s*\{[\s\S]*?border-inline-start-width:\s*4px/);
+assert.match(deployment, /put "public\/styles\.css" "public\/styles\.css"/);
+
+const resetPasswordSource = html.match(/async function resetPassword[^\n]+/)?.[0];
+assert(resetPasswordSource, 'resetPassword fehlt');
+assert.match(resetPasswordSource, /password-reset\/context.*method:'POST'.*JSON\.stringify\(\{token\}\)/);
+assert(resetPasswordSource.indexOf('autocomplete="username"') < resetPasswordSource.indexOf('autocomplete="new-password"'));
+assert.match(resetPasswordSource, /name="username" type="email" autocomplete="username"[^>]+readonly/);
+assert.match(resetPasswordSource, /catch\(error\)\{history\.replaceState\(\{\},'',location\.pathname\)/);
+assert.match(resetPasswordSource, /Link nicht mehr gültig/);
+assert.match(resetPasswordSource, /onclick="forgotPassword\(\)">Neuen Link anfordern/);
+assert.match(html, /fragment\.get\('invite'\)/);
+assert.match(html, /fragment\.get\('reset'\)/);
+
 const source = html.match(/function rankOptions[\s\S]*?(?=\nfunction reportDetailsFields)/)?.[0];
 assert(source, 'rankOptions fehlt');
 
@@ -42,8 +65,18 @@ assert.match(reportFields, /DIVERA-Einsatznummer<input value="E-42" readonly>/);
 assert.doesNotMatch(reportFields, /DIVERA-Einsatznummer<input name=/);
 assert.equal((reportFields.match(/class="command-row"/g) ?? []).length, 2);
 assert(reportFields.indexOf('Gesamteinsatzleitung') < reportFields.indexOf('Einsatzleitung der Einheit'));
+assert.match(reportFields, /name="commandRank">[\s\S]*?<option value="BI" selected>BI – Brandinspektor/);
+assert.match(reportFields, /name="commandName" value="A"/);
+assert.match(reportFields, /name="additionalCommandRank">[\s\S]*?<option value="BM" selected>BM – Brandmeister/);
+assert.match(reportFields, /name="additionalCommandName" value="B"/);
 assert.equal((reportFields.match(/class="form-section" open/g) ?? []).length, 3);
 assert.match(reportDetailsFields('new', {foreign_id: '', started_at: ''}), /DIVERA-Einsatznummer<input value="Nicht vorhanden" readonly>/);
+
+const durationSource = html.match(/function durationText[^\n]+/)?.[0];
+assert(durationSource, 'durationText fehlt');
+const durationText = new Function(`${durationSource}; return durationText;`)();
+assert.equal(durationText(null, null), '–');
+assert.equal(durationText(null, '2026-08-22T19:00:00Z'), '–');
 
 const reportTimesSource = html.match(/function reportTimes[^\n]+/)?.[0];
 assert(reportTimesSource, 'reportTimes fehlt');
@@ -56,7 +89,7 @@ assert.deepEqual([...times.matchAll(/<dt>([^<]+)<\/dt>/g)].map(match => match[1]
 
 const restoreFocusSource = html.match(/function restoreDialogFocus[^\n]+/)?.[0];
 assert(restoreFocusSource, 'restoreDialogFocus fehlt');
-assert.match(html, /\.form-section>summary:focus-visible\{outline-offset:-3px\}/);
+assert.match(css, /\.form-section\s*>\s*summary:focus-visible\s*\{[\s\S]*?outline-offset:\s*-3px/);
 let closeHandler;
 let focusCount = 0;
 const restoreDialogFocus = new Function('dialog', `${restoreFocusSource}; return restoreDialogFocus;`)({
@@ -79,11 +112,17 @@ assert.match(html, /onclick="editUser\(\$\{u\.id\},this\)"/);
 
 const loadCrewSource = html.match(/async function loadReportCrew[^\n]+/)?.[0];
 assert(loadCrewSource, 'loadReportCrew fehlt');
-assert.match(loadCrewSource, /unitSelect\.disabled=true/);
+assert.doesNotMatch(loadCrewSource, /unitSelect\.disabled=true/);
 assert.match(loadCrewSource, /form\.closest\('dialog'\)&&!dialog\.open/);
 assert.match(loadCrewSource, /root\.dataset\.crewRequest!==request/);
 assert.match(loadCrewSource, /unitSelect\?\.value\|\|unitId/);
 assert.match(loadCrewSource, /Erneut laden/);
+assert.match(loadCrewSource, /if\(restoreFocus\)retry\.focus\(\)/);
+
+const renderCrewSource = html.match(/async function renderCrew[\s\S]*?(?=\nfunction bindCrewBoard)/)?.[0];
+assert(renderCrewSource, 'renderCrew fehlt');
+assert.match(renderCrewSource, /if\(!root\.isConnected\|\|/);
+assert.match(renderCrewSource, /if\(restoreFocus\)root\.querySelector\('h3'\)\.focus\(\)/);
 
 const initialViewSource = html.match(/async function initialView[\s\S]*?(?=\nasync function start)/)?.[0];
 assert(initialViewSource, 'initialView fehlt');

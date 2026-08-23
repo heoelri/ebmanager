@@ -31,10 +31,7 @@ flowchart LR
     API -->|mail oder SMTP/STARTTLS| Mail
 ```
 
-- `public/index.html` enthält die responsive Oberfläche und verwendet native
-  Browserfunktionen einschließlich Dialog, aufklappbarer Formularbereiche und
-  Drag-and-Drop. Der Bearbeitungsdialog erhält den Fokus einmalig beim Öffnen
-  und gibt ihn beim Schließen an das auslösende Element zurück.
+- `public/index.html` enthält das native HTML und JavaScript der responsiven Oberfläche. `public/styles.css` bündelt Design-Tokens, Komponenten- und Geräteanpassungen ohne externe Abhängigkeiten. Die Oberfläche verwendet native Browserfunktionen einschließlich Dialog, aufklappbarer Formularbereiche und Drag-and-Drop. Der Bearbeitungsdialog erhält den Fokus einmalig beim Öffnen und gibt ihn beim Schließen an das auslösende Element zurück.
 - `.htaccess` erzwingt HTTPS, schützt Konfigurationsdateien und leitet
   `/api/*` an `api.php` weiter.
 - `api.php` enthält Routing, Authentifizierung, Berechtigungsprüfung und fachliche Transaktionen.
