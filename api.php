@@ -408,6 +408,7 @@ try {
 
     if ($method === 'GET' && $path === '/api/options') {
         respond(200, [
+            'ranks' => RANKS,
             'incidentTypes' => INCIDENT_TYPES,
             'classifications' => CLASSIFICATIONS,
             'classificationLabels' => CLASSIFICATION_LABELS

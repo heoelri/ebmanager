@@ -52,10 +52,12 @@ allgemein freigegeben.
 ## Fachliche Anpassung
 
 `constants.php` ist die zentrale Quelle für fachlich anpassbare Listen. Dort
-können `INCIDENT_TYPES`, `CLASSIFICATIONS` und die zugehörigen
+können `RANKS`, `INCIDENT_TYPES`, `CLASSIFICATIONS` und die zugehörigen
 `CLASSIFICATION_LABELS` geändert oder um eigene Einträge und Gruppen ergänzt
-werden. Backend und Oberfläche lesen dieselben Werte; eine doppelte Anpassung
-im JavaScript ist nicht erforderlich.
+werden. Dienstgrade ordnen ihre gespeicherte Abkürzung der vollständigen
+Bezeichnung zu, beispielsweise `'BM' => 'Brandmeister'`. Backend und
+Oberfläche lesen dieselben Werte; eine doppelte Anpassung im JavaScript ist
+nicht erforderlich.
 
 Die Schlüssel in `CLASSIFICATIONS` und `CLASSIFICATION_LABELS` müssen
 übereinstimmen und dauerhaft stabil bleiben, weil Berichte sie im
@@ -64,6 +66,8 @@ bleiben in bestehenden Berichten lesbar, können beim nächsten Bearbeiten aber
 nicht erneut ausgewählt werden. `ROLES` liegt ebenfalls in `constants.php`,
 ist jedoch mit Datenbankschema und Berechtigungslogik gekoppelt und darf nicht
 ohne entsprechende Code- und Schemaänderung angepasst werden.
+Bereits gespeicherte Dienstgradwerte bleiben beim Bearbeiten auswählbar, auch
+wenn sie später aus `RANKS` entfernt werden.
 
 ## Dokumentation
 
@@ -148,7 +152,7 @@ Vor jeder Aktualisierung müssen [CHANGELOG.md](CHANGELOG.md) und der Abschnitt 
 ## GitHub Actions
 
 `.github/workflows/test.yml` prüft jeden Push und jeden Pull Request. Dabei
-werden PHP-Syntax, Shellskripte, das MySQL-Schema und der
+werden PHP- und JavaScript-Syntax, Shellskripte, das MySQL-Schema und der
 Setup-/Anmeldeprozess geprüft. Ein unabhängiger zweiter Job baut außerdem das
 Docker-Image und führt denselben End-to-End-Test gegen Apache, HTTPS und MySQL
 aus.

@@ -2,6 +2,8 @@ name: Tests
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 permissions:
@@ -37,6 +39,8 @@ jobs:
         run: find . -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Testskripte prüfen
         run: bash -n test/smoke.sh test/migrations.sh docker/migrate.sh
+      - name: Frontend prüfen
+        run: node test/frontend.mjs
       - name: Schema und API prüfen
         env:
           MYSQL_PWD: test-password

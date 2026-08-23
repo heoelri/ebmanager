@@ -26,17 +26,17 @@ DB_DSN='' php -r '$_COOKIE["session"]=str_repeat("a",64); $_SERVER["REQUEST_METH
 # Das Frontend enthält die erwarteten Accessibility- und DIVERA-Elemente, aber keine duplizierten Fachoptionen.
 php -r '
   $html=file_get_contents("public/index.html");
-  foreach (["viewport-fit=cover","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","min-height:44px",":focus-visible","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:"] as $required) {
+  foreach (["viewport-fit=cover","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","min-height:44px",":focus-visible","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:","rankOptions","<select name=\"commandRank\">","<select name=\"additionalCommandRank\">"] as $required) {
     if (!str_contains($html,$required)) exit(1);
   }
-  foreach (["Kleinbrand","Wohngebäude","Menschen in Notlage"] as $duplicatedOption) {
+  foreach (["Kleinbrand","Wohngebäude","Menschen in Notlage","Feuerwehrmann-Anwärter"] as $duplicatedOption) {
     if (str_contains($html,$duplicatedOption)) exit(1);
   }
   if (preg_match("/<select[^>]+multiple/i",$html)) exit(1);
 '
 
 # Fachoptionen sind vorhanden und ihre Klassifikationsschlüssel stimmen mit den Gruppenbezeichnungen überein.
-php -r 'require "constants.php"; assert(INCIDENT_TYPES!==[]); assert(array_keys(CLASSIFICATIONS)===array_keys(CLASSIFICATION_LABELS));'
+php -r 'require "constants.php"; assert(RANKS["BM"]==="Brandmeister"); assert(INCIDENT_TYPES!==[]); assert(array_keys(CLASSIFICATIONS)===array_keys(CLASSIFICATION_LABELS));'
 
 # Ohne externen Testserver werden lokale HTTP- und SMTP-Testserver gestartet.
 if [[ -z "${TEST_BASE_URL:-}" ]]; then
@@ -104,6 +104,7 @@ options_json=$(curl --insecure --silent --fail --cookie "$session_cookie=$sessio
 printf '%s' "$options_json" | php -r '
   require "constants.php";
   $options=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+  assert($options["ranks"]===RANKS);
   assert($options["incidentTypes"]===INCIDENT_TYPES);
   assert($options["classifications"]===CLASSIFICATIONS);
   assert($options["classificationLabels"]===CLASSIFICATION_LABELS);
@@ -261,7 +262,7 @@ report_id=$(curl --insecure --silent --fail \
 }
 report_id_int=$((report_id))
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
-  einsatzberichte --execute="SELECT CONCAT(report_year,'|',running_number,'|',JSON_UNQUOTE(JSON_EXTRACT(damaged_party,'$.name')),'|',JSON_UNQUOTE(JSON_EXTRACT(damaging_party,'$.name')),'|',JSON_UNQUOTE(JSON_EXTRACT(incident_command,'$.name'))) FROM reports WHERE id=$report_id_int")" = '2026|69/2026|Max Mustermann|Erika Beispiel|D. Gerlach'
+  einsatzberichte --execute="SELECT CONCAT(report_year,'|',running_number,'|',JSON_UNQUOTE(JSON_EXTRACT(damaged_party,'$.name')),'|',JSON_UNQUOTE(JSON_EXTRACT(damaging_party,'$.name')),'|',JSON_UNQUOTE(JSON_EXTRACT(incident_command,'$.rank')),'|',JSON_UNQUOTE(JSON_EXTRACT(incident_command,'$.name'))) FROM reports WHERE id=$report_id_int")" = '2026|69/2026|Max Mustermann|Erika Beispiel|BOI|D. Gerlach'
 
 # Besatzungsmitglieder werden unabhängig von der Einfügereihenfolge stabil sortiert ausgegeben.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \

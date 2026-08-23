@@ -269,7 +269,7 @@ Viele-zu-viele-Zuordnung von Mitgliedern zu Qualifikationen.
 | `running_number` | VARCHAR(50), NULL | Manuell vergebene laufende Nummer der Einheit; bei Altbeständen leer |
 | `damaged_party` | JSON, NULL | Geschädigte Person mit Name, Telefon und Adresse |
 | `damaging_party` | JSON, NULL | Schädiger mit Name, Telefon und Adresse |
-| `incident_command` | JSON, NULL | Einsatzleitung und optionale weitere Führungskraft jeweils mit Dienstgrad und Name |
+| `incident_command` | JSON, NULL | Einsatzleitung und optionale weitere Führungskraft jeweils mit Name und standardmäßig einer Dienstgradabkürzung aus `RANKS`; bestehende benutzerdefinierte Werte bleiben zulässig |
 | `narrative` | TEXT, NOT NULL | Freitext des Einheitsberichts |
 | `vehicles` | TEXT, NOT NULL | Abgeleitete, kommagetrennte Fahrzeugübersicht |
 | `personnel` | TEXT, NOT NULL | Abgeleitete, kommagetrennte Personalübersicht |

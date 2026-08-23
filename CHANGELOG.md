@@ -2,6 +2,12 @@
 
 Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert. Nicht rückwärtskompatible Änderungen stehen zusätzlich unter `Breaking Changes` und enthalten die notwendigen Aktualisierungsschritte.
 
+## Unreleased
+
+### Added
+
+- Konfigurierbare Dienstgrade aus `constants.php` stehen in beiden Feldern der Einsatzleitung als Drop-down mit Abkürzung und vollständiger Bezeichnung bereit.
+
 ## 2026-08-23
 
 ### Added
