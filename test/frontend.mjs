@@ -11,6 +11,7 @@ assert.match(css, /--control-height:\s*44px/);
 assert.match(css, /font-size:\s*1rem/);
 assert.match(css, /env\(safe-area-inset-bottom\)/);
 assert.match(css, /@media \(forced-colors: active\)/);
+assert.match(css, /@media \(forced-colors: active\)[\s\S]*?\.error\s*\{[\s\S]*?border-inline-start-width:\s*4px/);
 assert.match(deployment, /put "public\/styles\.css" "public\/styles\.css"/);
 
 const resetPasswordSource = html.match(/async function resetPassword[^\n]+/)?.[0];

@@ -493,6 +493,10 @@ dialog::backdrop {
     border: 1px solid CanvasText;
   }
 
+  .error {
+    border-inline-start-width: 4px;
+  }
+
   button:disabled {
     color: GrayText;
   }
