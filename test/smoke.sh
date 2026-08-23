@@ -50,7 +50,7 @@ php -r '
 '
 
 # Fachoptionen sind vorhanden und ihre Klassifikationsschlüssel stimmen mit den Gruppenbezeichnungen überein.
-php -r 'require "constants.php"; assert(RANKS["BM"]==="Brandmeister"); assert(INCIDENT_TYPES!==[]); assert(array_keys(CLASSIFICATIONS)===array_keys(CLASSIFICATION_LABELS));'
+php -r 'require "constants.php"; assert(RANKS["BM"]==="Brandmeister"); assert(RANKS["GBI"]==="Gemeindebrandinspektor"); assert(RANKS["SBI"]==="Stadtbrandinspektor"); assert(array_key_last(RANKS)==="SBI"); assert(INCIDENT_TYPES!==[]); assert(array_keys(CLASSIFICATIONS)===array_keys(CLASSIFICATION_LABELS));'
 
 # Ohne externen Testserver werden lokale HTTP- und SMTP-Testserver gestartet.
 if [[ -z "${TEST_BASE_URL:-}" ]]; then

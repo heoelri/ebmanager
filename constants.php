@@ -15,7 +15,9 @@ const RANKS = [
     'OBM' => 'Oberbrandmeister',
     'HBM' => 'Hauptbrandmeister',
     'BI' => 'Brandinspektor',
-    'BOI' => 'Brandoberinspektor'
+    'BOI' => 'Brandoberinspektor',
+    'GBI' => 'Gemeindebrandinspektor',
+    'SBI' => 'Stadtbrandinspektor'
 ];
 
 // Zulässige Einsatzarten für das Berichtsformular und die serverseitige Validierung; gespeichert wird der jeweilige Textwert.

@@ -10,6 +10,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 - DIVERA-Fahrzeuge werden als aktueller Einheitsstamm synchronisiert; „Alles synchronisieren“ gleicht Mitglieder, Qualifikationen, Fahrzeuge und alle gelieferten Einsätze mit je einem lesenden Abruf pro Quelle ab.
 - Der DIVERA-Test-Fake verweist auf die offiziellen OpenAPI-Dokumente; ein monatlicher GitHub-Workflow prüft die verwendeten Pfade und dokumentierten Felder auf Abweichungen.
 - Konfigurierbare Dienstgrade aus `constants.php` stehen in beiden Feldern der Einsatzleitung als Drop-down mit Abkürzung und vollständiger Bezeichnung bereit.
+- Die Dienstgradliste nach VOFF Nordrhein-Westfalen enthält zusätzlich Gemeinde- und Stadtbrandinspektor; die Auswahl bleibt optional.
 - Einheitsführungen werden über neue Einsätze ihrer Einheiten und durch Führungskräfte erstellte Berichte informiert; Wehrführungen erhalten nach Freigaben durch Einheitsführungen eine E-Mail mit Einsatzdetails und direktem Link.
 - Berichtsformulare zeigen die DIVERA-Einsatznummer unveränderlich an, trennen Gesamt- und Einheitseinsatzleitung in feste Zeilen und bieten native einklappbare Bereiche.
 - Ein lokales Stylesheet vereinheitlicht Layout, Formulare und responsive Darstellung ohne zusätzliche Frontend-Abhängigkeiten.
