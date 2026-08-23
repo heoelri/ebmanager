@@ -10,7 +10,7 @@ Geschädigte und Schädiger werden als optionale strukturierte Angaben im jeweil
 
 ## API-Hardening vom 23. August 2026
 
-Die im vollständigen API-Review priorisierten Befunde zu Transport, Sitzungen und Zustandsinvarianten wurden umgesetzt. Apache erzwingt HTTPS und sendet HSTS. Der zufällige Sitzungstoken bleibt ausschließlich im `Secure`-Cookie; MySQL speichert nur seinen SHA-256-Hash. Rollenänderungen werden pro Organisation serialisiert und dürfen die letzte Wehrführung nicht entfernen. Berichtsfreigaben aktualisieren ausschließlich Entwürfe und überschreiben einen vorhandenen Freigabezeitpunkt nicht. Manuelle Einsatzzeitpunkte werden strikt validiert; DIVERA-Importe ohne Alarmzeit werden abgelehnt, statt die Serverzeit einzusetzen. Die Migration `002-hash-session-tokens.sql` überführt bestehende Sitzungen ohne Klartextverlust oder Abmeldung.
+Die im vollständigen API-Review priorisierten Befunde zu Transport, Sitzungen und Zustandsinvarianten wurden umgesetzt. Apache erzwingt HTTPS und sendet HSTS. Der zufällige Sitzungstoken bleibt ausschließlich im `Secure`-Cookie; MySQL speichert nur seinen SHA-256-Hash. Rollenänderungen werden pro Organisation serialisiert und dürfen die letzte Wehrführung nicht entfernen. Berichtsfreigaben aktualisieren ausschließlich Entwürfe und überschreiben einen vorhandenen Freigabezeitpunkt nicht. Manuelle Einsatzzeitpunkte werden strikt validiert; DIVERA-Importe ohne Alarmzeit werden abgelehnt, statt die Serverzeit einzusetzen.
 
 ## Systemübersicht vom 23. August 2026
 

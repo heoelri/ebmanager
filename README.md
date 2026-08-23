@@ -110,9 +110,9 @@ Die Anwendungsdateien sind schreibgeschützt in den Webcontainer eingebunden;
 Änderungen an PHP, HTML und `.htaccess` sind ohne neuen Image-Build verfügbar.
 Lokale Konfiguration und Repository-Metadaten werden nicht eingebunden. Beim
 Start führt der einmalige Dienst `migrate` alle noch nicht vermerkten Dateien
-aus `migrations/` vor dem Webcontainer aus. Beim ersten Upgrade eines älteren
-Dev-Volumes werden bestehende lokale Sitzungen verworfen; fachliche Daten
-bleiben erhalten. Ein kompletter lokaler Datenbankreset erfolgt mit:
+aus `migrations/` vor dem Webcontainer aus. Frische Datenbanken werden
+vollständig aus `schema.sql` initialisiert. Ein kompletter lokaler
+Datenbankreset erfolgt mit:
 
 ```powershell
 docker compose down --volumes
