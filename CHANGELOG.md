@@ -20,6 +20,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 ### Fixed
 
 - Der Dev-Migrations-Test wartet nach dem Healthcheck zusätzlich auf die endgültige MySQL-Instanz, da der Healthcheck kurzzeitig während des internen Neustarts als „healthy“ gilt und Folgebefehle sonst zufällig mit einem Socket-Verbindungsfehler abbrachen.
+- Der Compose-End-to-End-Test behandelt den erfolgreichen Abschluss des einmaligen Migrationsdienstes nicht mehr als Abbruchsignal.
 
 ### Changed
 

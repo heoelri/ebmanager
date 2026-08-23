@@ -55,7 +55,9 @@ jobs:
       - name: Upgrade eines bestehenden Dev-Volumes prüfen
         run: bash test/dev-migrations.sh
       - name: Images bauen und End-to-End-Test ausführen
-        run: docker compose --profile test up --build --abort-on-container-exit --exit-code-from test
+        run: |
+          docker compose up --build --detach --wait web
+          docker compose --profile test run --rm test
       - name: Container und Volumes entfernen
         if: always()
         run: docker compose --profile test down --volumes
