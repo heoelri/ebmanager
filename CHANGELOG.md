@@ -22,11 +22,12 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 - Der Dev-Migrations-Test wartet nach dem Healthcheck zusätzlich auf die endgültige MySQL-Instanz, da der Healthcheck kurzzeitig während des internen Neustarts als „healthy“ gilt und Folgebefehle sonst zufällig mit einem Socket-Verbindungsfehler abbrachen.
 - Die lokale Baseline erkennt eine bereits vorhandene DIVERA-Importhistorie auch dann, wenn einem älteren Dev-Volume noch `schema_migrations` fehlt.
 - Der Compose-End-to-End-Test behandelt den erfolgreichen Abschluss des einmaligen Migrationsdienstes nicht mehr als Abbruchsignal.
+- Die Systemübersicht liefert bei Datenbank- oder Schemafehlern wieder einen kuratierten Status statt eines unstrukturierten Serverfehlers.
 
 ### Changed
 
 - Die Einsatzübersicht weist Wehr- und Einheitsleitungen auf neuere, noch nicht importierte DIVERA-Einsätze hin und bietet dort den direkten Import an.
-- Einsatz- und Berichtslisten vermeiden N+1-Abfragen und liefern Zuordnungen sowie Besatzungen stabil sortiert; die Besatzungsvalidierung lädt zulässige Mitglieder einmalig und die Systemübersicht wiederholt keine vollständige Schemaprüfung.
+- Einsatz- und Berichtslisten vermeiden N+1-Abfragen und liefern Zuordnungen sowie Besatzungen stabil sortiert; die Besatzungsvalidierung lädt zulässige Mitglieder einmalig.
 - Manuelle Einsatzzeitpunkte werden strikt als UTC-ISO-Zeit validiert, fehlende DIVERA-Zeitpunkte werden abgelehnt und SMTP-Nachrichten enthalten einen RFC-konformen `Date`-Header.
 - Nur echte MySQL-Duplikatfehler liefern HTTP 409; andere Integritätsfehler werden nicht mehr irreführend als vorhandener Datensatz gemeldet.
 - Die Copilot-Instruktionen bündeln dauerhafte Projektregeln ohne wiederholte Sicherheits-, Architektur-, UI- und Testvorgaben.

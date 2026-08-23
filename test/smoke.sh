@@ -114,6 +114,12 @@ printf '%s' "$system_json" | php -r '
   };
   $check($data);
 '
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DROP TABLE divera_imports"
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/system" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(str_contains($data["database"]["status"],"unvollständig"));'
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  <migrations/005-divera-imports.sql
 
 regular_token='dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
 regular_hash=$(php -r "echo hash('sha256', '$regular_token');")

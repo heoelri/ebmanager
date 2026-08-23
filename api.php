@@ -436,11 +436,12 @@ try {
     if ($method === 'GET' && $path === '/api/system') {
         assertRole($user, 'wehrleitung');
         $settings = config();
-        $database = [
-            'status' => 'Bereit',
-            'name' => (string)db()->query('SELECT DATABASE()')->fetchColumn(),
-            'serverVersion' => (string)db()->getAttribute(PDO::ATTR_SERVER_VERSION)
-        ];
+        $databaseError = databaseConfigurationError();
+        $database = ['status' => $databaseError ?? 'Bereit'];
+        if ($databaseError === null) {
+            $database['name'] = (string)db()->query('SELECT DATABASE()')->fetchColumn();
+            $database['serverVersion'] = (string)db()->getAttribute(PDO::ATTR_SERVER_VERSION);
+        }
         $email = [
             'configured' => false,
             'transport' => empty($settings['smtp_host']) ? 'PHP mail()' : 'SMTP mit STARTTLS',
