@@ -76,6 +76,23 @@ services:
       - divera-test-data:/tmp/divera
     command: [bash, test/smoke.sh]
 
+  demo-seed:
+    profiles: [demo]
+    image: mysql:8.4
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DB_HOST: db
+      DB_NAME: einsatzberichte
+      DB_USER: einsatzberichte
+      DB_PASSWORD: local-password
+    volumes:
+      - ./docker/demo-seed.sh:/usr/local/bin/demo-seed.sh:ro
+      - ./demo/seed.sql:/demo/seed.sql:ro
+    command: [bash, /usr/local/bin/demo-seed.sh]
+    restart: "no"
+
   divera:
     profiles: [test]
     image: php:8.5-cli

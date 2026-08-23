@@ -129,6 +129,32 @@ docker compose down --volumes
 
 Aktualisierte Basis-Images werden mit `docker compose build --pull` geladen.
 
+### Lokale Demofeuerwehr
+
+Eine ausschließlich lokale Demofeuerwehr mit drei Einheiten, allen Rollen, Mitgliedern, Fahrzeugen und zahlreichen Einsätzen wird auf Wunsch in die laufende Compose-Datenbank importiert:
+
+```powershell
+docker compose --profile demo run --rm demo-seed
+docker compose up --build
+```
+
+Der Seed erkennt seine Organisation ausschließlich über das reservierte Konto `wehrleitung@demo.local`, setzt nur diese auf ihren definierten Demo-Stand zurück und verändert keine anderen Organisationen. Wiederholtes Ausführen erzeugt daher keine Duplikate. Ein kompletter Neustart ist mit `docker compose down --volumes` möglich.
+
+Alle Demo-Konten verwenden ausschließlich lokal das Kennwort `Demo-Feuerwehr-2026!`:
+
+| Rolle | E-Mail |
+|---|---|
+| Wehrführung | `wehrleitung@demo.local` |
+| Einheitsführung Mitte | `leitung.mitte@demo.local` |
+| Einheitsführung Nord | `leitung.nord@demo.local` |
+| Einheitsführung Süd | `leitung.sued@demo.local` |
+| Führungskraft Mitte | `fuehrung.mitte@demo.local` |
+| Führungskraft Nord | `fuehrung.nord@demo.local` |
+| Führungskraft Süd | `fuehrung.sued@demo.local` |
+| Führungskraft Mitte und Nord | `fuehrung.springer@demo.local` |
+
+Demodaten und Demo-Zugangsdaten dürfen nicht außerhalb der lokalen Docker-Compose-Umgebung verwendet werden. Der normale Aufruf `docker compose up` importiert keine Demodaten; Produktionsschema, Migrationen, CI und Deploymentpfade enthalten den Seed nicht.
+
 Die Docker-Tests verwenden dieselben MySQL- und HTTP-Prüfungen wie CI:
 
 ```powershell
