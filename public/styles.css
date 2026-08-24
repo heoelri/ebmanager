@@ -48,14 +48,19 @@ textarea {
 }
 
 button,
-input:not([type="checkbox"]),
+input:not([type="checkbox"]):not([type="radio"]),
 select,
 textarea {
-  min-height: var(--control-height);
   max-width: 100%;
   padding: .65rem;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-small);
+}
+
+button,
+input:not([type="checkbox"]):not([type="radio"]),
+select {
+  height: var(--control-height);
 }
 
 input,
@@ -177,7 +182,6 @@ main {
 .form-action {
   align-self: end;
   justify-self: start;
-  height: var(--control-height);
 }
 
 .full-width,
@@ -331,7 +335,7 @@ main {
 }
 
 .unit-picker summary {
-  min-height: var(--control-height);
+  height: var(--control-height);
   padding: .65rem;
   cursor: pointer;
   background: var(--color-surface);

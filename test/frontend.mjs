@@ -48,10 +48,11 @@ for (const label of ['Bericht erforderlich', 'Prüfung erforderlich', 'Bereit zu
 }
 assert.match(css, /\.incident-status\s*\{[\s\S]*?border-inline-start:\s*4px solid/);
 assert.match(html, /<fieldset class="unit-picker"><legend>Einheiten<\/legend><details><summary>Einheiten auswählen<\/summary><div class="check-grid">/);
-assert.match(css, /\.unit-picker summary\s*\{[\s\S]*?min-height:\s*var\(--control-height\)/);
+assert.match(css, /button,\s*input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\),\s*select\s*\{\s*height:\s*var\(--control-height\)/);
+assert.match(css, /\.unit-picker summary\s*\{[\s\S]*?height:\s*var\(--control-height\)/);
 assert.match(css, /\.unit-picker \.check-grid\s*\{[\s\S]*?position:\s*absolute/);
 assert.equal((html.match(/<button class="form-action">(?:Anlegen|Einladung senden)<\/button>/g) ?? []).length, 2);
-assert.match(css, /\.form-action\s*\{[\s\S]*?height:\s*var\(--control-height\)/);
+assert.match(css, /\.form-action\s*\{[\s\S]*?align-self:\s*end/);
 
 const filterOptionsSource = html.match(/function incidentFilterOptions[^\n]+/)?.[0];
 assert(filterOptionsSource, 'incidentFilterOptions fehlt');
