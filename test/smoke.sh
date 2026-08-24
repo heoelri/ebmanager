@@ -110,6 +110,7 @@ if [[ "$base_url" == https://* ]]; then
   curl --insecure --silent --head "$base_url/" | grep --ignore-case --quiet '^Strict-Transport-Security: max-age=31536000'
 fi
 
+# Der Bootstrap-Endpunkt muss innerhalb eines begrenzten Zeitfensters erreichbar werden.
 bootstrap_ready=false
 for _ in {1..60}; do
   if curl --insecure --silent --fail "$base_url/api/bootstrap" >/dev/null; then
@@ -219,13 +220,15 @@ curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="RENAME TABLE divera_imports_missing TO divera_imports"
 
-# Führungskräfte ohne Wehrleitungsrolle dürfen die Systemübersicht nicht aufrufen.
+# Führungskräfte ohne Wehrleitungsrolle dürfen weder Systemübersicht noch Nutzerverwaltung aufrufen.
 regular_token='dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
 regular_hash=$(php -r "echo hash('sha256', '$regular_token');")
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) SELECT organization_id,1,'Testkraft','testkraft@example.test',password_hash,'fuehrungskraft' FROM users WHERE email='admin@example.test'; SET @user_id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@user_id,1); INSERT INTO sessions(token,user_id,expires_at) VALUES('$regular_hash',@user_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR)"
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$regular_token" "$base_url/api/system")" = 403
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$regular_token" "$base_url/api/users")" = 403
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="DELETE FROM users WHERE email='testkraft@example.test'"
 
@@ -346,6 +349,8 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
     SET @other_force_id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@other_force_id,1); INSERT INTO sessions(token,user_id,expires_at) VALUES('$other_force_hash',@other_force_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR)"
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE incident_units SET vehicles=JSON_ARRAY(JSON_OBJECT('id','foreign-secret','name','Fremdfahrzeug','own',TRUE)) WHERE incident_id=$incident_id AND unit_id=$second_unit_id"
+
+# Nicht-Wehrführungen sehen nur aktuell zugeordnete Einheiten, Fahrzeuge und rollenbezogene Berichtsstatus.
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units" |
   php -r '$units=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(array_column($units,"id")===[1]);'
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents" |
@@ -420,7 +425,14 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --data "$report_payload" \
   "$base_url/api/incidents/$duplicate_incident_id/reports")" = 409
 
-# Die Führungskraft kann ihren Entwurf bearbeiten und genau einmal an die Einheitsführung senden.
+# Berichte mit nicht chronologischen Einsatzzeiten werden abgelehnt.
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --header 'Content-Type: application/json' \
+  --cookie "$session_cookie=$force_token" \
+  --data '{"unitId":1,"runningNumber":"98/2026","damagedParty":{},"damagingParty":{},"incidentCommand":{},"narrative":"Test","departedAt":"2026-08-22T19:30:00.000Z","arrivedAt":"2026-08-22T18:30:00.000Z","endedAt":"2026-08-22T20:00:00.000Z","incidentType":"Technische Hilfe","classification":{"site":[],"cause":[],"technical":[]},"crew":[]}' \
+  "$base_url/api/incidents/$duplicate_incident_id/reports")" = 400
+
+# Nur der Autor kann seinen Entwurf bearbeiten; die Übergabe ist einmalig und Rückgaben benötigen einen Kommentar.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
@@ -476,12 +488,22 @@ curl --insecure --silent --fail \
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request POST --data '{}' \
   "$base_url/api/reports/$report_id/submit-to-command" >/dev/null
+
+# In der Wehrführungsprüfung ist der Bericht für frühere Prüfstufen unveränderlich und nur noch lesbar.
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$leader_token" \
+  --header 'Content-Type: application/json' \
+  --request PUT \
+  --data "$report_payload" \
+  "$base_url/api/reports/$report_id")" = 403
 test "$(incident_status "$force_token" "$incident_id")" = submitted
 test "$(incident_status "$leader_token" "$incident_id")" = submitted
 test "$(incident_status "$session_token" "$incident_id")" = reports_pending
 assert_pdf "$session_token" "/api/reports/$report_id/pdf" 'Einzelbericht|Admin|Rolle: Wehrführung|Manipuliert'
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$incident_id/consolidation/pdf")" = 403
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$incident_id/consolidation/pdf")" = 409
+
+# Die Wehrführung kann erst nach Berichten aller alarmierten Einheiten konsolidieren und den Gesamtbericht exportieren.
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' \
   --data "${report_payload/\"unitId\":1/\"unitId\":$second_unit_id}" \
@@ -496,6 +518,8 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
   INCIDENT_ID="$incident_id" php -r '$items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $incident=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")))[0]; assert($incident["reportStatus"]["key"]==="completed");'
 assert_pdf "$session_token" "/api/incidents/$incident_id/consolidation/pdf" 'Abgeschlossener Gesamtbericht|Konsolidiert|Admin|Rolle: Wehrführung|Manipuliert|24.08.2026 11:00 Uhr'
+
+# Eine Rückgabe durch die Wehrführung invalidiert die Konsolidierung bis zur erneuten Übergabe.
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
   --data '{"comment":"Bitte durch die Einheit prüfen"}' "$base_url/api/reports/$report_id/return-to-unit" >/dev/null
@@ -511,6 +535,8 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request POST --data '{}' \
   "$base_url/api/reports/$report_id/submit-to-command" >/dev/null
+
+# Frühere Prüfstufen behalten nach Rückgabe und erneuter Übergabe ihre Leserechte.
 for previous_reviewer_token in "$force_token" "$leader_token"; do
   curl --insecure --silent --fail \
     --cookie "$session_cookie=$previous_reviewer_token" "$base_url/api/incidents/$incident_id/reports" |
@@ -605,15 +631,29 @@ curl --insecure --silent --fail \
   --data '{"accessKey":"test"}' "$base_url/api/units/1/divera" >/dev/null
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units/1/divera" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($data["alarms"])===2); assert(count($data["vehicles"])===2);'
+
+# Die periodische DIVERA-Kurzabfrage lädt Alarme, aber keine Stammdaten.
+: > "$divera_log"
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units/1/divera?summary=1" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($data["alarms"])===2); assert($data["vehicles"]===[]);'
+test "$(grep --count '^GET /api/v2/alarms$' "$divera_log")" = 1
+! grep --quiet '^GET /api/v2/pull/all$' "$divera_log"
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
   --data '{"accessKey":"verboten"}' "$base_url/api/units/1/divera")" = 403
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request POST \
   "$base_url/api/units/1/divera/members/sync")" = 403
+
+# Eine unbekannte DIVERA-ID wird nicht als lokaler Einsatz importiert.
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' \
+  --data '{"id":"kein-solcher-alarm"}' "$base_url/api/units/1/divera/import")" = 404
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' \
   --data '{"id":"alarm-1"}' "$base_url/api/units/1/divera/import" >/dev/null
+
+# Eine nachträglich importierte Einheitenzuordnung invalidiert einen bestehenden Gesamtbericht.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE incidents SET consolidated_at=UTC_TIMESTAMP() WHERE divera_id='alarm-1'"
 curl --insecure --silent --fail \
@@ -636,6 +676,8 @@ test "$(grep --count '^GET /api/v2/alarms$' "$divera_log")" = 1
 ! grep --extended-regexp --quiet '^(POST|PUT|PATCH|DELETE) ' "$divera_log"
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units/1/resources" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($data["members"])===2); assert(count($data["vehicles"])===2); assert(array_column($data["members"],"qualifications")===["AGT","MA"]);'
+
+# Ein wiederholter Gesamtabgleich aktualisiert vorhandene Einsätze ohne Duplikate.
 : > "$divera_log"
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
@@ -643,6 +685,8 @@ curl --insecure --silent --fail \
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($data["incidentsCreated"]===0); assert($data["incidentsUpdated"]===2); assert($data["assignmentsCreated"]===0);'
 test "$(grep --count '^GET /api/v2/pull/all$' "$divera_log")" = 1
 test "$(grep --count '^GET /api/v2/alarms$' "$divera_log")" = 1
+
+# Fehlerhafte DIVERA-Antworten brechen den Abgleich ab, ohne bestehende Stammdaten zu verändern.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE units SET divera_access_key='malformed' WHERE id=1"
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
@@ -650,6 +694,8 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   "$base_url/api/units/1/divera/sync")" = 502
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT CONCAT((SELECT COUNT(*) FROM vehicles WHERE unit_id=1),'|',(SELECT COUNT(*) FROM member_units WHERE unit_id=1))")" = '2|2'
+
+# Nicht mehr gelieferte Stammdatenzuordnungen verschwinden, historische Besatzungsmitglieder bleiben erhalten.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="INSERT IGNORE INTO report_crew(report_id,member_id) SELECT $report_id_int,id FROM members WHERE organization_id=1 AND divera_id='m2';
     UPDATE units SET divera_access_key='reduced' WHERE id=1"
@@ -662,7 +708,25 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request POST \
   "$base_url/api/units/1/divera/sync")" = 403
 
-# Das Zurücksetzen des Passworts verbraucht das Token, beendet bestehende Sitzungen und erlaubt den neuen Login.
+# Passwort-Wiederherstellung verrät keine Konten und begrenzt neue Token pro Nutzer.
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --header 'Content-Type: application/json' \
+  --data '{"email":"nicht-registriert@example.test"}' \
+  "$base_url/api/password-reset/request")" = 202
+rate_limit_hash=$(php -r "echo hash('sha256', 'rate-limit');")
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DELETE FROM password_resets WHERE user_id=(SELECT id FROM users WHERE email='admin@example.test');
+    INSERT INTO password_resets(user_id,token_hash,expires_at) SELECT id,'$rate_limit_hash',UTC_TIMESTAMP()+INTERVAL 30 MINUTE FROM users WHERE email='admin@example.test'"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --header 'Content-Type: application/json' \
+  --data '{"email":"admin@example.test"}' \
+  "$base_url/api/password-reset/request")" = 202
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT COUNT(*) FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE u.email='admin@example.test'")" = 1
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DELETE FROM password_resets WHERE user_id=(SELECT id FROM users WHERE email='admin@example.test')"
+
+# Abgelaufene und unbekannte Reset-Tokens werden abgelehnt; ein gültiges Token ist einmalig und beendet bestehende Sitzungen.
 reset_token='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 reset_hash=$(php -r "echo hash('sha256', '$reset_token');")
 expired_token='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
@@ -689,6 +753,10 @@ curl --insecure --silent --fail \
   --header 'Content-Type: application/json' \
   --data "{\"token\":\"$reset_token\",\"password\":\"neues-geheimes-passwort\"}" \
   "$base_url/api/password-reset/confirm" | grep --quiet '"ok":true'
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --header 'Content-Type: application/json' \
+  --data "{\"token\":\"$reset_token\",\"password\":\"weiteres-geheimes-passwort\"}" \
+  "$base_url/api/password-reset/confirm")" = 400
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$session_token" "$base_url/api/me")" = 401
 curl --insecure --silent --fail \
