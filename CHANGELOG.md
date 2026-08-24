@@ -18,7 +18,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Fixed
 
-- Der Migrations-Idempotenztest wartet nach dem Datenbank-Healthcheck auf eine erfolgreiche `mysql`-Anmeldung statt nur auf `mysqladmin ping`, da Letzteres kurzzeitig auch gegen den temporären MySQL-Initialisierungsserver erfolgreich sein kann, bevor der eigentliche Serverwechsel abgeschlossen ist.
+- Der Migrations-Idempotenztest wartet begrenzt auf eine erfolgreiche TCP-Anmeldung am finalen MySQL-Server statt nur auf `mysqladmin ping`, das auch gegen den temporären Initialisierungsserver erfolgreich sein kann.
 
 ### Changed
 
