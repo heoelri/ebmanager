@@ -9,7 +9,12 @@ trap 'rm -f "$migration_file"; "${compose[@]}" down --volumes --remove-orphans >
 
 printf 'CREATE TABLE migration_test (id INT PRIMARY KEY);\n' > "$migration_file"
 "${compose[@]}" up --detach --wait db
-until "${compose[@]}" exec -T db mysqladmin --user=root -ptest-password ping --silent; do sleep 1; done
+# The temporary init server only accepts socket connections, so TCP identifies the final server.
+for _ in {1..60}; do
+  if "${compose[@]}" exec -T db mysql --host=127.0.0.1 --user=root -ptest-password einsatzberichte --execute="SELECT 1" >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+"${compose[@]}" exec -T db mysql --host=127.0.0.1 --user=root -ptest-password einsatzberichte --execute="SELECT 1" >/dev/null
 
 # Simulate an installation from before the report workflow and vehicle catalog.
 "${compose[@]}" exec -T db mysql --user=root -ptest-password einsatzberichte --execute="

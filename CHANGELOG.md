@@ -16,6 +16,10 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 - Berichtsformulare zeigen die DIVERA-Einsatznummer unveränderlich an, trennen Gesamt- und Einheitseinsatzleitung in feste Zeilen und bieten native einklappbare Bereiche.
 - Ein lokales Stylesheet vereinheitlicht Layout, Formulare und responsive Darstellung ohne zusätzliche Frontend-Abhängigkeiten.
 
+### Fixed
+
+- Der Migrations-Idempotenztest wartet begrenzt auf eine erfolgreiche TCP-Anmeldung am finalen MySQL-Server statt nur auf `mysqladmin ping`, das auch gegen den temporären Initialisierungsserver erfolgreich sein kann.
+
 ### Changed
 
 - Wehrführungen benötigen keine Einheitszuordnung, Einheitsführungen gehören exakt einer Einheit an und Führungskräfte dürfen DIVERA-Einsätze ihrer zugeordneten Einheiten selbst erkennen und importieren.
