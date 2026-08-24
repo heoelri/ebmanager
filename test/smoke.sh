@@ -110,10 +110,19 @@ if [[ "$base_url" == https://* ]]; then
   curl --insecure --silent --head "$base_url/" | grep --ignore-case --quiet '^Strict-Transport-Security: max-age=31536000'
 fi
 
-for _ in {1..20}; do
-  curl --insecure --silent --fail "$base_url/api/bootstrap" >/dev/null && break
-  sleep 0.25
+bootstrap_ready=false
+for _ in {1..60}; do
+  if curl --insecure --silent --fail "$base_url/api/bootstrap" >/dev/null; then
+    bootstrap_ready=true
+    break
+  fi
+  sleep 0.5
 done
+if [[ "$bootstrap_ready" != true ]]; then
+  echo "Bootstrap-Endpunkt unter $base_url/api/bootstrap ist nicht erreichbar." >&2
+  curl --insecure --silent --show-error "$base_url/api/bootstrap" >&2 || true
+  exit 1
+fi
 
 # Setup-Anfragen ohne JSON-Content-Type werden abgelehnt.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
