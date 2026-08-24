@@ -67,18 +67,22 @@ const cards = [
   {dataset: {incidentStatus: 'submitted'}, hidden: false}
 ];
 const noFilteredIncidents = {hidden: true};
-const filterIncidents = new Function('document', `${filterSource}; return filterIncidents;`)({
-  querySelectorAll: () => cards,
-  querySelector: () => noFilteredIncidents
-});
+const storedFilters = new Map();
+const filterIncidents = new Function('document', 'localStorage', 'me', `${filterSource}; return filterIncidents;`)(
+  {querySelectorAll: () => cards, querySelector: () => noFilteredIncidents},
+  {setItem: (key, value) => storedFilters.set(key, value)},
+  {id: 42}
+);
 filterIncidents('submitted');
 assert.deepEqual(cards.map(card => card.hidden), [true, false]);
 assert.equal(noFilteredIncidents.hidden, true);
+assert.equal(storedFilters.get('incidentStatusFilter:42'), 'submitted');
 filterIncidents('ready');
 assert.equal(noFilteredIncidents.hidden, false);
 filterIncidents('');
 assert.deepEqual(cards.map(card => card.hidden), [false, false]);
 assert.match(html, /<label>Status filtern<select id="incidentStatusFilter"/);
+assert.match(html, /statusFilter\.value=localStorage\.getItem\(`incidentStatusFilter:\$\{me\.id\}`\)\|\|'';filterIncidents\(statusFilter\.value\)/);
 
 const reportFieldsSource = html.match(/function contactFields[\s\S]*?(?=\nfunction bindDuration)/)?.[0];
 assert(reportFieldsSource, 'Berichtsdetails fehlen');
