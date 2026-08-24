@@ -9,7 +9,12 @@ trap 'rm -f "$migration_file"; "${compose[@]}" down --volumes --remove-orphans >
 
 printf 'CREATE TABLE migration_test (id INT PRIMARY KEY);\n' > "$migration_file"
 "${compose[@]}" up --detach --wait db
-until "${compose[@]}" exec -T db mysqladmin --user=root -ptest-password ping --silent; do sleep 1; done
+# The healthcheck only proves mysqld accepts connections; right after the
+# container turns healthy, MySQL may still be swapping from its temporary
+# init server to the final one, which can briefly reject root logins with
+# "Access denied" even though the password is correct. Retry the actual
+# client/database login used below until it succeeds.
+until "${compose[@]}" exec -T db mysql --user=root -ptest-password einsatzberichte --execute="SELECT 1" >/dev/null 2>&1; do sleep 1; done
 
 # Simulate an installation from before the report workflow and vehicle catalog.
 "${compose[@]}" exec -T db mysql --user=root -ptest-password einsatzberichte --execute="
