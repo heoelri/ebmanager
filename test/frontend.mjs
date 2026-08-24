@@ -62,6 +62,7 @@ assert.equal(incidentFilterOptions([
 assert.match(incidentFilterOptions([{reportStatus: {key: 'reports_pending'}}], 'ready'), /value="ready">Bereit zur Konsolidierung/);
 assert.doesNotMatch(incidentFilterOptions([], 'unknown'), /unknown/);
 assert.doesNotMatch(incidentFilterOptions([], 'toString'), /toString/);
+assert.equal(incidentFilterOptions([{reportStatus: {key: 'toString'}}]), '<option value="toString">toString</option>');
 
 const filterSource = html.match(/function filterIncidents[^\n]+/)?.[0];
 assert(filterSource, 'filterIncidents fehlt');
