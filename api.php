@@ -1225,7 +1225,9 @@ try {
                         ? ['key' => 'report_exists', 'label' => 'Einsatzbericht vorhanden: ' . implode(', ', $names), 'pendingUnits' => []]
                         : ['key' => 'submitted', 'label' => 'Bericht abgegeben', 'pendingUnits' => []]);
             }
-            $row['units'] = implode(', ', array_column($relevant, 'unitName'));
+            $unitNames = array_column($relevant, 'unitName');
+            sort($unitNames, SORT_NATURAL | SORT_FLAG_CASE);
+            $row['units'] = implode(', ', $unitNames);
             foreach ($relevant as &$assignment) {
                 if (!$assignment['reportAuthorName']
                     || $user['role'] !== 'fuehrungskraft'

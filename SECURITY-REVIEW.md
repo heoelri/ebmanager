@@ -26,7 +26,7 @@ Wiederholung.
 
 ## Login-Historie vom 23. August 2026
 
-Die Historie erfasst ausschließlich die Benutzer-ID und den UTC-Zeitpunkt erfolgreicher Anmeldungen. IP-Adressen, User-Agents, Kennwörter und fehlgeschlagene Versuche werden nicht gespeichert. Die Ausgabe erfolgt nur über die bereits auf `wehrleitung` und den aktuellen Mandanten begrenzte Benutzerverwaltung; pro Benutzer werden höchstens fünf Zeitpunkte ausgegeben. Beim Löschen eines Benutzers werden die Einträge kaskadierend entfernt. Nach erfolgreicher Passwortprüfung aktualisiert der Login veraltete Hash-Algorithmen oder Parameter mit `PASSWORD_DEFAULT`; eine gleichzeitige Passwortänderung wird durch ein bedingtes Update nicht überschrieben.
+Die Historie erfasst ausschließlich die Benutzer-ID und den UTC-Zeitpunkt erfolgreicher Anmeldungen. IP-Adressen, User-Agents, Kennwörter und fehlgeschlagene Versuche werden nicht gespeichert. Die Ausgabe erfolgt nur über die bereits auf `wehrleitung` und den aktuellen Mandanten begrenzte Benutzerverwaltung; pro Benutzer werden höchstens fünf Zeitpunkte ausgegeben. Beim Löschen eines Benutzers werden die Einträge kaskadierend entfernt. Nach erfolgreicher Passwortprüfung aktualisiert der Login veraltete Hash-Algorithmen oder Parameter mit `PASSWORD_DEFAULT`; `SELECT ... FOR UPDATE` serialisiert dies mit gleichzeitigen Passwortänderungen und deren Sitzungswiderruf.
 
 ## Personenangaben in Einheitsberichten vom 23. August 2026
 
