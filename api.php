@@ -1143,12 +1143,15 @@ try {
                 && !one("SELECT id FROM users WHERE organization_id=? AND role='wehrleitung' AND id<>? LIMIT 1", [$existing['organization_id'], $existing['id']])) {
                 throw new ApiError(409, 'Mindestens eine Wehrführung ist erforderlich');
             }
-            query(
-                'UPDATE users SET unit_id=?,name=?,email=?,role=?,password_hash=? WHERE id=?',
-                [$unitIds[0] ?? null, required($data['name'] ?? null, 'Name', 200),
-                 emailAddress($data['email'] ?? null), $data['role'],
-                 $password ? password_hash($password, PASSWORD_DEFAULT) : $existing['password_hash'], $existing['id']]
-            );
+            $sql = 'UPDATE users SET unit_id=?,name=?,email=?,role=?';
+            $params = [$unitIds[0] ?? null, required($data['name'] ?? null, 'Name', 200),
+                emailAddress($data['email'] ?? null), $data['role']];
+            if ($password) {
+                $sql .= ',password_hash=?';
+                $params[] = password_hash($password, PASSWORD_DEFAULT);
+            }
+            $params[] = $existing['id'];
+            query("$sql WHERE id=?", $params);
             replaceMemberships((int)$existing['id'], $unitIds);
             if ($password) query('DELETE FROM sessions WHERE user_id=?', [$existing['id']]);
         });
@@ -1171,10 +1174,11 @@ try {
         $assignmentParams = $user['role'] === 'wehrleitung' ? $params : array_merge([$user['id']], $params);
         foreach (query(
             "SELECT iu.incident_id,iu.unit_id unitId,iu.vehicles,u.name unitName,
-             r.id IS NOT NULL hasReport,r.status reportStatus,r.author_id reportAuthorId
+             r.id IS NOT NULL hasReport,r.status reportStatus,r.author_id reportAuthorId,author.name reportAuthorName
              FROM incident_units iu JOIN incidents i ON i.id=iu.incident_id JOIN units u ON u.id=iu.unit_id AND u.organization_id=i.organization_id
              $membershipJoin
              LEFT JOIN reports r ON r.incident_id=iu.incident_id AND r.unit_id=iu.unit_id
+             LEFT JOIN users author ON author.id=r.author_id AND author.organization_id=i.organization_id
              WHERE $where ORDER BY iu.incident_id,iu.unit_id",
             $assignmentParams
         )->fetchAll() as $assignment) {
@@ -1213,18 +1217,25 @@ try {
                     !$assignment['hasReport']
                     || ($assignment['reportStatus'] === 'author_draft' && $assignment['reportAuthorId'] === $user['id'])
                 ));
-                $inProgress = array_values(array_filter($relevant, fn($assignment) =>
-                    $assignment['reportStatus'] === 'author_draft' && $assignment['reportAuthorId'] !== $user['id']
+                $otherAuthors = array_values(array_filter($relevant, fn($assignment) =>
+                    $assignment['hasReport'] && $assignment['reportAuthorId'] !== $user['id']
                 ));
-                $names = array_column($required ?: $inProgress, 'unitName');
+                $names = array_column($required ?: $otherAuthors, 'unitName');
                 $row['reportStatus'] = $required
                     ? ['key' => 'report_required', 'label' => 'Bericht erforderlich: ' . implode(', ', $names), 'pendingUnits' => $names]
-                    : ($inProgress
-                        ? ['key' => 'in_progress', 'label' => 'Bericht in Bearbeitung: ' . implode(', ', $names), 'pendingUnits' => []]
+                    : ($otherAuthors
+                        ? ['key' => 'report_exists', 'label' => 'Einsatzbericht vorhanden: ' . implode(', ', $names), 'pendingUnits' => []]
                         : ['key' => 'submitted', 'label' => 'Bericht abgegeben', 'pendingUnits' => []]);
             }
             $row['units'] = implode(', ', array_column($relevant, 'unitName'));
-            foreach ($relevant as &$assignment) unset($assignment['unitName'], $assignment['reportStatus'], $assignment['reportAuthorId']);
+            foreach ($relevant as &$assignment) {
+                if (!$assignment['reportAuthorName']
+                    || $user['role'] !== 'fuehrungskraft'
+                    || $assignment['reportAuthorId'] === $user['id']) {
+                    unset($assignment['reportAuthorName']);
+                }
+                unset($assignment['unitName'], $assignment['reportStatus'], $assignment['reportAuthorId']);
+            }
             unset($assignment);
             $row['assignments'] = json_encode($relevant, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
             foreach (['id', 'organization_id', 'divera_date'] as $key) if ($row[$key] !== null) $row[$key] = (int)$row[$key];

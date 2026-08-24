@@ -6,6 +6,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Added
 
+- Führungskräfte sehen Einheit und Verfasser eines bereits vorhandenen fremden Einheitsberichts, ohne dessen Inhalte oder Workflowdaten einsehen zu können.
 - Rollenabhängige PDF-Downloads exportieren Einsatzakten, sichtbare Einzelberichte und abgeschlossene Gesamtberichte mit Exportzeitpunkt, Nutzer und Rolle.
 - Die Einsatzübersicht zeigt und filtert rollenbezogen fehlende, zu prüfende, zur Konsolidierung bereite und abgeschlossene Einsatzberichte.
 - Ein dreistufiger Workflow führt Einheitsberichte vom Autorenentwurf über die Einheitsführung zur Wehrführung, protokolliert alle Übergänge unveränderlich und unterstützt kommentierte Rückgaben mit E-Mail-Benachrichtigung.

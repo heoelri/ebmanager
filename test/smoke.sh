@@ -371,7 +371,7 @@ test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-characte
 test "$(curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_url/api/incidents/$incident_id/reports")" = '[]'
 test "$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$incident_id/reports")" = '[]'
 test "$(incident_status "$force_token" "$incident_id")" = report_required
-test "$(incident_status "$other_force_token" "$incident_id")" = in_progress
+test "$(incident_status "$other_force_token" "$incident_id")" = report_exists
 test "$(incident_status "$leader_token" "$incident_id")" = awaiting_report
 assert_pdf "$force_token" "/api/reports/$report_id/pdf" 'Einzelbericht|Führungskraft Test|Rolle: Führungskraft|Ursprünglich|Max Mustermann'
 assert_pdf "$force_token" "/api/incidents/$incident_id/pdf" 'Rollenbezogene Einsatzakte|Führungskraft Test|Rolle: Führungskraft|Ursprünglich' 'Fremdfahrzeug'
@@ -430,6 +430,7 @@ curl --insecure --silent --fail \
   --request POST --data '{}' \
   "$base_url/api/reports/$report_id/submit-to-unit" >/dev/null
 test "$(incident_status "$force_token" "$incident_id")" = submitted
+test "$(incident_status "$other_force_token" "$incident_id")" = report_exists
 test "$(incident_status "$leader_token" "$incident_id")" = review_required
 assert_pdf "$leader_token" "/api/reports/$report_id/pdf" 'Einzelbericht|Einheitsleitung Eins|Rolle: Einheitsführung|Manipuliert'
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
