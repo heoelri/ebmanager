@@ -132,19 +132,21 @@ INSERT INTO incidents(organization_id,divera_id,foreign_id,divera_date,title,sta
   (@org,'demo-012','D-2026-012',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 50 DAY),'Tierrettung',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 50 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Tier in Notlage','Nordpark, Musterstadt',50.1132,8.6012,'Demo: bei Wehrführung','','Bürgertelefon','',NULL),
   (@org,'demo-013','D-2026-013',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 61 DAY),'Unklare Rauchentwicklung',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 61 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Rauch im Freien','Industrieweg 9, Musterstadt',50.1233,8.6123,'Demo: ein Bericht fehlt','','Leitstelle','',NULL),
   (@org,'demo-014','D-2026-014',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 73 DAY),'Wasserschaden',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 73 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Rohrbruch im Gebäude','Nordplatz 3, Musterstadt',50.1334,8.6234,'Demo: Entwurf','','Hausverwaltung','',NULL),
-  (@org,'demo-015','D-2026-015',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 88 DAY),'Brandnachschau',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 88 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Kontrolle nach Kleinbrand','Mühlenweg 6, Musterstadt',50.1435,8.6345,'Demo: abgeschlossener Einheitsbericht','','Leitstelle','',NULL);
+  (@org,'demo-015','D-2026-015',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 88 DAY),'Brandnachschau',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 88 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Kontrolle nach Kleinbrand','Mühlenweg 6, Musterstadt',50.1435,8.6345,'Demo: abgeschlossener Einheitsbericht','','Leitstelle','',NULL),
+  (@org,'demo-flow-single','D-FLOW-001',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 2 HOUR),'Demo-Flow: Baum auf Fahrbahn',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 2 HOUR,'%Y-%m-%dT%H:%i:%s.000Z'),'Umgestürzter Baum blockiert die Fahrbahn','Waldstraße 18, Musterstadt',50.1040,8.6080,'Demo-Flow mit einer Einheit: unbearbeitet','','Leitstelle','',NULL),
+  (@org,'demo-flow-multi','D-FLOW-002',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 4 HOUR),'Demo-Flow: Kellerbrand',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 4 HOUR,'%Y-%m-%dT%H:%i:%s.000Z'),'Rauchentwicklung aus einem Keller','Ringstraße 27, Musterstadt',50.1160,8.6160,'Demo-Flow mit zwei Einheiten: unbearbeitet','','Leitstelle','',NULL);
 
 INSERT INTO incident_units(incident_id,unit_id,vehicles)
 SELECT i.id,@mitte,JSON_ARRAY(
   JSON_OBJECT('id','demo-mitte-elw','name','ELW 1','own',TRUE),
   JSON_OBJECT('id','demo-mitte-hlf','name','HLF 20','own',TRUE),
   JSON_OBJECT('id','demo-mitte-dlk','name','DLK 23','own',TRUE)
-) FROM incidents i WHERE i.organization_id=@org AND i.divera_id IN ('demo-001','demo-004','demo-005','demo-006','demo-008','demo-010','demo-011','demo-013','demo-015')
+) FROM incidents i WHERE i.organization_id=@org AND i.divera_id IN ('demo-001','demo-004','demo-005','demo-006','demo-008','demo-010','demo-011','demo-013','demo-015','demo-flow-single','demo-flow-multi')
 UNION ALL
 SELECT i.id,@nord,JSON_ARRAY(
   JSON_OBJECT('id','demo-nord-lf','name','LF 10','own',TRUE),
   JSON_OBJECT('id','demo-nord-mtf','name','MTF Nord','own',TRUE)
-) FROM incidents i WHERE i.organization_id=@org AND i.divera_id IN ('demo-002','demo-004','demo-005','demo-007','demo-008','demo-012','demo-014')
+) FROM incidents i WHERE i.organization_id=@org AND i.divera_id IN ('demo-002','demo-004','demo-005','demo-007','demo-008','demo-012','demo-014','demo-flow-multi')
 UNION ALL
 SELECT i.id,@sued,JSON_ARRAY(
   JSON_OBJECT('id','demo-sued-tsf','name','TSF-W Süd','own',TRUE),
