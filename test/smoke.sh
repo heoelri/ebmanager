@@ -60,6 +60,10 @@ php -r '
   assert(preg_match("#/Count ([3-9])#",$pdf));
   assert(substr_count($pdf,iconv("UTF-8","Windows-1252//TRANSLIT","Nutzer: Prüfer"))>=3);
   assert(str_contains($pdf,iconv("UTF-8","Windows-1252//TRANSLIT","Übung")));
+  try { @pdfEncode("\xFF"); exit(1); } catch (ApiError $error) {
+    assert($error->status===503);
+    assert($error->getMessage()==="PDF-Text konnte nicht kodiert werden");
+  }
 '
 
 # Das Frontend enthält die erwarteten Accessibility- und DIVERA-Elemente, aber keine duplizierten Fachoptionen.

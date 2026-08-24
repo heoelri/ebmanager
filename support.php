@@ -19,7 +19,7 @@ function pdfEncode(string $text): string
 {
     if (!function_exists('iconv')) throw new ApiError(503, 'PDF-Export ist auf diesem Server nicht verfügbar');
     $encoded = iconv('UTF-8', 'Windows-1252//TRANSLIT', str_replace(["\r\n", "\r"], "\n", $text));
-    if ($encoded === false) throw new RuntimeException('PDF-Text konnte nicht kodiert werden');
+    if ($encoded === false) throw new ApiError(503, 'PDF-Text konnte nicht kodiert werden');
     return preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $encoded) ?? '';
 }
 
