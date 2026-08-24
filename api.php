@@ -874,19 +874,17 @@ try {
 
     if ($method === 'POST' && $path === '/api/login') {
         $data = input();
+        $email = required($data['email'] ?? null, 'E-Mail', 320);
         $password = (string)($data['password'] ?? '');
-        $login = one('SELECT * FROM users WHERE email=?', [required($data['email'] ?? null, 'E-Mail', 320)]);
-        if (!$login || !password_verify($password, $login['password_hash'])) {
-            throw new ApiError(401, 'E-Mail oder Passwort falsch');
-        }
-        $newHash = password_needs_rehash($login['password_hash'], PASSWORD_DEFAULT)
-            ? password_hash($password, PASSWORD_DEFAULT)
-            : null;
         $token = bin2hex(random_bytes(32));
         $cookieName = sessionCookieName();
-        transaction(function () use ($token, $login, $cookieName, $newHash) {
-            if ($newHash !== null) {
-                query('UPDATE users SET password_hash=? WHERE id=? AND password_hash=?', [$newHash, $login['id'], $login['password_hash']]);
+        transaction(function () use ($email, $password, $token, $cookieName) {
+            $login = one('SELECT * FROM users WHERE email=? FOR UPDATE', [$email]);
+            if (!$login || !password_verify($password, $login['password_hash'])) {
+                throw new ApiError(401, 'E-Mail oder Passwort falsch');
+            }
+            if (password_needs_rehash($login['password_hash'], PASSWORD_DEFAULT)) {
+                query('UPDATE users SET password_hash=? WHERE id=?', [password_hash($password, PASSWORD_DEFAULT), $login['id']]);
             }
             query('DELETE FROM sessions WHERE expires_at<=UTC_TIMESTAMP()');
             if (preg_match('/^[a-f0-9]{64}$/', $_COOKIE[$cookieName] ?? '')) query('DELETE FROM sessions WHERE token=?', [hash('sha256', $_COOKIE[$cookieName])]);
