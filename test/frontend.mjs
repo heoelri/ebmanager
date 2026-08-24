@@ -56,8 +56,9 @@ const incidentFilterOptions = new Function('esc', `${filterLabelsSource};${filte
 assert.equal(incidentFilterOptions([
   {reportStatus: {key: 'reports_pending', label: 'Bericht ausstehend: Löschzug'}},
   {reportStatus: {key: 'submitted', label: 'An Wehrführung übergeben'}},
-  {reportStatus: {key: 'reports_pending', label: 'Berichte ausstehend: Löschzug, Löschgruppe'}}
-]), '<option value="reports_pending">Berichte ausstehend</option><option value="submitted">Bericht abgegeben</option>');
+  {reportStatus: {key: 'reports_pending', label: 'Berichte ausstehend: Löschzug, Löschgruppe'}},
+  {reportStatus: {key: 'report_exists', label: 'Einsatzbericht vorhanden: Löschzug'}}
+]), '<option value="reports_pending">Berichte ausstehend</option><option value="submitted">Bericht abgegeben</option><option value="report_exists">Einsatzbericht vorhanden</option>');
 
 const filterSource = html.match(/function filterIncidents[^\n]+/)?.[0];
 assert(filterSource, 'filterIncidents fehlt');
@@ -204,6 +205,22 @@ for (const [me, visible] of [
   const existingReportsNotice = new Function('me', `${existingReportsNoticeSource}; return existingReportsNotice;`)(me);
   assert.equal(existingReportsNotice().includes('Für alle verfügbaren Einheiten'), visible);
 }
+const inaccessibleReportNoticesSource = html.match(/function inaccessibleReportNotices[^\n]+/)?.[0];
+assert(inaccessibleReportNoticesSource, 'inaccessibleReportNotices fehlt');
+const inaccessibleReportNotices = new Function(
+  'me', 'units', 'esc',
+  `${inaccessibleReportNoticesSource}; return inaccessibleReportNotices;`
+)(
+  {role: 'fuehrungskraft', unitIds: [1]},
+  [{id: 1, name: 'Löschzug Mitte'}, {id: 2, name: 'Löschgruppe Nord'}],
+  value => String(value ?? '').replaceAll('<', '&lt;')
+);
+const inaccessibleNotice = inaccessibleReportNotices([
+  {unitId: 1, reportAuthorName: 'Franziska <Roth>'},
+  {unitId: 2, reportAuthorName: 'Nils Weber'}
+]);
+assert.match(inaccessibleNotice, /Löschzug Mitte.*Franziska &lt;Roth>.*Berichtsinhalte/s);
+assert.doesNotMatch(inaccessibleNotice, /Nils Weber|Löschgruppe Nord/);
 assert.doesNotMatch(html, /\/release/);
 assert.match(html, /type="\$\{type\}" name="unitIds"/);
 assert.match(html, /role==='einheitsleitung'\?'radio':'checkbox'/);

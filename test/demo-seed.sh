@@ -36,3 +36,25 @@ export HTTP_PORT=0 HTTPS_PORT=0
 [[ "$("${compose[@]}" exec -T web curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --header 'Content-Type: application/json' --data '{"email":"wehrleitung@demo.local","password":"Demo-Feuerwehr-2026!"}' \
   https://localhost/api/login)" == 200 ]]
+
+[[ "$("${compose[@]}" exec -T web curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie-jar /tmp/daniel-demo-cookie --header 'Content-Type: application/json' \
+  --data '{"email":"fuehrung.springer@demo.local","password":"Demo-Feuerwehr-2026!"}' \
+  https://localhost/api/login)" == 200 ]]
+"${compose[@]}" exec -T web curl --insecure --silent --fail --cookie /tmp/daniel-demo-cookie https://localhost/api/incidents |
+  "${compose[@]}" exec -T web php -r '
+    $incidents=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+    $single=array_values(array_filter($incidents,fn($item)=>$item["foreign_id"]==="D-2026-015"))[0];
+    $singleAssignments=json_decode($single["assignments"],true,512,JSON_THROW_ON_ERROR);
+    assert(array_column($singleAssignments,"reportAuthorName")===["Franziska Roth"]);
+    $multi=array_values(array_filter($incidents,fn($item)=>$item["foreign_id"]==="D-2026-005"))[0];
+    $visibleAuthors=array_values(array_filter(array_column(json_decode($multi["assignments"],true,512,JSON_THROW_ON_ERROR),"reportAuthorName")));
+    assert($visibleAuthors===["Nils Weber"]);
+    foreach (["D-2026-012","D-2026-014"] as $number) {
+      $incident=array_values(array_filter($incidents,fn($item)=>$item["foreign_id"]===$number))[0];
+      assert($incident["reportStatus"]["key"]==="report_exists");
+    }
+  '
+demo_015_id=$("${mysql[@]}" --execute="SELECT id FROM incidents WHERE foreign_id='D-2026-015'")
+[[ "$("${compose[@]}" exec -T web curl --insecure --silent --fail --cookie /tmp/daniel-demo-cookie \
+  "https://localhost/api/incidents/$demo_015_id/reports")" == '[]' ]]
