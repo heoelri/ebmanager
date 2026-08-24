@@ -6,7 +6,7 @@ Diese Anleitung ist die maßgebliche Betriebsdokumentation für die Erstinstalla
 
 Der Webhoster muss folgende Funktionen bereitstellen:
 
-- PHP 8.2 oder neuer mit `pdo_mysql` und für SMTP mit `openssl`
+- PHP 8.2 oder neuer mit `pdo_mysql`, `iconv` für PDF-Exporte und für SMTP mit `openssl`
 - MySQL 8.0 oder neuer
 - Apache mit `mod_rewrite` und erlaubten `.htaccess`-Dateien
 - eine Domain oder Subdomain mit dauerhaft aktiviertem HTTPS
@@ -246,6 +246,7 @@ Migrationen dürfen nicht auf Verdacht rückgängig gemacht werden. Maßgeblich 
 | API-Aufrufe liefern 404 | `.htaccess`, `mod_rewrite` und `AllowOverride` beim Hoster prüfen |
 | Unterverzeichnis öffnet, API-Aufrufe gehen aber an die Domainwurzel | Aktuelle Version von `public/index.html` hochladen und die Anwendung über die Verzeichnisadresse mit abschließendem `/` öffnen |
 | HTTPS-Weiterleitung funktioniert nicht | Zertifikat, Domainzuordnung und Apache-Unterstützung prüfen |
+| PDF-Export liefert HTTP 503 | Prüfen, ob die PHP-Erweiterung `iconv` aktiviert ist |
 | Passwort-E-Mail kommt nicht an | `app_url`, `mail_from`, PHP `mail()`, Spamordner und Mailprotokoll des Hosters prüfen |
 | GitHub-Deployment findet Secrets nicht | Environment-Name `hiba`, Secret-Namen und Environment-Freigabe prüfen |
 | SFTP-Deployment schlägt fehl | Hostname, `SFTP_PORT`, Benutzer, Schlüssel oder Passwort, aktuellen `SFTP_KNOWN_HOSTS`-Eintrag und ein vorhandenes `SFTP_PATH` prüfen |

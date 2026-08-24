@@ -54,7 +54,7 @@ allgemein freigegeben.
 
 Die Wehrführung kann einen Gesamtbericht erst speichern, wenn für jede dem Einsatz zugeordnete Einheit ein Einzelbericht im Status „Prüfung durch Wehrführung“ vorliegt. Eine Rückgabe oder eine später ergänzte Einheitenzuordnung macht eine bestehende Konsolidierung wieder ungültig. Führungskräfte sehen nach ihrer Abgabe den Zeitpunkt, den aktuellen Prüfstatus und den ausdrücklichen Hinweis, dass der Bericht für sie nur noch lesbar ist.
 
-In der Einsatzansicht können alle Rollen ihre sichtbare Einsatzakte und jeden sichtbaren Einzelbericht als PDF herunterladen. Die Wehrführung kann zusätzlich einen abgeschlossenen Gesamtbericht exportieren. Die serverseitig erzeugten PDFs verwenden dieselben Leserechte wie die Webansicht und enthalten auf jeder Seite Exportzeitpunkt, Nutzername, Rolle und Seitenzahl.
+In der Einsatzansicht können alle Rollen ihre sichtbare Einsatzakte und jeden sichtbaren Einzelbericht als PDF herunterladen. Die Wehrführung kann zusätzlich einen abgeschlossenen Gesamtbericht exportieren. Die serverseitig erzeugten PDFs verwenden dieselben Leserechte wie die Webansicht und enthalten auf jeder Seite Exportzeitpunkt, Nutzername, Rolle und Seitenzahl. Dafür muss die PHP-Erweiterung `iconv` verfügbar sein; andernfalls antwortet der Export mit HTTP 503.
 
 ## Fachliche Anpassung
 
@@ -82,7 +82,7 @@ Bereits gespeicherte Dienstgradwerte bleiben beim Bearbeiten auswählbar, auch w
 
 ## Voraussetzungen
 
-- PHP 8.2 oder neuer mit `pdo_mysql`
+- PHP 8.2 oder neuer mit `pdo_mysql` und `iconv`
 - MySQL 8.0 oder neuer
 - Apache mit `mod_rewrite` und erlaubten `.htaccess`-Dateien
 - HTTPS
