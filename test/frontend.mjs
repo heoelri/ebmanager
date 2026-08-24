@@ -194,6 +194,16 @@ for (const me of [
 }
 assert.match(html, /api\/incidents\/\$\{id\}\/pdf'">Einsatzakte als PDF/);
 assert.match(html, /item\.consolidated_at\?`<p><button type="button" onclick="location\.href='api\/incidents\/\$\{id\}\/consolidation\/pdf'">Gesamtbericht als PDF/);
+const existingReportsNoticeSource = html.match(/function existingReportsNotice[^\n]+/)?.[0];
+assert(existingReportsNoticeSource, 'existingReportsNotice fehlt');
+for (const [me, visible] of [
+  [{role: 'wehrleitung', unitIds: []}, true],
+  [{role: 'fuehrungskraft', unitIds: [1, 2]}, true],
+  [{role: 'einheitsleitung', unitIds: [1]}, false]
+]) {
+  const existingReportsNotice = new Function('me', `${existingReportsNoticeSource}; return existingReportsNotice;`)(me);
+  assert.equal(existingReportsNotice().includes('Für alle verfügbaren Einheiten'), visible);
+}
 assert.doesNotMatch(html, /\/release/);
 assert.match(html, /type="\$\{type\}" name="unitIds"/);
 assert.match(html, /role==='einheitsleitung'\?'radio':'checkbox'/);
