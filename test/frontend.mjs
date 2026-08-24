@@ -62,16 +62,21 @@ assert.equal(incidentFilterOptions([
 
 const filterSource = html.match(/function filterIncidents[^\n]+/)?.[0];
 assert(filterSource, 'filterIncidents fehlt');
+const filterPreferenceSource = html.match(/function incidentFilterPreference[^\n]+/)?.[0];
+assert(filterPreferenceSource, 'incidentFilterPreference fehlt');
 const cards = [
   {dataset: {incidentStatus: 'report_required'}, hidden: false},
   {dataset: {incidentStatus: 'submitted'}, hidden: false}
 ];
 const noFilteredIncidents = {hidden: true};
 const storedFilters = new Map();
-const filterIncidents = new Function('document', 'localStorage', 'me', `${filterSource}; return filterIncidents;`)(
-  {querySelectorAll: () => cards, querySelector: () => noFilteredIncidents},
-  {setItem: (key, value) => storedFilters.set(key, value)},
+const incidentFilterPreference = new Function('localStorage', 'me', `${filterPreferenceSource}; return incidentFilterPreference;`)(
+  {getItem: key => storedFilters.get(key), setItem: (key, value) => storedFilters.set(key, value)},
   {id: 42}
+);
+const filterIncidents = new Function('document', 'incidentFilterPreference', `${filterSource}; return filterIncidents;`)(
+  {querySelectorAll: () => cards, querySelector: () => noFilteredIncidents},
+  incidentFilterPreference
 );
 filterIncidents('submitted');
 assert.deepEqual(cards.map(card => card.hidden), [true, false]);
@@ -81,8 +86,14 @@ filterIncidents('ready');
 assert.equal(noFilteredIncidents.hidden, false);
 filterIncidents('');
 assert.deepEqual(cards.map(card => card.hidden), [false, false]);
+const blockedPreference = new Function('localStorage', 'me', `${filterPreferenceSource}; return incidentFilterPreference;`)(
+  {getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); }},
+  {id: 42}
+);
+assert.equal(blockedPreference(), '');
+assert.equal(blockedPreference('submitted'), 'submitted');
 assert.match(html, /<label>Status filtern<select id="incidentStatusFilter"/);
-assert.match(html, /statusFilter\.value=localStorage\.getItem\(`incidentStatusFilter:\$\{me\.id\}`\)\|\|'';filterIncidents\(statusFilter\.value\)/);
+assert.match(html, /statusFilter\.value=incidentFilterPreference\(\);filterIncidents\(statusFilter\.value\)/);
 
 const reportFieldsSource = html.match(/function contactFields[\s\S]*?(?=\nfunction bindDuration)/)?.[0];
 assert(reportFieldsSource, 'Berichtsdetails fehlen');
