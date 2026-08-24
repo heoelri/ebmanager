@@ -261,6 +261,176 @@ function reportVisibilitySql(array $user, string $alias = 'r'): array
     ];
 }
 
+function visibleIncident(int $incidentId, array $user): ?array
+{
+    if ($user['role'] === 'wehrleitung') {
+        return one('SELECT * FROM incidents WHERE id=? AND organization_id=?', [$incidentId, $user['organization_id']]);
+    }
+    return one(
+        'SELECT i.* FROM incidents i WHERE i.id=? AND i.organization_id=?
+         AND EXISTS(SELECT 1 FROM incident_units iu JOIN user_units uu ON uu.unit_id=iu.unit_id WHERE iu.incident_id=i.id AND uu.user_id=?)',
+        [$incidentId, $user['organization_id'], $user['id']]
+    );
+}
+
+function visibleIncidentReports(int $incidentId, array $user): array
+{
+    [$visibility, $visibilityParams] = reportVisibilitySql($user);
+    $where = " AND $visibility";
+    $params = array_merge([$incidentId, $user['organization_id']], $visibilityParams);
+    $rows = query(
+        "SELECT r.*,u.name author_name,un.name unit_name FROM reports r
+         JOIN incidents i ON i.id=r.incident_id
+         JOIN users u ON u.id=r.author_id AND u.organization_id=i.organization_id
+         JOIN units un ON un.id=r.unit_id AND un.organization_id=i.organization_id
+         WHERE r.incident_id=? AND i.organization_id=?$where ORDER BY r.created_at",
+        $params
+    )->fetchAll();
+    $crew = [];
+    foreach (query(
+        "SELECT rc.report_id reportId,rc.member_id memberId,m.name,rc.vehicle,rc.role
+         FROM report_crew rc JOIN members m ON m.id=rc.member_id JOIN reports r ON r.id=rc.report_id
+         JOIN incidents i ON i.id=r.incident_id AND m.organization_id=i.organization_id
+         WHERE r.incident_id=? AND i.organization_id=?$where ORDER BY rc.report_id,rc.member_id",
+        $params
+    )->fetchAll() as $person) {
+        $reportId = (int)$person['reportId'];
+        unset($person['reportId']);
+        $person['memberId'] = (int)$person['memberId'];
+        $crew[$reportId][] = $person;
+    }
+    $history = [];
+    if ($rows) {
+        $ids = array_map(fn($row) => (int)$row['id'], $rows);
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        foreach (query(
+            "SELECT report_id,from_status,to_status,actor_name,actor_role,comment,
+             DATE_FORMAT(created_at,'%Y-%m-%dT%H:%i:%sZ') created_at
+             FROM report_transitions WHERE report_id IN ($placeholders) ORDER BY created_at,id",
+            $ids
+        )->fetchAll() as $transition) {
+            $history[(int)$transition['report_id']][] = $transition;
+        }
+    }
+    foreach ($rows as &$row) {
+        $row['crew'] = json_encode($crew[(int)$row['id']] ?? [], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        $row['history'] = $history[(int)$row['id']] ?? [];
+        $row['editable'] = canEditReport($row, $user);
+        $row['duration_minutes'] = $row['ended_at'] && $row['alarmed_at']
+            ? (int)round((strtotime($row['ended_at']) - strtotime($row['alarmed_at'])) / 60)
+            : null;
+        foreach (['id', 'incident_id', 'unit_id', 'author_id', 'report_year'] as $key) if ($row[$key] !== null) $row[$key] = (int)$row[$key];
+    }
+    return $rows;
+}
+
+function exportDateTime(mixed $value): string
+{
+    if (!$value) return '–';
+    try {
+        return (new DateTimeImmutable((string)$value, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('Europe/Berlin'))->format('d.m.Y H:i') . ' Uhr';
+    } catch (Throwable) {
+        return (string)$value;
+    }
+}
+
+function exportJson(mixed $value): array
+{
+    if (is_array($value)) return $value;
+    return json_decode((string)($value ?: '{}'), true, 512, JSON_THROW_ON_ERROR);
+}
+
+function exportLine(array &$lines, string $text = '', bool $bold = false): void
+{
+    $lines[] = compact('text', 'bold');
+}
+
+function incidentExportLines(array $incident): array
+{
+    $assignments = query(
+        'SELECT u.name,iu.vehicles FROM incident_units iu JOIN units u ON u.id=iu.unit_id AND u.organization_id=? WHERE iu.incident_id=? ORDER BY u.name',
+        [$incident['organization_id'], $incident['id']]
+    )->fetchAll();
+    $lines = [];
+    exportLine($lines, 'Einsatzdaten', true);
+    exportLine($lines, 'Feuerwehr: ' . one('SELECT name FROM organizations WHERE id=?', [$incident['organization_id']])['name']);
+    exportLine($lines, 'Einsatz: ' . $incident['title']);
+    exportLine($lines, 'Einsatznummer: ' . ($incident['foreign_id'] ?: ($incident['divera_id'] ?: $incident['id'])));
+    exportLine($lines, 'Zeitpunkt: ' . exportDateTime($incident['started_at']) . ' (Europe/Berlin)');
+    exportLine($lines, 'Adresse: ' . ($incident['address'] ?: '–'));
+    exportLine($lines, 'Alarmierte Einheiten: ' . (implode(', ', array_column($assignments, 'name')) ?: '–'));
+    foreach (['message' => 'Meldung', 'remark' => 'Bemerkung', 'patient' => 'Patient', 'caller' => 'Meldende Person'] as $key => $label) {
+        if ($incident[$key] !== '') exportLine($lines, "$label: {$incident[$key]}");
+    }
+    $vehicles = [];
+    foreach ($assignments as $assignment) foreach (exportJson($assignment['vehicles']) as $vehicle) {
+        $vehicles[] = is_string($vehicle) ? $vehicle : $vehicle['name'] . (($vehicle['own'] ?? true) ? ' (eigene Einheit)' : ' (andere Einheit)');
+    }
+    exportLine($lines, 'Fahrzeuge beim Import: ' . ($vehicles ? implode(', ', $vehicles) : 'Keine Fahrzeuge'));
+    exportLine($lines);
+    return $lines;
+}
+
+function reportExportLines(array $report): array
+{
+    $statusLabels = ['author_draft' => 'Entwurf der Führungskraft', 'unit_review' => 'Prüfung durch Einheitsführung', 'wehr_review' => 'Prüfung durch Wehrführung'];
+    $roleLabels = ['fuehrungskraft' => 'Führungskraft', 'einheitsleitung' => 'Einheitsführung', 'wehrleitung' => 'Wehrführung'];
+    $crewRoleLabels = ['einheitsfuehrer' => 'Einheitsführer', 'maschinist' => 'Maschinist', 'besatzung' => 'Besatzung', 'mannschaft' => 'Besatzung'];
+    $lines = [];
+    exportLine($lines, 'Einzelbericht ' . $report['unit_name'] . ' – Nr. ' . ($report['running_number'] ?: '–'), true);
+    exportLine($lines, 'Autor: ' . $report['author_name']);
+    exportLine($lines, 'Status: ' . ($statusLabels[$report['status']] ?? $report['status']));
+    exportLine($lines, 'Einsatzart: ' . ($report['incident_type'] ?: '–'));
+    exportLine($lines, 'Alarmiert: ' . exportDateTime($report['alarmed_at']));
+    exportLine($lines, 'Ausgerückt: ' . exportDateTime($report['departed_at']));
+    exportLine($lines, 'Eingetroffen: ' . exportDateTime($report['arrived_at']));
+    exportLine($lines, 'Beendet: ' . exportDateTime($report['ended_at']));
+    exportLine($lines, 'Dauer: ' . ($report['duration_minutes'] === null ? '–' : intdiv($report['duration_minutes'], 60) . ' Std. ' . ($report['duration_minutes'] % 60) . ' Min.'));
+    $command = exportJson($report['incident_command']);
+    foreach ([
+        'Gesamteinsatzleitung' => [$command['rank'] ?? '', $command['name'] ?? ''],
+        'Einsatzleitung der Einheit' => [$command['additionalRank'] ?? '', $command['additionalName'] ?? '']
+    ] as $label => $person) {
+        if (array_filter($person)) exportLine($lines, "$label: " . implode(' ', array_filter($person)));
+    }
+    foreach (['damaged_party' => 'Geschädigte Person', 'damaging_party' => 'Schädiger'] as $key => $label) {
+        $contact = array_filter(exportJson($report[$key]));
+        if ($contact) exportLine($lines, "$label: " . implode(' | ', $contact));
+    }
+    foreach (exportJson($report['classification']) as $group => $values) {
+        if ($values) exportLine($lines, (CLASSIFICATION_LABELS[$group] ?? $group) . ': ' . implode(', ', $values));
+    }
+    exportLine($lines, 'Fahrzeuge: ' . ($report['vehicles'] ?: '–'));
+    exportLine($lines, 'Personal: ' . ($report['personnel'] ?: '–'));
+    exportLine($lines, 'Besatzung', true);
+    $crew = exportJson($report['crew']);
+    if (!$crew) exportLine($lines, 'Keine Besatzung');
+    foreach ($crew as $person) {
+        $vehicle = $person['vehicle'] ?: 'Ohne Fahrzeug';
+        exportLine($lines, "$vehicle | " . ($crewRoleLabels[$person['role']] ?? $person['role']) . ': ' . $person['name']);
+    }
+    exportLine($lines, 'Einsatzverlauf', true);
+    foreach (explode("\n", $report['narrative']) as $paragraph) exportLine($lines, $paragraph);
+    exportLine($lines, 'Prüfverlauf', true);
+    foreach ($report['history'] as $transition) {
+        $entry = exportDateTime($transition['created_at']) . ': ' . $transition['actor_name'] . ' (' . ($roleLabels[$transition['actor_role']] ?? $transition['actor_role']) . ') – ' . ($statusLabels[$transition['to_status']] ?? $transition['to_status']);
+        if ($transition['comment'] !== '') $entry .= ' | ' . $transition['comment'];
+        exportLine($lines, $entry);
+    }
+    exportLine($lines);
+    return $lines;
+}
+
+function reportReferenceForExport(int $reportId, array $user): ?array
+{
+    [$visibility, $params] = reportVisibilitySql($user);
+    return one(
+        "SELECT r.incident_id FROM reports r JOIN incidents i ON i.id=r.incident_id
+         WHERE r.id=? AND i.organization_id=? AND $visibility",
+        array_merge([$reportId, $user['organization_id']], $params)
+    );
+}
+
 function transitionReport(int $reportId, string $action, array $user, string $comment): array
 {
     $rules = [
@@ -1064,53 +1234,50 @@ try {
         respond(201, ['id' => $id] + ($warning ? ['warning' => $warning] : []));
     }
 
+    if ($method === 'GET' && preg_match('#^/api/incidents/(\d+)/pdf$#', $path, $match)) {
+        $incidentId = (int)$match[1];
+        $foundIncident = visibleIncident($incidentId, $user);
+        if (!$foundIncident) throw new ApiError(404, 'Einsatz nicht gefunden');
+        $lines = incidentExportLines($foundIncident);
+        foreach (visibleIncidentReports($incidentId, $user) as $report) $lines = array_merge($lines, reportExportLines($report));
+        respondPdf("einsatz-$incidentId-akte.pdf", 'Rollenbezogene Einsatzakte', $lines, $user);
+    }
+
+    if ($method === 'GET' && preg_match('#^/api/reports/(\d+)/pdf$#', $path, $match)) {
+        $reportId = (int)$match[1];
+        $reference = reportReferenceForExport($reportId, $user);
+        if (!$reference) throw new ApiError(404, 'Bericht nicht gefunden');
+        $foundIncident = visibleIncident((int)$reference['incident_id'], $user);
+        if (!$foundIncident) throw new ApiError(404, 'Bericht nicht gefunden');
+        $reports = array_values(array_filter(visibleIncidentReports((int)$reference['incident_id'], $user), fn($report) => $report['id'] === $reportId));
+        if (!$reports) throw new ApiError(404, 'Bericht nicht gefunden');
+        respondPdf(
+            "einsatz-{$reference['incident_id']}-bericht-$reportId.pdf",
+            'Einzelbericht',
+            array_merge(incidentExportLines($foundIncident), reportExportLines($reports[0])),
+            $user
+        );
+    }
+
+    if ($method === 'GET' && preg_match('#^/api/incidents/(\d+)/consolidation/pdf$#', $path, $match)) {
+        assertRole($user, 'wehrleitung');
+        $incidentId = (int)$match[1];
+        $foundIncident = incident($incidentId, $user['organization_id']);
+        if (!$foundIncident) throw new ApiError(404, 'Einsatz nicht gefunden');
+        if ($foundIncident['consolidated_at'] === null) throw new ApiError(409, 'Der Gesamtbericht ist nicht abgeschlossen');
+        $lines = incidentExportLines($foundIncident);
+        exportLine($lines, 'Abgeschlossener Gesamtbericht', true);
+        exportLine($lines, 'Abgeschlossen am: ' . exportDateTime($foundIncident['consolidated_at']) . ' (Europe/Berlin)');
+        foreach (explode("\n", $foundIncident['consolidated_text']) as $paragraph) exportLine($lines, $paragraph);
+        exportLine($lines);
+        foreach (visibleIncidentReports($incidentId, $user) as $report) $lines = array_merge($lines, reportExportLines($report));
+        respondPdf("einsatz-$incidentId-gesamtbericht.pdf", 'Abgeschlossener Gesamtbericht', $lines, $user);
+    }
+
     if ($method === 'GET' && preg_match('#^/api/incidents/(\d+)/reports$#', $path, $match)) {
         $incident = incident((int)$match[1], $user['organization_id']);
         if (!$incident) throw new ApiError(404, 'Einsatz nicht gefunden');
-        [$visibility, $visibilityParams] = reportVisibilitySql($user);
-        $where = " AND $visibility";
-        $params = array_merge([(int)$match[1]], $visibilityParams);
-        $rows = query(
-            "SELECT r.*,u.name author_name,un.name unit_name FROM reports r
-             JOIN users u ON u.id=r.author_id JOIN units un ON un.id=r.unit_id
-             WHERE r.incident_id=?$where ORDER BY r.created_at",
-            $params
-        )->fetchAll();
-        $crew = [];
-        foreach (query(
-            "SELECT rc.report_id reportId,rc.member_id memberId,m.name,rc.vehicle,rc.role
-             FROM report_crew rc JOIN members m ON m.id=rc.member_id JOIN reports r ON r.id=rc.report_id
-             WHERE r.incident_id=?$where ORDER BY rc.report_id,rc.member_id",
-            $params
-        )->fetchAll() as $person) {
-            $reportId = (int)$person['reportId'];
-            unset($person['reportId']);
-            $person['memberId'] = (int)$person['memberId'];
-            $crew[$reportId][] = $person;
-        }
-        $history = [];
-        if ($rows) {
-            $ids = array_map(fn($row) => (int)$row['id'], $rows);
-            $placeholders = implode(',', array_fill(0, count($ids), '?'));
-            foreach (query(
-                "SELECT report_id,from_status,to_status,actor_name,actor_role,comment,
-                 DATE_FORMAT(created_at,'%Y-%m-%dT%H:%i:%sZ') created_at
-                 FROM report_transitions WHERE report_id IN ($placeholders) ORDER BY created_at,id",
-                $ids
-            )->fetchAll() as $transition) {
-                $history[(int)$transition['report_id']][] = $transition;
-            }
-        }
-        foreach ($rows as &$row) {
-            $row['crew'] = json_encode($crew[(int)$row['id']] ?? [], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
-            $row['history'] = $history[(int)$row['id']] ?? [];
-            $row['editable'] = canEditReport($row, $user);
-            $row['duration_minutes'] = $row['ended_at'] && $row['alarmed_at']
-                ? (int)round((strtotime($row['ended_at']) - strtotime($row['alarmed_at'])) / 60)
-                : null;
-            foreach (['id', 'incident_id', 'unit_id', 'author_id', 'report_year'] as $key) if ($row[$key] !== null) $row[$key] = (int)$row[$key];
-        }
-        respond(200, $rows);
+        respond(200, visibleIncidentReports((int)$match[1], $user));
     }
 
     if ($method === 'POST' && preg_match('#^/api/incidents/(\d+)/reports$#', $path, $match)) {

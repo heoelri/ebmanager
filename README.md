@@ -54,6 +54,8 @@ allgemein freigegeben.
 
 Die Wehrführung kann einen Gesamtbericht erst speichern, wenn für jede dem Einsatz zugeordnete Einheit ein Einzelbericht im Status „Prüfung durch Wehrführung“ vorliegt. Eine Rückgabe oder eine später ergänzte Einheitenzuordnung macht eine bestehende Konsolidierung wieder ungültig. Führungskräfte sehen nach ihrer Abgabe den Zeitpunkt, den aktuellen Prüfstatus und den ausdrücklichen Hinweis, dass der Bericht für sie nur noch lesbar ist.
 
+In der Einsatzansicht können alle Rollen ihre sichtbare Einsatzakte und jeden sichtbaren Einzelbericht als PDF herunterladen. Die Wehrführung kann zusätzlich einen abgeschlossenen Gesamtbericht exportieren. Die serverseitig erzeugten PDFs verwenden dieselben Leserechte wie die Webansicht und enthalten auf jeder Seite Exportzeitpunkt, Nutzername, Rolle und Seitenzahl.
+
 ## Fachliche Anpassung
 
 `constants.php` ist die zentrale Quelle für fachlich anpassbare Listen. Dort können `RANKS`, `INCIDENT_TYPES`, `CLASSIFICATIONS` und die zugehörigen `CLASSIFICATION_LABELS` geändert oder um eigene Einträge und Gruppen ergänzt werden. Dienstgrade ordnen ihre gespeicherte Abkürzung der vollständigen Bezeichnung zu, beispielsweise `'BM' => 'Brandmeister'`. Backend und Oberfläche lesen dieselben Werte; eine doppelte Anpassung im JavaScript ist nicht erforderlich.
