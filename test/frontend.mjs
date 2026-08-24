@@ -271,8 +271,15 @@ const inaccessibleNotice = inaccessibleReportNotices([
 assert.match(inaccessibleNotice, /Löschzug Mitte.*Franziska &lt;Roth>.*Berichtsinhalte/s);
 assert.doesNotMatch(inaccessibleNotice, /Nils Weber|Löschgruppe Nord/);
 assert.doesNotMatch(html, /\/release/);
-assert.match(html, /type="\$\{type\}" name="unitIds"/);
-assert.match(html, /role==='einheitsleitung'\?'radio':'checkbox'/);
+const membershipFieldsSource = html.match(/function membershipFields[^\n]+/)?.[0];
+assert(membershipFieldsSource, 'Einheitsauswahl für Benutzer fehlt');
+const membershipFields = new Function('units', 'esc', `${membershipFieldsSource}; return membershipFields;`)(
+  [{id: 1, name: 'Löschzug'}, {id: 2, name: 'Löschgruppe'}],
+  value => String(value)
+);
+assert.match(membershipFields('fuehrungskraft', [2]), /class="unit-picker".*<details><summary>Einheiten auswählen<\/summary>.*type="checkbox".*value="2" checked/s);
+assert.doesNotMatch(membershipFields('einheitsleitung'), /unit-picker|<details>/);
+assert.match(membershipFields('einheitsleitung'), /<legend>Einheit<\/legend>.*type="radio".*required/s);
 assert.match(html, /Alles synchronisieren/);
 assert.match(html, /Fahrzeuge synchronisieren/);
 assert.match(html, /\/resources/);
