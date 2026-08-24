@@ -190,6 +190,16 @@ for (const me of [
   const reportActions = new Function('me', `${reportActionsSource}; return reportActions;`)(me);
   assert.equal(reportActions({id: 1, unit_id: 1, author_id: 1, status: 'wehr_review', editable: false, history: []}, 1), '');
 }
+const existingReportsNoticeSource = html.match(/function existingReportsNotice[^\n]+/)?.[0];
+assert(existingReportsNoticeSource, 'existingReportsNotice fehlt');
+for (const [me, visible] of [
+  [{role: 'wehrleitung', unitIds: []}, true],
+  [{role: 'fuehrungskraft', unitIds: [1, 2]}, true],
+  [{role: 'einheitsleitung', unitIds: [1]}, false]
+]) {
+  const existingReportsNotice = new Function('me', `${existingReportsNoticeSource}; return existingReportsNotice;`)(me);
+  assert.equal(existingReportsNotice().includes('Für alle verfügbaren Einheiten'), visible);
+}
 assert.doesNotMatch(html, /\/release/);
 assert.match(html, /type="\$\{type\}" name="unitIds"/);
 assert.match(html, /role==='einheitsleitung'\?'radio':'checkbox'/);
