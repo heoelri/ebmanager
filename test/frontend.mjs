@@ -188,6 +188,28 @@ assert.match(html, /Der Einsatzbericht ist für Sie jetzt nur noch lesbar/);
 assert.match(html, /jede alarmierte Einheit einen Bericht an die Wehrführung gesendet hat/);
 assert.match(html, /Noch nicht bereit:/);
 assert.match(html, /if\(me\.role==='wehrleitung'&&mayConsolidate\)bindForm\('#consolidate'/);
+const resourceOverviewSource = html.match(/function crewSummary[\s\S]*?(?=\nfunction selectedCrew)/)?.[0];
+assert(resourceOverviewSource, 'Konsolidierte Fahrzeug- und Besatzungsübersicht fehlt');
+const consolidatedResources = new Function(
+  'esc',
+  `${resourceOverviewSource}; return consolidatedResources;`
+)(value => String(value ?? '').replaceAll('<', '&lt;'));
+const resourceOverview = consolidatedResources([
+  {unitId: 2, vehicles: '[{"name":"LF 20"},{"name":"ELW <1>"}]'},
+  {unitId: 1, vehicles: '["MTF"]'}
+], [
+  {unit_id: 2, crew: '[{"name":"Mia","vehicle":"LF 20","role":"maschinist"},{"name":"Noah","vehicle":"","role":"besatzung"}]'},
+  {unit_id: 1, crew: '[]'}
+], [
+  {id: 2, name: 'Löschzug Süd'},
+  {id: 1, name: 'Löschgruppe Nord'}
+]);
+assert(resourceOverview.indexOf('Löschgruppe Nord') < resourceOverview.indexOf('Löschzug Süd'));
+assert(resourceOverview.indexOf('ELW &lt;1>') < resourceOverview.indexOf('LF 20'));
+assert.match(resourceOverview, /MTF: Keine Besatzung/);
+assert.match(resourceOverview, /LF 20: Mia \(Maschinist\)/);
+assert.match(resourceOverview, /Ohne Fahrzeug: Noah \(Besatzung\)/);
+assert.match(html, /<h3>Fahrzeuge und Besatzung<\/h3>\$\{consolidatedResources\(assignments,reports,units\)\}/);
 const authorNoticeSource = html.match(/function authorReportNotice[^\n]+/)?.[0];
 assert(authorNoticeSource, 'authorReportNotice fehlt');
 const authorReportNotice = new Function(
