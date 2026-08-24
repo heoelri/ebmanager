@@ -286,11 +286,15 @@ leader_token='eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
 leader_hash=$(php -r "echo hash('sha256', '$leader_token');")
 force_token='ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
 force_hash=$(php -r "echo hash('sha256', '$force_token');")
+other_force_token='abababababababababababababababababababababababababababababababab'
+other_force_hash=$(php -r "echo hash('sha256', '$other_force_token');")
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) SELECT organization_id,1,'Einheitsleitung Eins','leitung1@example.test',password_hash,'einheitsleitung' FROM users WHERE email='admin@example.test';
     SET @leader_id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@leader_id,1); INSERT INTO sessions(token,user_id,expires_at) VALUES('$leader_hash',@leader_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR);
     INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) SELECT organization_id,1,'Führungskraft Test','fuehrungskraft@example.test',password_hash,'fuehrungskraft' FROM users WHERE email='admin@example.test';
-    SET @force_id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@force_id,1); INSERT INTO sessions(token,user_id,expires_at) VALUES('$force_hash',@force_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR)"
+    SET @force_id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@force_id,1); INSERT INTO sessions(token,user_id,expires_at) VALUES('$force_hash',@force_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR);
+    INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) SELECT organization_id,1,'Weitere Führungskraft','weitere-fuehrungskraft@example.test',password_hash,'fuehrungskraft' FROM users WHERE email='admin@example.test';
+    SET @other_force_id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@other_force_id,1); INSERT INTO sessions(token,user_id,expires_at) VALUES('$other_force_hash',@other_force_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR)"
 test "$(incident_status "$force_token" "$incident_id")" = report_required
 test "$(incident_status "$leader_token" "$incident_id")" = report_required
 
@@ -314,6 +318,7 @@ test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-characte
 test "$(curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_url/api/incidents/$incident_id/reports")" = '[]'
 test "$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$incident_id/reports")" = '[]'
 test "$(incident_status "$force_token" "$incident_id")" = report_required
+test "$(incident_status "$other_force_token" "$incident_id")" = in_progress
 test "$(incident_status "$leader_token" "$incident_id")" = awaiting_report
 
 # Besatzungsmitglieder werden unabhängig von der Einfügereihenfolge stabil sortiert ausgegeben.

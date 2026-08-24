@@ -983,7 +983,7 @@ try {
         foreach (query(
             "SELECT iu.incident_id,iu.unit_id unitId,iu.vehicles,u.name unitName,
              r.id IS NOT NULL hasReport,r.status reportStatus,r.author_id reportAuthorId
-             FROM incident_units iu JOIN incidents i ON i.id=iu.incident_id JOIN units u ON u.id=iu.unit_id
+             FROM incident_units iu JOIN incidents i ON i.id=iu.incident_id JOIN units u ON u.id=iu.unit_id AND u.organization_id=i.organization_id
              LEFT JOIN reports r ON r.incident_id=iu.incident_id AND r.unit_id=iu.unit_id
              WHERE $where ORDER BY iu.incident_id,iu.unit_id",
             $params

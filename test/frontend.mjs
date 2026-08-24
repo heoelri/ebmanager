@@ -50,12 +50,14 @@ assert.match(css, /\.incident-status\s*\{[\s\S]*?border-inline-start:\s*4px soli
 
 const filterOptionsSource = html.match(/function incidentFilterOptions[^\n]+/)?.[0];
 assert(filterOptionsSource, 'incidentFilterOptions fehlt');
-const incidentFilterOptions = new Function('esc', `${filterOptionsSource}; return incidentFilterOptions;`)(value => String(value));
+const filterLabelsSource = html.match(/const incidentStatusFilterLabels=\{[^\n]+/)?.[0];
+assert(filterLabelsSource, 'incidentStatusFilterLabels fehlt');
+const incidentFilterOptions = new Function('esc', `${filterLabelsSource};${filterOptionsSource}; return incidentFilterOptions;`)(value => String(value));
 assert.equal(incidentFilterOptions([
-  {reportStatus: {key: 'report_required', label: 'Bericht erforderlich: Löschzug'}},
-  {reportStatus: {key: 'submitted', label: 'Bericht abgegeben'}},
-  {reportStatus: {key: 'report_required', label: 'Bericht erforderlich: Löschgruppe'}}
-]), '<option value="report_required">Bericht erforderlich</option><option value="submitted">Bericht abgegeben</option>');
+  {reportStatus: {key: 'reports_pending', label: 'Bericht ausstehend: Löschzug'}},
+  {reportStatus: {key: 'submitted', label: 'An Wehrführung übergeben'}},
+  {reportStatus: {key: 'reports_pending', label: 'Berichte ausstehend: Löschzug, Löschgruppe'}}
+]), '<option value="reports_pending">Berichte ausstehend</option><option value="submitted">Bericht abgegeben</option>');
 
 const filterSource = html.match(/function filterIncidents[^\n]+/)?.[0];
 assert(filterSource, 'filterIncidents fehlt');
