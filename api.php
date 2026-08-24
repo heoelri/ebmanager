@@ -981,9 +981,10 @@ try {
         )->fetchAll();
         $assignments = [];
         foreach (query(
-            "SELECT iu.incident_id,iu.unit_id unitId,iu.vehicles,
-             EXISTS(SELECT 1 FROM reports r WHERE r.incident_id=iu.incident_id AND r.unit_id=iu.unit_id) hasReport
-             FROM incident_units iu JOIN incidents i ON i.id=iu.incident_id
+            "SELECT iu.incident_id,iu.unit_id unitId,iu.vehicles,u.name unitName,
+             r.id IS NOT NULL hasReport,r.status reportStatus,r.author_id reportAuthorId
+             FROM incident_units iu JOIN incidents i ON i.id=iu.incident_id JOIN units u ON u.id=iu.unit_id AND u.organization_id=i.organization_id
+             LEFT JOIN reports r ON r.incident_id=iu.incident_id AND r.unit_id=iu.unit_id
              WHERE $where ORDER BY iu.incident_id,iu.unit_id",
             $params
         )->fetchAll() as $assignment) {
@@ -991,10 +992,48 @@ try {
             unset($assignment['incident_id']);
             $assignment['unitId'] = (int)$assignment['unitId'];
             $assignment['hasReport'] = (int)$assignment['hasReport'];
+            if ($assignment['reportAuthorId'] !== null) $assignment['reportAuthorId'] = (int)$assignment['reportAuthorId'];
             $assignments[$incidentId][] = $assignment;
         }
         foreach ($rows as &$row) {
-            $row['assignments'] = json_encode($assignments[(int)$row['id']] ?? [], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+            $incidentAssignments = $assignments[(int)$row['id']] ?? [];
+            $relevant = $user['role'] === 'wehrleitung'
+                ? $incidentAssignments
+                : array_values(array_filter($incidentAssignments, fn($assignment) => in_array($assignment['unitId'], $user['unitIds'], true)));
+            if ($user['role'] === 'wehrleitung') {
+                $pending = array_values(array_filter($relevant, fn($assignment) => $assignment['reportStatus'] !== 'wehr_review'));
+                $pendingUnits = array_column($pending, 'unitName');
+                $row['reportStatus'] = $row['consolidated_at'] !== null
+                    ? ['key' => 'completed', 'label' => 'Abgeschlossen', 'pendingUnits' => []]
+                    : ($pending
+                        ? ['key' => 'reports_pending', 'label' => (count($pending) === 1 ? 'Bericht ausstehend: ' : 'Berichte ausstehend: ') . implode(', ', $pendingUnits), 'pendingUnits' => $pendingUnits]
+                        : ['key' => 'ready', 'label' => 'Bereit zur Konsolidierung', 'pendingUnits' => []]);
+            } elseif ($user['role'] === 'einheitsleitung') {
+                $status = $relevant[0]['reportStatus'] ?? null;
+                $row['reportStatus'] = match ($status) {
+                    'author_draft' => ['key' => 'awaiting_report', 'label' => 'Bericht der Führungskraft ausstehend', 'pendingUnits' => []],
+                    'unit_review' => ['key' => 'review_required', 'label' => 'Prüfung erforderlich', 'pendingUnits' => []],
+                    'wehr_review' => ['key' => 'submitted', 'label' => 'An Wehrführung übergeben', 'pendingUnits' => []],
+                    default => ['key' => 'report_required', 'label' => 'Bericht erforderlich', 'pendingUnits' => []],
+                };
+            } else {
+                $required = array_values(array_filter($relevant, fn($assignment) =>
+                    !$assignment['hasReport']
+                    || ($assignment['reportStatus'] === 'author_draft' && $assignment['reportAuthorId'] === $user['id'])
+                ));
+                $inProgress = array_values(array_filter($relevant, fn($assignment) =>
+                    $assignment['reportStatus'] === 'author_draft' && $assignment['reportAuthorId'] !== $user['id']
+                ));
+                $names = array_column($required ?: $inProgress, 'unitName');
+                $row['reportStatus'] = $required
+                    ? ['key' => 'report_required', 'label' => 'Bericht erforderlich: ' . implode(', ', $names), 'pendingUnits' => $names]
+                    : ($inProgress
+                        ? ['key' => 'in_progress', 'label' => 'Bericht in Bearbeitung: ' . implode(', ', $names), 'pendingUnits' => []]
+                        : ['key' => 'submitted', 'label' => 'Bericht abgegeben', 'pendingUnits' => []]);
+            }
+            foreach ($incidentAssignments as &$assignment) unset($assignment['unitName'], $assignment['reportStatus'], $assignment['reportAuthorId']);
+            unset($assignment);
+            $row['assignments'] = json_encode($incidentAssignments, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
             foreach (['id', 'organization_id', 'divera_date'] as $key) if ($row[$key] !== null) $row[$key] = (int)$row[$key];
             foreach (['lat', 'lng'] as $key) if ($row[$key] !== null) $row[$key] = (float)$row[$key];
         }

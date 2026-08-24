@@ -15,6 +15,10 @@ mysql_tls_args=()
 divera_log="${TMPDIR:-/tmp}/divera-requests-$$.log"
 [[ "${DIVERA_API_BASE_URL:-}" == 'http://divera:8090' ]] && divera_log=/tmp/divera/requests.log
 divera_pid=''
+incident_status() {
+  curl --insecure --silent --fail --cookie "$session_cookie=$1" "$base_url/api/incidents" |
+    INCIDENT_ID="$2" php -r '$items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $matches=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID"))); assert(count($matches)===1); echo $matches[0]["reportStatus"]["key"];'
+}
 if mysql --help 2>&1 | grep -- '--ssl-mode' >/dev/null; then
   mysql_tls_args=(--ssl-mode=DISABLED)
 elif mysql --help 2>&1 | grep -- '--skip-ssl' >/dev/null; then
@@ -263,7 +267,7 @@ incident_id=$(curl --insecure --silent --fail \
   "$base_url/api/incidents" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
-  SECOND_UNIT_ID="$second_unit_id" php -r '$incidents=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $assignments=json_decode($incidents[0]["assignments"],true,512,JSON_THROW_ON_ERROR); $expected=[1,(int)getenv("SECOND_UNIT_ID")]; sort($expected); assert(array_column($assignments,"unitId")===$expected);'
+  SECOND_UNIT_ID="$second_unit_id" php -r '$incidents=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $assignments=json_decode($incidents[0]["assignments"],true,512,JSON_THROW_ON_ERROR); $expected=[1,(int)getenv("SECOND_UNIT_ID")]; sort($expected); assert(array_column($assignments,"unitId")===$expected); assert($incidents[0]["reportStatus"]["key"]==="reports_pending"); assert(count($incidents[0]["reportStatus"]["pendingUnits"])===2);'
 
 # Der letzte erfolgreiche DIVERA-Import wird je Einheit als UTC-Zeitpunkt ausgegeben.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
@@ -282,11 +286,17 @@ leader_token='eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
 leader_hash=$(php -r "echo hash('sha256', '$leader_token');")
 force_token='ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
 force_hash=$(php -r "echo hash('sha256', '$force_token');")
+other_force_token='abababababababababababababababababababababababababababababababab'
+other_force_hash=$(php -r "echo hash('sha256', '$other_force_token');")
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) SELECT organization_id,1,'Einheitsleitung Eins','leitung1@example.test',password_hash,'einheitsleitung' FROM users WHERE email='admin@example.test';
     SET @leader_id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@leader_id,1); INSERT INTO sessions(token,user_id,expires_at) VALUES('$leader_hash',@leader_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR);
     INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) SELECT organization_id,1,'Führungskraft Test','fuehrungskraft@example.test',password_hash,'fuehrungskraft' FROM users WHERE email='admin@example.test';
-    SET @force_id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@force_id,1); INSERT INTO sessions(token,user_id,expires_at) VALUES('$force_hash',@force_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR)"
+    SET @force_id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@force_id,1); INSERT INTO sessions(token,user_id,expires_at) VALUES('$force_hash',@force_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR);
+    INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) SELECT organization_id,1,'Weitere Führungskraft','weitere-fuehrungskraft@example.test',password_hash,'fuehrungskraft' FROM users WHERE email='admin@example.test';
+    SET @other_force_id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@other_force_id,1); INSERT INTO sessions(token,user_id,expires_at) VALUES('$other_force_hash',@other_force_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR)"
+test "$(incident_status "$force_token" "$incident_id")" = report_required
+test "$(incident_status "$leader_token" "$incident_id")" = report_required
 
 # Berichte starten rollenabhängig, bleiben bis zur jeweiligen Übergabe verborgen und speichern die Fachdaten.
 report_payload='{"unitId":1,"foreign_id":"manipuliert","divera_id":"manipuliert","runningNumber":"69/2026","damagedParty":{"name":"Max Mustermann","phone":"02733 123","address":"Musterweg 1"},"damagingParty":{"name":"Erika Beispiel","phone":"","address":"Beispielweg 2"},"incidentCommand":{"rank":"BOI","name":"D. Gerlach","additionalRank":"BI","additionalName":"A. Busch"},"narrative":"Ursprünglich","departedAt":"2026-08-22T18:05:00.000Z","arrivedAt":"2026-08-22T18:10:00.000Z","endedAt":"2026-08-22T19:00:00.000Z","incidentType":"Technische Hilfe","classification":{"site":[],"cause":[],"technical":[]},"crew":[]}'
@@ -307,6 +317,9 @@ test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-characte
   einsatzberichte --execute="SELECT CONCAT(COALESCE(foreign_id,''),'|',COALESCE(divera_id,'')) FROM incidents WHERE id=$incident_id")" = '|'
 test "$(curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_url/api/incidents/$incident_id/reports")" = '[]'
 test "$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$incident_id/reports")" = '[]'
+test "$(incident_status "$force_token" "$incident_id")" = report_required
+test "$(incident_status "$other_force_token" "$incident_id")" = in_progress
+test "$(incident_status "$leader_token" "$incident_id")" = awaiting_report
 
 # Besatzungsmitglieder werden unabhängig von der Einfügereihenfolge stabil sortiert ausgegeben.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
@@ -345,6 +358,8 @@ curl --insecure --silent --fail \
   --header 'Content-Type: application/json' \
   --request POST --data '{}' \
   "$base_url/api/reports/$report_id/submit-to-unit" >/dev/null
+test "$(incident_status "$force_token" "$incident_id")" = submitted
+test "$(incident_status "$leader_token" "$incident_id")" = review_required
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" \
   --header 'Content-Type: application/json' \
@@ -379,16 +394,26 @@ curl --insecure --silent --fail \
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request POST --data '{}' \
   "$base_url/api/reports/$report_id/submit-to-command" >/dev/null
+test "$(incident_status "$force_token" "$incident_id")" = submitted
+test "$(incident_status "$leader_token" "$incident_id")" = submitted
+test "$(incident_status "$session_token" "$incident_id")" = reports_pending
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' \
   --data "${report_payload/\"unitId\":1/\"unitId\":$second_unit_id}" \
   "$base_url/api/incidents/$incident_id/reports" >/dev/null
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
+  INCIDENT_ID="$incident_id" php -r '$items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $incident=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")))[0]; assert($incident["reportStatus"]["key"]==="ready");'
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request PUT \
   --data '{"text":"Konsolidiert"}' "$base_url/api/incidents/$incident_id/consolidation" >/dev/null
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
+  INCIDENT_ID="$incident_id" php -r '$items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $incident=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")))[0]; assert($incident["reportStatus"]["key"]==="completed");'
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
   --data '{"comment":"Bitte durch die Einheit prüfen"}' "$base_url/api/reports/$report_id/return-to-unit" >/dev/null
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
+  INCIDENT_ID="$incident_id" php -r '$items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $incident=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")))[0]; assert($incident["reportStatus"]["key"]==="reports_pending"); assert($incident["reportStatus"]["pendingUnits"]===["Löschzug"]);'
+test "$(incident_status "$leader_token" "$incident_id")" = review_required
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT CONCAT(status,'|',consolidated_at IS NULL,'|',(SELECT COUNT(*) FROM report_transitions WHERE report_id=$report_id_int)) FROM reports JOIN incidents ON incidents.id=reports.incident_id WHERE reports.id=$report_id_int")" = 'unit_review|1|6'
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
