@@ -59,6 +59,9 @@ assert.equal(incidentFilterOptions([
   {reportStatus: {key: 'reports_pending', label: 'Berichte ausstehend: Löschzug, Löschgruppe'}},
   {reportStatus: {key: 'report_exists', label: 'Einsatzbericht vorhanden: Löschzug'}}
 ]), '<option value="reports_pending">Berichte ausstehend</option><option value="submitted">Bericht abgegeben</option><option value="report_exists">Einsatzbericht vorhanden</option>');
+assert.match(incidentFilterOptions([{reportStatus: {key: 'reports_pending'}}], 'ready'), /value="ready">Bereit zur Konsolidierung/);
+assert.doesNotMatch(incidentFilterOptions([], 'unknown'), /unknown/);
+assert.doesNotMatch(incidentFilterOptions([], 'toString'), /toString/);
 
 const filterSource = html.match(/function filterIncidents[^\n]+/)?.[0];
 assert(filterSource, 'filterIncidents fehlt');
@@ -72,7 +75,7 @@ const noFilteredIncidents = {hidden: true};
 const storedFilters = new Map();
 const incidentFilterPreference = new Function('localStorage', 'me', `${filterPreferenceSource}; return incidentFilterPreference;`)(
   {getItem: key => storedFilters.get(key), setItem: (key, value) => storedFilters.set(key, value)},
-  {id: 42}
+  {id: 42, role: 'wehrleitung'}
 );
 const filterIncidents = new Function('document', 'incidentFilterPreference', `${filterSource}; return filterIncidents;`)(
   {querySelectorAll: () => cards, querySelector: () => noFilteredIncidents},
@@ -81,19 +84,21 @@ const filterIncidents = new Function('document', 'incidentFilterPreference', `${
 filterIncidents('submitted');
 assert.deepEqual(cards.map(card => card.hidden), [true, false]);
 assert.equal(noFilteredIncidents.hidden, true);
-assert.equal(storedFilters.get('incidentStatusFilter:42'), 'submitted');
+assert.equal(storedFilters.get('incidentStatusFilter:42:wehrleitung'), 'submitted');
 filterIncidents('ready');
 assert.equal(noFilteredIncidents.hidden, false);
 filterIncidents('');
 assert.deepEqual(cards.map(card => card.hidden), [false, false]);
 const blockedPreference = new Function('localStorage', 'me', `${filterPreferenceSource}; return incidentFilterPreference;`)(
   {getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); }},
-  {id: 42}
+  {id: 42, role: 'wehrleitung'}
 );
 assert.equal(blockedPreference(), '');
 assert.equal(blockedPreference('submitted'), 'submitted');
 assert.match(html, /<label>Status filtern<select id="incidentStatusFilter"/);
-assert.match(html, /statusFilter\.value=incidentFilterPreference\(\);filterIncidents\(statusFilter\.value\)/);
+assert.match(html, /const selectedStatus=incidentFilterPreference\(\)/);
+assert.match(html, /incidentFilterOptions\(incidents,selectedStatus\)/);
+assert.match(html, /statusFilter\.value=selectedStatus;filterIncidents\(statusFilter\.value\)/);
 
 const reportFieldsSource = html.match(/function contactFields[\s\S]*?(?=\nfunction bindDuration)/)?.[0];
 assert(reportFieldsSource, 'Berichtsdetails fehlen');
