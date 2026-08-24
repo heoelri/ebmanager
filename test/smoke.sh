@@ -169,11 +169,21 @@ if [[ "$base_url" == https://* ]]; then
 fi
 
 # Wiederholte Anmeldungen erscheinen vollständig und absteigend sortiert in der Login-Historie.
+weak_password_hash=$(php -r 'echo password_hash("geheimes-passwort", PASSWORD_BCRYPT, ["cost"=>4]);')
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="UPDATE users SET password_hash='$weak_password_hash' WHERE email='admin@example.test'"
 curl --insecure --silent --fail --cookie-jar second-login-cookies.txt \
   --header 'Content-Type: application/json' \
   --header "Origin: $base_url" \
   --data '{"email":"admin@example.test","password":"geheimes-passwort"}' \
   "$base_url/api/login" | grep --quiet '"ok":true'
+current_password_hash=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT password_hash FROM users WHERE email='admin@example.test'")
+WEAK_HASH="$weak_password_hash" CURRENT_HASH="$current_password_hash" php -r '
+  assert(getenv("CURRENT_HASH")!==getenv("WEAK_HASH"));
+  assert(password_verify("geheimes-passwort",getenv("CURRENT_HASH")));
+  assert(!password_needs_rehash(getenv("CURRENT_HASH"),PASSWORD_DEFAULT));
+'
 users_json=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/users")
 printf '%s' "$users_json" | php -r '$users=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($users[0]["loginHistory"])===2); assert($users[0]["loginHistory"][0]>=$users[0]["loginHistory"][1]);'
 rm -f second-login-cookies.txt
@@ -325,6 +335,19 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
     SET @force_id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@force_id,1); INSERT INTO sessions(token,user_id,expires_at) VALUES('$force_hash',@force_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR);
     INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) SELECT organization_id,1,'Weitere Führungskraft','weitere-fuehrungskraft@example.test',password_hash,'fuehrungskraft' FROM users WHERE email='admin@example.test';
     SET @other_force_id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@other_force_id,1); INSERT INTO sessions(token,user_id,expires_at) VALUES('$other_force_hash',@other_force_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR)"
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="UPDATE incident_units SET vehicles=JSON_ARRAY(JSON_OBJECT('id','foreign-secret','name','Fremdfahrzeug','own',TRUE)) WHERE incident_id=$incident_id AND unit_id=$second_unit_id"
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units" |
+  php -r '$units=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(array_column($units,"id")===[1]);'
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents" |
+  INCIDENT_ID="$incident_id" php -r '
+    $items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+    $incident=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")))[0];
+    $assignments=json_decode($incident["assignments"],true,512,JSON_THROW_ON_ERROR);
+    assert(array_column($assignments,"unitId")===[1]);
+    assert($incident["units"]==="Löschzug");
+    assert(!str_contains(json_encode($incident),"Fremdfahrzeug"));
+  '
 test "$(incident_status "$force_token" "$incident_id")" = report_required
 test "$(incident_status "$leader_token" "$incident_id")" = report_required
 
@@ -351,7 +374,7 @@ test "$(incident_status "$force_token" "$incident_id")" = report_required
 test "$(incident_status "$other_force_token" "$incident_id")" = in_progress
 test "$(incident_status "$leader_token" "$incident_id")" = awaiting_report
 assert_pdf "$force_token" "/api/reports/$report_id/pdf" 'Einzelbericht|Führungskraft Test|Rolle: Führungskraft|Ursprünglich|Max Mustermann'
-assert_pdf "$force_token" "/api/incidents/$incident_id/pdf" 'Rollenbezogene Einsatzakte|Führungskraft Test|Rolle: Führungskraft|Ursprünglich'
+assert_pdf "$force_token" "/api/incidents/$incident_id/pdf" 'Rollenbezogene Einsatzakte|Führungskraft Test|Rolle: Führungskraft|Ursprünglich' 'Fremdfahrzeug'
 assert_pdf "$other_force_token" "/api/incidents/$incident_id/pdf" 'Rollenbezogene Einsatzakte|Weitere Führungskraft|Rolle: Führungskraft|Testeinsatz' 'Ursprünglich'
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$leader_token" "$base_url/api/reports/$report_id/pdf")" = 404
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/reports/$report_id/pdf")" = 404

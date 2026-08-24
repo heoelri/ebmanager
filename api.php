@@ -345,11 +345,17 @@ function exportLine(array &$lines, string $text = '', bool $bold = false): void
     $lines[] = compact('text', 'bold');
 }
 
-function incidentExportLines(array $incident): array
+function incidentExportLines(array $incident, array $user): array
 {
+    $where = $user['role'] === 'wehrleitung'
+        ? ''
+        : ' AND EXISTS(SELECT 1 FROM user_units uu WHERE uu.user_id=? AND uu.unit_id=iu.unit_id)';
+    $params = [$incident['organization_id'], $incident['id']];
+    if ($user['role'] !== 'wehrleitung') $params[] = $user['id'];
     $assignments = query(
-        'SELECT u.name,iu.vehicles FROM incident_units iu JOIN units u ON u.id=iu.unit_id AND u.organization_id=? WHERE iu.incident_id=? ORDER BY u.name',
-        [$incident['organization_id'], $incident['id']]
+        "SELECT u.name,iu.vehicles FROM incident_units iu JOIN units u ON u.id=iu.unit_id AND u.organization_id=?
+         WHERE iu.incident_id=?$where ORDER BY u.name",
+        $params
     )->fetchAll();
     $lines = [];
     exportLine($lines, 'Einsatzdaten', true);
@@ -868,13 +874,20 @@ try {
 
     if ($method === 'POST' && $path === '/api/login') {
         $data = input();
+        $password = (string)($data['password'] ?? '');
         $login = one('SELECT * FROM users WHERE email=?', [required($data['email'] ?? null, 'E-Mail', 320)]);
-        if (!$login || !password_verify((string)($data['password'] ?? ''), $login['password_hash'])) {
+        if (!$login || !password_verify($password, $login['password_hash'])) {
             throw new ApiError(401, 'E-Mail oder Passwort falsch');
         }
+        $newHash = password_needs_rehash($login['password_hash'], PASSWORD_DEFAULT)
+            ? password_hash($password, PASSWORD_DEFAULT)
+            : null;
         $token = bin2hex(random_bytes(32));
         $cookieName = sessionCookieName();
-        transaction(function () use ($token, $login, $cookieName) {
+        transaction(function () use ($token, $login, $cookieName, $newHash) {
+            if ($newHash !== null) {
+                query('UPDATE users SET password_hash=? WHERE id=? AND password_hash=?', [$newHash, $login['id'], $login['password_hash']]);
+            }
             query('DELETE FROM sessions WHERE expires_at<=UTC_TIMESTAMP()');
             if (preg_match('/^[a-f0-9]{64}$/', $_COOKIE[$cookieName] ?? '')) query('DELETE FROM sessions WHERE token=?', [hash('sha256', $_COOKIE[$cookieName])]);
             query('INSERT INTO sessions(token,user_id,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 12 HOUR)', [hash('sha256', $token), $login['id']]);
@@ -1019,12 +1032,16 @@ try {
     }
 
     if ($method === 'GET' && $path === '/api/units') {
+        $where = $user['role'] === 'wehrleitung'
+            ? 'u.organization_id=?'
+            : 'u.organization_id=? AND EXISTS(SELECT 1 FROM user_units uu WHERE uu.user_id=? AND uu.unit_id=u.id)';
+        $params = $user['role'] === 'wehrleitung' ? [$user['organization_id']] : [$user['organization_id'], $user['id']];
         $rows = query(
             "SELECT u.id,u.name,(u.divera_access_key IS NOT NULL) divera_configured,
              DATE_FORMAT(MAX(di.imported_at),'%Y-%m-%dT%H:%i:%s.000Z') last_divera_import_at
              FROM units u LEFT JOIN divera_imports di ON di.unit_id=u.id
-             WHERE u.organization_id=? GROUP BY u.id,u.name,u.divera_access_key ORDER BY u.name",
-            [$user['organization_id']]
+             WHERE $where GROUP BY u.id,u.name,u.divera_access_key ORDER BY u.name",
+            $params
         )->fetchAll();
         foreach ($rows as &$row) { $row['id'] = (int)$row['id']; $row['divera_configured'] = (int)$row['divera_configured']; }
         respond(200, $rows);
@@ -1144,19 +1161,22 @@ try {
             : 'i.organization_id=? AND EXISTS(SELECT 1 FROM incident_units x JOIN user_units uu ON uu.unit_id=x.unit_id WHERE x.incident_id=i.id AND uu.user_id=?)';
         $params = $user['role'] === 'wehrleitung' ? [$user['organization_id']] : [$user['organization_id'], $user['id']];
         $rows = query(
-            "SELECT i.*,
-             (SELECT GROUP_CONCAT(u.name ORDER BY u.name SEPARATOR ', ') FROM incident_units x JOIN units u ON u.id=x.unit_id WHERE x.incident_id=i.id) units
-             FROM incidents i WHERE $where ORDER BY i.started_at DESC",
+            "SELECT i.* FROM incidents i WHERE $where ORDER BY i.started_at DESC",
             $params
         )->fetchAll();
         $assignments = [];
+        $membershipJoin = $user['role'] === 'wehrleitung'
+            ? ''
+            : 'JOIN user_units visible_uu ON visible_uu.unit_id=iu.unit_id AND visible_uu.user_id=?';
+        $assignmentParams = $user['role'] === 'wehrleitung' ? $params : array_merge([$user['id']], $params);
         foreach (query(
             "SELECT iu.incident_id,iu.unit_id unitId,iu.vehicles,u.name unitName,
              r.id IS NOT NULL hasReport,r.status reportStatus,r.author_id reportAuthorId
              FROM incident_units iu JOIN incidents i ON i.id=iu.incident_id JOIN units u ON u.id=iu.unit_id AND u.organization_id=i.organization_id
+             $membershipJoin
              LEFT JOIN reports r ON r.incident_id=iu.incident_id AND r.unit_id=iu.unit_id
              WHERE $where ORDER BY iu.incident_id,iu.unit_id",
-            $params
+            $assignmentParams
         )->fetchAll() as $assignment) {
             $incidentId = (int)$assignment['incident_id'];
             unset($assignment['incident_id']);
@@ -1165,11 +1185,13 @@ try {
             if ($assignment['reportAuthorId'] !== null) $assignment['reportAuthorId'] = (int)$assignment['reportAuthorId'];
             $assignments[$incidentId][] = $assignment;
         }
-        foreach ($rows as &$row) {
+        foreach ($rows as $index => &$row) {
             $incidentAssignments = $assignments[(int)$row['id']] ?? [];
-            $relevant = $user['role'] === 'wehrleitung'
-                ? $incidentAssignments
-                : array_values(array_filter($incidentAssignments, fn($assignment) => in_array($assignment['unitId'], $user['unitIds'], true)));
+            $relevant = $incidentAssignments;
+            if ($user['role'] !== 'wehrleitung' && !$relevant) {
+                unset($rows[$index]);
+                continue;
+            }
             if ($user['role'] === 'wehrleitung') {
                 $pending = array_values(array_filter($relevant, fn($assignment) => $assignment['reportStatus'] !== 'wehr_review'));
                 $pendingUnits = array_column($pending, 'unitName');
@@ -1201,13 +1223,15 @@ try {
                         ? ['key' => 'in_progress', 'label' => 'Bericht in Bearbeitung: ' . implode(', ', $names), 'pendingUnits' => []]
                         : ['key' => 'submitted', 'label' => 'Bericht abgegeben', 'pendingUnits' => []]);
             }
-            foreach ($incidentAssignments as &$assignment) unset($assignment['unitName'], $assignment['reportStatus'], $assignment['reportAuthorId']);
+            $row['units'] = implode(', ', array_column($relevant, 'unitName'));
+            foreach ($relevant as &$assignment) unset($assignment['unitName'], $assignment['reportStatus'], $assignment['reportAuthorId']);
             unset($assignment);
-            $row['assignments'] = json_encode($incidentAssignments, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+            $row['assignments'] = json_encode($relevant, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
             foreach (['id', 'organization_id', 'divera_date'] as $key) if ($row[$key] !== null) $row[$key] = (int)$row[$key];
             foreach (['lat', 'lng'] as $key) if ($row[$key] !== null) $row[$key] = (float)$row[$key];
         }
-        respond(200, $rows);
+        unset($row);
+        respond(200, array_values($rows));
     }
 
     if ($method === 'POST' && $path === '/api/incidents') {
@@ -1238,7 +1262,7 @@ try {
         $incidentId = (int)$match[1];
         $foundIncident = visibleIncident($incidentId, $user);
         if (!$foundIncident) throw new ApiError(404, 'Einsatz nicht gefunden');
-        $lines = incidentExportLines($foundIncident);
+        $lines = incidentExportLines($foundIncident, $user);
         foreach (visibleIncidentReports($incidentId, $user) as $report) $lines = array_merge($lines, reportExportLines($report));
         respondPdf("einsatz-$incidentId-akte.pdf", 'Rollenbezogene Einsatzakte', $lines, $user);
     }
@@ -1254,7 +1278,7 @@ try {
         respondPdf(
             "einsatz-{$reference['incident_id']}-bericht-$reportId.pdf",
             'Einzelbericht',
-            array_merge(incidentExportLines($foundIncident), reportExportLines($reports[0])),
+            array_merge(incidentExportLines($foundIncident, $user), reportExportLines($reports[0])),
             $user
         );
     }
@@ -1265,7 +1289,7 @@ try {
         $foundIncident = incident($incidentId, $user['organization_id']);
         if (!$foundIncident) throw new ApiError(404, 'Einsatz nicht gefunden');
         if ($foundIncident['consolidated_at'] === null) throw new ApiError(409, 'Der Gesamtbericht ist nicht abgeschlossen');
-        $lines = incidentExportLines($foundIncident);
+        $lines = incidentExportLines($foundIncident, $user);
         exportLine($lines, 'Abgeschlossener Gesamtbericht', true);
         exportLine($lines, 'Abgeschlossen am: ' . exportDateTime($foundIncident['consolidated_at']) . ' (Europe/Berlin)');
         foreach (explode("\n", $foundIncident['consolidated_text']) as $paragraph) exportLine($lines, $paragraph);

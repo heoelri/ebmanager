@@ -19,6 +19,8 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Fixed
 
+- Einheitenlisten, Einsatzzuordnungen, Fahrzeug-Snapshots und PDF-Einsatzakten zeigen Führungskräften und Einheitsführungen nur noch ihre aktuell zugeordneten Einheiten.
+- Erfolgreiche Anmeldungen aktualisieren veraltete Passwort-Hashes auf die aktuellen `PASSWORD_DEFAULT`-Parameter.
 - Der Hinweis auf bereits vorhandene Einheitsberichte erscheint nur noch für die Wehrführung und Nutzer mit Zugriff auf mehrere Einheiten.
 - Der Migrations-Idempotenztest wartet begrenzt auf eine erfolgreiche TCP-Anmeldung am finalen MySQL-Server statt nur auf `mysqladmin ping`, das auch gegen den temporären Initialisierungsserver erfolgreich sein kann.
 
