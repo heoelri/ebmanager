@@ -15,6 +15,83 @@ function respond(int $status, mixed $value): never
     exit;
 }
 
+function pdfEncode(string $text): string
+{
+    if (!function_exists('iconv')) throw new ApiError(503, 'PDF-Export ist auf diesem Server nicht verfügbar');
+    $encoded = iconv('UTF-8', 'Windows-1252//TRANSLIT', str_replace(["\r\n", "\r"], "\n", $text));
+    if ($encoded === false) throw new ApiError(503, 'PDF-Text konnte nicht kodiert werden');
+    return preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $encoded) ?? '';
+}
+
+function pdfEscape(string $text): string
+{
+    return str_replace(['\\', '(', ')'], ['\\\\', '\\(', '\\)'], $text);
+}
+
+function pdfBinary(string $title, array $lines, string $metadata): string
+{
+    $rows = [];
+    foreach ($lines as $line) {
+        $text = pdfEncode((string)($line['text'] ?? ''));
+        $wrapped = $text === '' ? [''] : explode("\n", wordwrap($text, ($line['bold'] ?? false) ? 80 : 95, "\n", true));
+        foreach ($wrapped as $part) $rows[] = ['text' => $part, 'bold' => (bool)($line['bold'] ?? false)];
+    }
+    $pages = array_chunk($rows, 48) ?: [[]];
+    $objects = [
+        1 => '<< /Type /Catalog /Pages 2 0 R >>',
+        2 => '',
+        3 => '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+        4 => '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>'
+    ];
+    $kids = [];
+    foreach ($pages as $index => $pageRows) {
+        $pageObject = 5 + $index * 2;
+        $contentObject = $pageObject + 1;
+        $kids[] = "$pageObject 0 R";
+        $content = "BT /F2 14 Tf 50 805 Td (" . pdfEscape(pdfEncode($title)) . ") Tj ET\n";
+        foreach ($pageRows as $position => $row) {
+            $font = $row['bold'] ? 'F2' : 'F1';
+            $content .= "BT /$font 10 Tf 50 " . (780 - $position * 14) . " Td (" . pdfEscape($row['text']) . ") Tj ET\n";
+        }
+        $footer = pdfEncode($metadata . ' | Seite ' . ($index + 1) . '/' . count($pages));
+        foreach (explode("\n", wordwrap($footer, 115, "\n", true)) as $footerIndex => $part) {
+            $content .= "BT /F1 7 Tf 40 " . (25 + $footerIndex * 9) . " Td (" . pdfEscape($part) . ") Tj ET\n";
+        }
+        $content = rtrim($content, "\n");
+        $objects[$pageObject] = "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents $contentObject 0 R >>";
+        $objects[$contentObject] = "<< /Length " . strlen($content) . " >>\nstream\n$content\n" . 'endstream';
+    }
+    $objects[2] = '<< /Type /Pages /Kids [' . implode(' ', $kids) . '] /Count ' . count($pages) . ' >>';
+    ksort($objects);
+    $pdf = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n";
+    $offsets = [0];
+    foreach ($objects as $number => $object) {
+        $offsets[$number] = strlen($pdf);
+        $pdf .= "$number 0 obj\n$object\nendobj\n";
+    }
+    $xref = strlen($pdf);
+    $pdf .= "xref\n0 " . (count($objects) + 1) . "\n0000000000 65535 f \n";
+    for ($number = 1; $number <= count($objects); $number++) $pdf .= sprintf("%010d 00000 n \n", $offsets[$number]);
+    return $pdf . "trailer\n<< /Size " . (count($objects) + 1) . " /Root 1 0 R >>\nstartxref\n$xref\n%%EOF\n";
+}
+
+function respondPdf(string $filename, string $title, array $lines, array $user): never
+{
+    $role = ['fuehrungskraft' => 'Führungskraft', 'einheitsleitung' => 'Einheitsführung', 'wehrleitung' => 'Wehrführung'][$user['role']] ?? $user['role'];
+    $exportedAt = (new DateTimeImmutable('now', new DateTimeZone('UTC')))
+        ->setTimezone(new DateTimeZone('Europe/Berlin'))
+        ->format('d.m.Y H:i:s');
+    $pdf = pdfBinary($title, $lines, "Exportiert am: $exportedAt Uhr (Europe/Berlin) | Nutzer: {$user['name']} | Rolle: $role");
+    $safeFilename = preg_replace('/[^A-Za-z0-9._-]/', '-', $filename) ?: 'einsatzbericht.pdf';
+    http_response_code(200);
+    header('Content-Type: application/pdf');
+    header('Content-Disposition: attachment; filename="' . $safeFilename . '"');
+    header('Content-Length: ' . strlen($pdf));
+    header('Cache-Control: no-store');
+    echo $pdf;
+    exit;
+}
+
 function config(): array
 {
     static $config;

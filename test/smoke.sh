@@ -19,6 +19,21 @@ incident_status() {
   curl --insecure --silent --fail --cookie "$session_cookie=$1" "$base_url/api/incidents" |
     INCIDENT_ID="$2" php -r '$items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $matches=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID"))); assert(count($matches)===1); echo $matches[0]["reportStatus"]["key"];'
 }
+assert_pdf() {
+  local token=$1 path=$2 expected=$3 forbidden=${4:-}
+  local body="${TMPDIR:-/tmp}/export-$$.pdf" headers="${TMPDIR:-/tmp}/export-$$.headers"
+  curl --insecure --silent --fail --cookie "$session_cookie=$token" --dump-header "$headers" --output "$body" "$base_url$path"
+  grep --ignore-case --quiet '^Content-Type: application/pdf' "$headers"
+  grep --ignore-case --quiet '^Content-Disposition: attachment; filename="[A-Za-z0-9._-]*\.pdf"' "$headers"
+  PDF_BODY="$body" PDF_EXPECTED="$expected" PDF_FORBIDDEN="$forbidden" php -r '
+    $pdf=file_get_contents(getenv("PDF_BODY"));
+    assert(str_starts_with($pdf,"%PDF-1.4"));
+    assert(str_ends_with($pdf,"%%EOF\n"));
+    foreach(explode("|",getenv("PDF_EXPECTED")) as $text) assert(str_contains($pdf,iconv("UTF-8","Windows-1252//TRANSLIT",$text)));
+    if (getenv("PDF_FORBIDDEN")!=="") assert(!str_contains($pdf,iconv("UTF-8","Windows-1252//TRANSLIT",getenv("PDF_FORBIDDEN"))));
+  '
+  rm -f "$body" "$headers"
+}
 if mysql --help 2>&1 | grep -- '--ssl-mode' >/dev/null; then
   mysql_tls_args=(--ssl-mode=DISABLED)
 elif mysql --help 2>&1 | grep -- '--skip-ssl' >/dev/null; then
@@ -35,6 +50,21 @@ DIVERA_API_BASE_URL='http://divera:8090/' php -r 'require "support.php"; if (div
 for invalid_divera_url in 'https://host?x=1' 'https://user@host' 'https://host/path' 'https://host#fragment'; do
   DIVERA_API_BASE_URL="$invalid_divera_url" php -r 'require "support.php"; try { diveraBaseUrl(); exit(1); } catch (ApiError $error) { if ($error->status!==503) exit(1); }'
 done
+
+# Der Renderer erzeugt mehrseitige PDFs mit Umlauten und Exportmetadaten auf jeder Seite.
+php -r '
+  require "support.php";
+  $pdf=pdfBinary("Prüfung",array_fill(0,120,["text"=>"Übung","bold"=>false]),"Nutzer: Prüfer | Rolle: Führungskraft");
+  assert(str_starts_with($pdf,"%PDF-1.4"));
+  assert(str_ends_with($pdf,"%%EOF\n"));
+  assert(preg_match("#/Count ([3-9])#",$pdf));
+  assert(substr_count($pdf,iconv("UTF-8","Windows-1252//TRANSLIT","Nutzer: Prüfer"))>=3);
+  assert(str_contains($pdf,iconv("UTF-8","Windows-1252//TRANSLIT","Übung")));
+  try { @pdfEncode("\xFF"); exit(1); } catch (ApiError $error) {
+    assert($error->status===503);
+    assert($error->getMessage()==="PDF-Text konnte nicht kodiert werden");
+  }
+'
 
 # Das Frontend enthält die erwarteten Accessibility- und DIVERA-Elemente, aber keine duplizierten Fachoptionen.
 php -r '
@@ -320,6 +350,24 @@ test "$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token
 test "$(incident_status "$force_token" "$incident_id")" = report_required
 test "$(incident_status "$other_force_token" "$incident_id")" = report_exists
 test "$(incident_status "$leader_token" "$incident_id")" = awaiting_report
+assert_pdf "$force_token" "/api/reports/$report_id/pdf" 'Einzelbericht|Führungskraft Test|Rolle: Führungskraft|Ursprünglich|Max Mustermann'
+assert_pdf "$force_token" "/api/incidents/$incident_id/pdf" 'Rollenbezogene Einsatzakte|Führungskraft Test|Rolle: Führungskraft|Ursprünglich'
+assert_pdf "$other_force_token" "/api/incidents/$incident_id/pdf" 'Rollenbezogene Einsatzakte|Weitere Führungskraft|Rolle: Führungskraft|Testeinsatz' 'Ursprünglich'
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$leader_token" "$base_url/api/reports/$report_id/pdf")" = 404
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/reports/$report_id/pdf")" = 404
+
+# PDF-Endpunkte geben keine Daten eines fremden Mandanten preis.
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="INSERT INTO organizations(id,name) VALUES(900,'Fremde Wehr');
+    INSERT INTO units(id,organization_id,name) VALUES(900,900,'Fremde Einheit');
+    INSERT INTO users(id,organization_id,unit_id,name,email,password_hash,role) VALUES(900,900,NULL,'Fremde Wehrführung','fremd@example.test','x','wehrleitung');
+    INSERT INTO incidents(id,organization_id,title,started_at,address,message,remark,patient,caller,consolidated_text,consolidated_at) VALUES(900,900,'Fremder Einsatz','2026-08-22T18:00:00.000Z','','','','','','Fremd konsolidiert',UTC_TIMESTAMP());
+    INSERT INTO incident_units(incident_id,unit_id,vehicles) VALUES(900,900,JSON_ARRAY());
+    INSERT INTO reports(id,incident_id,unit_id,author_id,narrative,vehicles,personnel,classification,status) VALUES(900,900,900,900,'Fremder Bericht','','',JSON_OBJECT(),'wehr_review');
+    INSERT INTO report_transitions(report_id,from_status,to_status,actor_id,actor_name,actor_role,created_at) VALUES(900,NULL,'wehr_review',900,'Fremde Wehrführung','wehrleitung',UTC_TIMESTAMP())"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/incidents/900/pdf")" = 404
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/reports/900/pdf")" = 404
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/incidents/900/consolidation/pdf")" = 404
 
 # Besatzungsmitglieder werden unabhängig von der Einfügereihenfolge stabil sortiert ausgegeben.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
@@ -361,6 +409,7 @@ curl --insecure --silent --fail \
 test "$(incident_status "$force_token" "$incident_id")" = submitted
 test "$(incident_status "$other_force_token" "$incident_id")" = report_exists
 test "$(incident_status "$leader_token" "$incident_id")" = review_required
+assert_pdf "$leader_token" "/api/reports/$report_id/pdf" 'Einzelbericht|Einheitsleitung Eins|Rolle: Einheitsführung|Manipuliert'
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" \
   --header 'Content-Type: application/json' \
@@ -398,6 +447,9 @@ curl --insecure --silent --fail \
 test "$(incident_status "$force_token" "$incident_id")" = submitted
 test "$(incident_status "$leader_token" "$incident_id")" = submitted
 test "$(incident_status "$session_token" "$incident_id")" = reports_pending
+assert_pdf "$session_token" "/api/reports/$report_id/pdf" 'Einzelbericht|Admin|Rolle: Wehrführung|Manipuliert'
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$incident_id/consolidation/pdf")" = 403
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$incident_id/consolidation/pdf")" = 409
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' \
   --data "${report_payload/\"unitId\":1/\"unitId\":$second_unit_id}" \
@@ -407,13 +459,17 @@ curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request PUT \
   --data '{"text":"Konsolidiert"}' "$base_url/api/incidents/$incident_id/consolidation" >/dev/null
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="UPDATE incidents SET consolidated_at='2026-08-24 09:00:00' WHERE id=$incident_id"
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
   INCIDENT_ID="$incident_id" php -r '$items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $incident=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")))[0]; assert($incident["reportStatus"]["key"]==="completed");'
+assert_pdf "$session_token" "/api/incidents/$incident_id/consolidation/pdf" 'Abgeschlossener Gesamtbericht|Konsolidiert|Admin|Rolle: Wehrführung|Manipuliert|24.08.2026 11:00 Uhr'
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
   --data '{"comment":"Bitte durch die Einheit prüfen"}' "$base_url/api/reports/$report_id/return-to-unit" >/dev/null
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
   INCIDENT_ID="$incident_id" php -r '$items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $incident=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")))[0]; assert($incident["reportStatus"]["key"]==="reports_pending"); assert($incident["reportStatus"]["pendingUnits"]===["Löschzug"]);'
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$incident_id/consolidation/pdf")" = 409
 test "$(incident_status "$leader_token" "$incident_id")" = review_required
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT CONCAT(status,'|',consolidated_at IS NULL,'|',(SELECT COUNT(*) FROM report_transitions WHERE report_id=$report_id_int)) FROM reports JOIN incidents ON incidents.id=reports.incident_id WHERE reports.id=$report_id_int")" = 'unit_review|1|6'
