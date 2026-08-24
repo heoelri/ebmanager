@@ -188,8 +188,12 @@ for (const me of [
   {id: 2, role: 'einheitsleitung', unitIds: [1]}
 ]) {
   const reportActions = new Function('me', `${reportActionsSource}; return reportActions;`)(me);
-  assert.equal(reportActions({id: 1, unit_id: 1, author_id: 1, status: 'wehr_review', editable: false, history: []}, 1), '');
+  const actions = reportActions({id: 1, unit_id: 1, author_id: 1, status: 'wehr_review', editable: false, history: []}, 1);
+  assert.match(actions, /api\/reports\/1\/pdf/);
+  assert.doesNotMatch(actions, /Bearbeiten/);
 }
+assert.match(html, /api\/incidents\/\$\{id\}\/pdf'">Einsatzakte als PDF/);
+assert.match(html, /item\.consolidated_at\?`<p><button type="button" onclick="location\.href='api\/incidents\/\$\{id\}\/consolidation\/pdf'">Gesamtbericht als PDF/);
 assert.doesNotMatch(html, /\/release/);
 assert.match(html, /type="\$\{type\}" name="unitIds"/);
 assert.match(html, /role==='einheitsleitung'\?'radio':'checkbox'/);
