@@ -226,6 +226,8 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
   --execute="INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) SELECT organization_id,1,'Testkraft','testkraft@example.test',password_hash,'fuehrungskraft' FROM users WHERE email='admin@example.test'; SET @user_id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@user_id,1); INSERT INTO sessions(token,user_id,expires_at) VALUES('$regular_hash',@user_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR)"
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$regular_token" "$base_url/api/system")" = 403
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$regular_token" "$base_url/api/users")" = 403
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="DELETE FROM users WHERE email='testkraft@example.test'"
 
@@ -419,6 +421,11 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" \
   --data "$report_payload" \
   "$base_url/api/incidents/$duplicate_incident_id/reports")" = 409
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --header 'Content-Type: application/json' \
+  --cookie "$session_cookie=$force_token" \
+  --data '{"unitId":1,"runningNumber":"98/2026","damagedParty":{},"damagingParty":{},"incidentCommand":{},"narrative":"Test","departedAt":"2026-08-22T19:30:00.000Z","arrivedAt":"2026-08-22T18:30:00.000Z","endedAt":"2026-08-22T20:00:00.000Z","incidentType":"Technische Hilfe","classification":{"site":[],"cause":[],"technical":[]},"crew":[]}' \
+  "$base_url/api/incidents/$duplicate_incident_id/reports")" = 400
 
 # Die Führungskraft kann ihren Entwurf bearbeiten und genau einmal an die Einheitsführung senden.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
@@ -476,6 +483,12 @@ curl --insecure --silent --fail \
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request POST --data '{}' \
   "$base_url/api/reports/$report_id/submit-to-command" >/dev/null
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$leader_token" \
+  --header 'Content-Type: application/json' \
+  --request PUT \
+  --data "$report_payload" \
+  "$base_url/api/reports/$report_id")" = 403
 test "$(incident_status "$force_token" "$incident_id")" = submitted
 test "$(incident_status "$leader_token" "$incident_id")" = submitted
 test "$(incident_status "$session_token" "$incident_id")" = reports_pending
@@ -605,12 +618,20 @@ curl --insecure --silent --fail \
   --data '{"accessKey":"test"}' "$base_url/api/units/1/divera" >/dev/null
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units/1/divera" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($data["alarms"])===2); assert(count($data["vehicles"])===2);'
+: > "$divera_log"
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units/1/divera?summary=1" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($data["alarms"])===2); assert($data["vehicles"]===[]);'
+test "$(grep --count '^GET /api/v2/alarms$' "$divera_log")" = 1
+! grep --quiet '^GET /api/v2/pull/all$' "$divera_log"
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
   --data '{"accessKey":"verboten"}' "$base_url/api/units/1/divera")" = 403
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request POST \
   "$base_url/api/units/1/divera/members/sync")" = 403
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' \
+  --data '{"id":"kein-solcher-alarm"}' "$base_url/api/units/1/divera/import")" = 404
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' \
   --data '{"id":"alarm-1"}' "$base_url/api/units/1/divera/import" >/dev/null
@@ -662,6 +683,24 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request POST \
   "$base_url/api/units/1/divera/sync")" = 403
 
+# Passwort-Wiederherstellung verrät keine Konten und begrenzt neue Token pro Nutzer.
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --header 'Content-Type: application/json' \
+  --data '{"email":"nicht-registriert@example.test"}' \
+  "$base_url/api/password-reset/request")" = 202
+rate_limit_hash=$(php -r "echo hash('sha256', 'rate-limit');")
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DELETE FROM password_resets WHERE user_id=(SELECT id FROM users WHERE email='admin@example.test');
+    INSERT INTO password_resets(user_id,token_hash,expires_at) SELECT id,'$rate_limit_hash',UTC_TIMESTAMP()+INTERVAL 30 MINUTE FROM users WHERE email='admin@example.test'"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --header 'Content-Type: application/json' \
+  --data '{"email":"admin@example.test"}' \
+  "$base_url/api/password-reset/request")" = 202
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT COUNT(*) FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE u.email='admin@example.test'")" = 1
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DELETE FROM password_resets WHERE user_id=(SELECT id FROM users WHERE email='admin@example.test')"
+
 # Das Zurücksetzen des Passworts verbraucht das Token, beendet bestehende Sitzungen und erlaubt den neuen Login.
 reset_token='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 reset_hash=$(php -r "echo hash('sha256', '$reset_token');")
@@ -689,6 +728,10 @@ curl --insecure --silent --fail \
   --header 'Content-Type: application/json' \
   --data "{\"token\":\"$reset_token\",\"password\":\"neues-geheimes-passwort\"}" \
   "$base_url/api/password-reset/confirm" | grep --quiet '"ok":true'
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --header 'Content-Type: application/json' \
+  --data "{\"token\":\"$reset_token\",\"password\":\"weiteres-geheimes-passwort\"}" \
+  "$base_url/api/password-reset/confirm")" = 400
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$session_token" "$base_url/api/me")" = 401
 curl --insecure --silent --fail \
