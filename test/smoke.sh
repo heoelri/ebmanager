@@ -78,7 +78,7 @@ php -r '
   foreach (["--control-height: 44px",":focus-visible","safe-area-inset-bottom","forced-colors: active"] as $required) {
     if (!str_contains($css,$required)) exit(1);
   }
-  if (str_contains($html,"<style") || str_contains($html,"<script>") || preg_match("/\\son[a-z]+=/i",$frontend) || preg_match("/\\sstyle=\"/i",$frontend)) exit(1);
+  if (str_contains($html,"<style") || preg_match("/<script(?![^>]*\\s+src\\s*=)[^>]*>/i",$html) || preg_match("/\\son[a-z]+=/i",$frontend) || preg_match("/\\sstyle=\"/i",$frontend)) exit(1);
   foreach (["Kleinbrand","Wohngebäude","Menschen in Notlage","Feuerwehrmann-Anwärter"] as $duplicatedOption) {
     if (str_contains($frontend,$duplicatedOption)) exit(1);
   }
