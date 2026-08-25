@@ -64,6 +64,8 @@ assert.match(html, /<fieldset class="unit-picker"><legend>Einheiten<\/legend><de
 assert.match(css, /button,\s*input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\),\s*select\s*\{\s*height:\s*var\(--control-height\)/);
 assert.match(css, /\.unit-picker summary\s*\{[\s\S]*?height:\s*var\(--control-height\)/);
 assert.match(css, /\.unit-picker \.check-grid\s*\{[\s\S]*?position:\s*absolute[\s\S]*?top:\s*calc\(100% \+ \.25rem\)[\s\S]*?inset-inline:\s*0/);
+assert.match(html, /const error=Error\(r\.ok\?'Ungültige Serverantwort':text\);error\.status=r\.status;throw error/);
+assert.match(html, /boxes\.forEach\(box=>box\.setCustomValidity\(count\?'':'Wählen Sie mindestens eine Einheit aus\.'\)\)/);
 assert.match(html, /if\(form\.getAttribute\('aria-busy'\)==='true'\)return/);
 assert.match(html, /e\.submitter\|\|form\.querySelector\('button\[type=submit\],button:not\(\[type\]\)'\)/);
 assert.equal((html.match(/<button class="form-action">(?:Anmelden|Anlegen|Einladung senden|Speichern)<\/button>/g) ?? []).length, 4);
