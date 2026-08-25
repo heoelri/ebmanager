@@ -125,6 +125,12 @@ if ($method !== 'GET') {
     return;
 }
 
+if ($accessKey === 'http-error') {
+    http_response_code(503);
+    echo '{"error":"service unavailable"}';
+    return;
+}
+
 if ($path === '/api/v2/pull/all') {
     if ($malformed) {
         echo '{"data":{"cluster":{"vehicle":[{"id":"","name":"Ungültig"}],"qualification":[],"consumer":[]}}}';

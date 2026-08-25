@@ -608,16 +608,28 @@ function diveraGet(string $url, string $error): array
         'method' => 'GET', 'timeout' => 20, 'ignore_errors' => true,
         'header' => "Accept: application/json\r\nUser-Agent: Einsatzberichte-PHP\r\n"
     ]]);
-    // Convert transport warnings and non-2xx responses into one stable API error.
+    error_clear_last();
     $raw = @file_get_contents($url, false, $context);
+    $warning = (string)(error_get_last()['message'] ?? '');
     $status = 0;
     foreach ($http_response_header ?? [] as $header) if (preg_match('/^HTTP\/\S+\s+(\d+)/', $header, $match)) $status = (int)$match[1];
-    if ($raw === false || $status < 200 || $status >= 300) throw new ApiError(502, $error);
+    if ($raw === false && $status === 0) {
+        $reason = match (true) {
+            str_contains($warning, 'php_network_getaddresses'), str_contains($warning, 'getaddrinfo') => 'Host nicht erreichbar',
+            str_contains($warning, 'Connection refused'), str_contains($warning, 'actively refused') => 'Dienst nicht erreichbar',
+            str_contains($warning, 'timed out'), str_contains($warning, 'timeout') => 'Zeitüberschreitung',
+            str_contains($warning, 'SSL'), str_contains($warning, 'certificate'), str_contains($warning, 'crypto') => 'TLS-Verbindung fehlgeschlagen',
+            default => 'Verbindung fehlgeschlagen'
+        };
+        throw new ApiError(502, "$error: $reason");
+    }
+    if ($status < 200 || $status >= 300) throw new ApiError(502, "$error (HTTP $status)");
     try {
         $data = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
-        return is_array($data) ? $data : [];
+        if (!is_array($data)) throw new JsonException();
+        return $data;
     } catch (JsonException) {
-        throw new ApiError(502, $error);
+        throw new ApiError(502, "$error: ungültige JSON-Antwort");
     }
 }
 
