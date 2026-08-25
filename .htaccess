@@ -17,7 +17,7 @@ RewriteRule ^$ public/index.html [L]
 
 <IfModule mod_headers.c>
   Header always set Strict-Transport-Security "max-age=31536000"
-  Header always set Content-Security-Policy "frame-ancestors 'none'"
+  Header always set Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'"
   Header always set Referrer-Policy "no-referrer"
   Header always set X-Content-Type-Options "nosniff"
 </IfModule>

@@ -1,11 +1,21 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const html = fs.readFileSync('public/index.html', 'utf8');
+const documentHtml = fs.readFileSync('public/index.html', 'utf8');
+const javascript = fs.readFileSync('public/app.js', 'utf8');
+const html = `${documentHtml}\n${javascript}`;
 const css = fs.readFileSync('public/styles.css', 'utf8');
 const deployment = fs.readFileSync('.github/workflows/deploy.yml', 'utf8');
-assert.match(html, /<link rel="stylesheet" href="public\/styles\.css">/);
-assert.doesNotMatch(html, /<style(?:\s|>)/);
+const htaccess = fs.readFileSync('.htaccess', 'utf8');
+assert.match(documentHtml, /<link rel="stylesheet" href="public\/styles\.css">/);
+assert.match(documentHtml, /<script src="public\/app\.js" defer><\/script>/);
+const inlineScriptTag = /<script(?![^>]*\s+src\s*=)[^>]*>/i;
+assert.doesNotMatch(documentHtml, inlineScriptTag);
+assert.match('<script type="module">', inlineScriptTag);
+assert.match('<script nonce="test">', inlineScriptTag);
+assert.doesNotMatch('<script defer src="public/app.js">', inlineScriptTag);
+assert.doesNotMatch(html, /\son[a-z]+=/);
+assert.doesNotMatch(documentHtml, /<style(?:\s|>)/);
 assert.doesNotMatch(html, /\sstyle="/);
 assert.match(css, /--control-height:\s*44px/);
 assert.match(css, /font-size:\s*1rem/);
@@ -13,6 +23,9 @@ assert.match(css, /env\(safe-area-inset-bottom\)/);
 assert.match(css, /@media \(forced-colors: active\)/);
 assert.match(css, /@media \(forced-colors: active\)[\s\S]*?\.error\s*\{[\s\S]*?border-inline-start-width:\s*4px/);
 assert.match(deployment, /put "public\/styles\.css" "public\/styles\.css"/);
+assert.match(deployment, /put "public\/app\.js" "public\/app\.js"/);
+assert.match(htaccess, /Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'"/);
+assert.match(javascript, /document\.addEventListener\('click'/);
 
 const apiSource = html.match(/async function api[^\n]+/)?.[0];
 assert(apiSource, 'API-Helfer fehlt');
@@ -34,7 +47,7 @@ assert(resetPasswordSource.indexOf('autocomplete="username"') < resetPasswordSou
 assert.match(resetPasswordSource, /name="username" type="email" autocomplete="username"[^>]+readonly/);
 assert.match(resetPasswordSource, /catch\(error\)\{history\.replaceState\(\{\},'',location\.pathname\)/);
 assert.match(resetPasswordSource, /Link nicht mehr gültig/);
-assert.match(resetPasswordSource, /onclick="forgotPassword\(\)">Neuen Link anfordern/);
+assert.match(resetPasswordSource, /data-action="forgotPassword">Neuen Link anfordern/);
 assert.match(html, /fragment\.get\('invite'\)/);
 assert.match(html, /fragment\.get\('reset'\)/);
 
@@ -61,8 +74,8 @@ for (const label of ['Bericht erforderlich', 'Prüfung erforderlich', 'Bereit zu
 }
 assert.match(css, /\.incident-status\s*\{[\s\S]*?border-inline-start:\s*4px solid/);
 assert.match(html, /<fieldset class="unit-picker"><legend>Einheiten<\/legend><details><summary>Einheiten auswählen<\/summary><div class="check-grid">/);
-assert.match(css, /button,\s*input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\),\s*select\s*\{\s*height:\s*var\(--control-height\)/);
-assert.match(css, /\.unit-picker summary\s*\{[\s\S]*?height:\s*var\(--control-height\)/);
+assert.match(css, /button,\s*input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\),\s*select\s*\{\s*min-height:\s*var\(--control-height\)/);
+assert.match(css, /\.unit-picker summary\s*\{[\s\S]*?min-height:\s*var\(--control-height\)/);
 assert.match(css, /\.unit-picker \.check-grid\s*\{[\s\S]*?position:\s*absolute[\s\S]*?top:\s*calc\(100% \+ \.25rem\)[\s\S]*?inset-inline:\s*0/);
 assert.match(html, /const error=Error\(r\.ok\?'Ungültige Serverantwort':text\);error\.status=r\.status;throw error/);
 assert.match(html, /boxes\.forEach\(box=>box\.setCustomValidity\(count\?'':'Wählen Sie mindestens eine Einheit aus\.'\)\)/);
@@ -125,7 +138,7 @@ assert.equal(blockedPreference('submitted'), 'submitted');
 assert.match(html, /<label>Status filtern<select id="incidentStatusFilter"/);
 assert.match(html, /const selectedStatus=incidentFilterPreference\(\)/);
 assert.match(html, /incidentFilterOptions\(incidents,selectedStatus\)/);
-assert.match(html, /statusFilter\.value=selectedStatus;filterIncidents\(statusFilter\.value\)/);
+assert.match(html, /statusFilter\.value=selectedStatus;statusFilter\.addEventListener\('change',\(\)=>filterIncidents\(statusFilter\.value\)\);filterIncidents\(statusFilter\.value\)/);
 
 const reportFieldsSource = html.match(/function contactFields[\s\S]*?(?=\nfunction bindDuration)/)?.[0];
 assert(reportFieldsSource, 'Berichtsdetails fehlen');
@@ -197,8 +210,8 @@ const editReportSource = html.match(/async function editReport[^\n]+/)?.[0];
 assert(editReportSource, 'editReport fehlt');
 assert.match(editReportSource, /<button type="submit" disabled>Speichern<\/button>/);
 assert(editReportSource.indexOf("bindForm('#edit'") < editReportSource.indexOf("await loadReportCrew(form,'#editCrew'"));
-assert.match(html, /onclick="editReport\(\$\{report\.id\},this\)"/);
-assert.match(html, /onclick="editUser\(\$\{u\.id\},this\)"/);
+assert.match(html, /data-action="editReport" data-id="\$\{report\.id\}"/);
+assert.match(html, /data-action="editUser" data-id="\$\{u\.id\}"/);
 assert.match(html, /author_draft:'Entwurf der Führungskraft'/);
 assert.match(html, /unit_review:'Prüfung durch Einheitsführung'/);
 assert.match(html, /wehr_review:'Prüfung durch Wehrführung'/);
@@ -262,8 +275,8 @@ for (const me of [
   assert.match(actions, /api\/reports\/1\/pdf/);
   assert.doesNotMatch(actions, /Bearbeiten/);
 }
-assert.match(html, /api\/incidents\/\$\{id\}\/pdf'">Einsatzakte als PDF/);
-assert.match(html, /item\.consolidated_at\?`<p><button type="button" onclick="location\.href='api\/incidents\/\$\{id\}\/consolidation\/pdf'">Gesamtbericht als PDF/);
+assert.match(html, /data-action="download" data-href="api\/incidents\/\$\{id\}\/pdf">Einsatzakte als PDF/);
+assert.match(html, /item\.consolidated_at\?`<p><button type="button" data-action="download" data-href="api\/incidents\/\$\{id\}\/consolidation\/pdf">Gesamtbericht als PDF/);
 const existingReportsNoticeSource = html.match(/function existingReportsNotice[^\n]+/)?.[0];
 assert(existingReportsNoticeSource, 'existingReportsNotice fehlt');
 for (const [me, visible] of [
@@ -300,6 +313,12 @@ const membershipFields = new Function('units', 'esc', `${membershipFieldsSource}
 assert.match(membershipFields('fuehrungskraft', [2]), /class="unit-picker".*<details><summary>Einheiten auswählen<\/summary>.*type="checkbox".*value="2" checked/s);
 assert.doesNotMatch(membershipFields('einheitsleitung'), /unit-picker|<details>/);
 assert.match(membershipFields('einheitsleitung'), /<legend>Einheit<\/legend>.*type="radio".*required/s);
+assert.match(html, /<ul class="user-list">\$\{users\.map/);
+assert.match(html, /\$\{esc\(roleLabels\[u\.role\]\|\|u\.role\)\}/);
+assert.match(html, />\$\{roleLabels\[r\]\}<\/option>/);
+assert.match(html, /\$\{esc\(roleLabels\[me\.role\]\|\|me\.role\)\}/);
+assert.match(html, /\$\{esc\(roleLabels\[user\.role\]\|\|user\.role\)\}/);
+assert.match(css, /\.form-section > summary,\s*\.crew-available summary\s*\{[\s\S]*?min-height:\s*var\(--control-height\)/);
 const unitPickerLabelSource = html.match(/function unitPickerLabel[^\n]+/)?.[0];
 assert(unitPickerLabelSource, 'Beschriftung der Einheitsauswahl fehlt');
 const unitPickerLabel = new Function(`${unitPickerLabelSource}; return unitPickerLabel;`)();

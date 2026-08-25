@@ -190,7 +190,7 @@ Setup-/Anmeldeprozess geprüft. Ein unabhängiger zweiter Job baut außerdem das
 Docker-Image und führt denselben End-to-End-Test gegen Apache, HTTPS und MySQL
 aus.
 
-Nach einem erfolgreichen Testlauf eines Pushs auf `main` lädt `.github/workflows/deploy.yml` ausschließlich `.htaccess`, `api.php`, `constants.php`, `support.php`, `public/index.html` und `public/styles.css` per **SFTP** hoch. `config.local.php`, Datenbankdateien und `schema.sql` werden niemals automatisch übertragen.
+Nach einem erfolgreichen Testlauf eines Pushs auf `main` lädt `.github/workflows/deploy.yml` ausschließlich `.htaccess`, `api.php`, `constants.php`, `support.php`, `public/index.html`, `public/app.js` und `public/styles.css` per **SFTP** hoch. `config.local.php`, Datenbankdateien und `schema.sql` werden niemals automatisch übertragen.
 
 Die Einrichtung des Environments `hiba`, alle Secrets und die Trennung zukünftiger Ziele wie `devpreview` sind unter [Automatisches Deployment mit GitHub Actions einrichten](docs/WEBSPACE-DEPLOYMENT.md#9-automatisches-deployment-mit-github-actions-einrichten) dokumentiert.
 

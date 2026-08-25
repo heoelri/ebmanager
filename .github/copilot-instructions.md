@@ -17,7 +17,7 @@
 - Eine Organisation beziehungsweise Wehr ist ein strikt getrennter Mandant mit mehreren Einheiten. Einheitsnamen sind innerhalb einer Organisation über `(organization_id, name)` eindeutig.
 - Zielbetrieb ist klassischer Webspace mit HTTPS, SFTP, PHP 8.2 oder neuer, Apache und MySQL 8.0 oder neuer.
 - `api.php` enthält Routing und Fachlogik. `constants.php` ist die zentrale Quelle für Rollen und fachliche Auswahllisten. `support.php` enthält gemeinsame HTTP-, PDO-, Validierungs- und Mailfunktionen.
-- `public/index.html` enthält das native HTML und JavaScript; `public/styles.css` enthält die lokal ausgelieferten, responsiven Styles. Es gibt kein Frontend-Framework und keine Composer-Laufzeitabhängigkeiten.
+- `public/index.html` enthält das native HTML, `public/app.js` die browserseitige Logik ohne Inline-Eventhandler und `public/styles.css` die lokal ausgelieferten, responsiven Styles. Es gibt kein Frontend-Framework und keine Composer-Laufzeitabhängigkeiten.
 - `.htaccess` erzwingt HTTPS, schützt nicht öffentliche Dateien, leitet `/api/*` an `api.php` weiter und liefert `public/index.html` aus.
 - Root- und Unterverzeichnis-Deployment funktionieren ohne separate Pfadkonfiguration.
 - API-Fehler haben die Form `{ "error": "..." }`. Eingaben werden an der API-Grenze validiert; Fehler werden weder verschluckt noch als Erfolg dargestellt.
@@ -125,7 +125,7 @@
 - `test/fake-divera.php` verweist auf die offiziellen OpenAPI-Dokumente. Halte seine GET-Antworten damit konsistent; `.github/workflows/divera-api-contract.yml` prüft Pfade und dokumentierte Felder monatlich, während undokumentierte Antwortdetails vor Änderungen manuell mit einer separaten DIVERA-Testeinheit geprüft werden müssen.
 - GitHub Actions prüft PHP- und JavaScript-Syntax, Shellskripte, `schema.sql`, den HTTP-End-to-End-Fluss sowie Docker Compose gegen Apache/HTTPS und MySQL.
 - Pull Requests erhalten keinen Zugriff auf Deployment-Secrets.
-- Nach erfolgreichen Tests eines Pushs auf `main` lädt der Workflow nur `.htaccess`, `api.php`, `constants.php`, `support.php`, `public/index.html` und `public/styles.css` per SFTP mit geprüftem Host-Key hoch. Lokale Konfiguration, Schema und Migrationen werden nie automatisch deployt.
+- Nach erfolgreichen Tests eines Pushs auf `main` lädt der Workflow nur `.htaccess`, `api.php`, `constants.php`, `support.php`, `public/index.html`, `public/app.js` und `public/styles.css` per SFTP mit geprüftem Host-Key hoch. Lokale Konfiguration, Schema und Migrationen werden nie automatisch deployt.
 - Das produktive GitHub-Environment heißt `hiba`. Jedes weitere Ziel benötigt eigene Secrets, Schutzregeln und eine eigene Concurrency-Gruppe.
 
 ## Betrieb und Zurücksetzen

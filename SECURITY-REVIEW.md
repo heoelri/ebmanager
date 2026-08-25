@@ -103,8 +103,7 @@ Secrets, HTTPS und externe DIVERA-Aufrufe.
 
 - Das Cookie-Präfix `__Host-` verhindert, dass andere Subdomains ein
   gleichnamiges Sitzungscookie setzen.
-- CSP `frame-ancestors 'none'`, HSTS, `nosniff` und `Referrer-Policy:
-  no-referrer` werden durch Apache gesetzt.
+- Die CSP beschränkt Skripte, Styles, API-Verbindungen, Formulare und sonstige Ressourcen auf die eigene Origin, verbietet Plugins, fremde Basispfade und Framing; HSTS, `nosniff` und `Referrer-Policy: no-referrer` werden ebenfalls durch Apache gesetzt.
 - Zusätzliche mandantenübergreifende Verbundschlüssel in MySQL wären eine
   weitere Schutzschicht gegen zukünftige Programmierfehler. Die aktuelle
   Mandantentrennung wird vollständig in den geprüften API-Abfragen erzwungen.
