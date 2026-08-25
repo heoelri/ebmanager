@@ -160,7 +160,7 @@ Die Docker-Tests verwenden dieselben MySQL- und HTTP-Prüfungen wie CI:
 docker compose --profile test down --volumes
 $env:DIVERA_API_BASE_URL='http://divera:8090'
 docker compose --profile test up --build --detach --wait divera web
-docker compose --profile test run --rm test
+docker compose --profile test run --rm --no-deps test
 docker compose --profile test down --volumes
 ```
 
