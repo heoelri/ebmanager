@@ -6,7 +6,7 @@ Die API erzwingt die Einheitenanzahl je Rolle: keine Zuordnung für Wehrführung
 
 Berichtsübergänge sperren den Datensatz, prüfen Rolle, Einheit und erwarteten Ausgangsstatus erneut und schreiben Status sowie Historie in derselben Transaktion. Rückgaben verlangen einen längenbegrenzten Kommentar; eine Rückgabe an einen nicht mehr zuständigen Autor wird abgelehnt. Die Wehrführung kann fremde Einheitsberichte nicht bearbeiten, und eine Rückgabe macht eine bestehende Konsolidierung sichtbar ungültig, ohne den Arbeitsstand zu löschen.
 
-DIVERA bleibt ausschließlich lesend angebunden. Einzel- und Gesamtimport verwenden nur `GET`; der Browser liefert beim Einzelimport lediglich die Alarm-ID, die serverseitig erneut verifiziert wird. Die optionale Basisadresse ist eine serverseitige Testkonfiguration und wird nie aus Requests übernommen. Der Fake-DIVERA-Test protokolliert die Methoden und weist schreibende externe Aufrufe zurück.
+DIVERA bleibt ausschließlich lesend angebunden. Einzel- und Gesamtimport verwenden nur `GET`; der Browser liefert beim Einzelimport lediglich die Alarm-ID, die serverseitig erneut verifiziert wird. Die optionale Basisadresse ist eine serverseitige Test- und lokale Demokonfiguration und wird nie aus Requests übernommen. Der Fake-DIVERA-Dienst protokolliert die Methoden und weist schreibende externe Aufrufe zurück.
 
 ## Workflow-Benachrichtigungen vom 23. August 2026
 
@@ -81,7 +81,7 @@ Secrets, HTTPS und externe DIVERA-Aufrufe.
   nicht gefunden.
 - `SameSite=Strict`, verpflichtendes JSON, Origin-Prüfung und das Fehlen
   zustandsändernder GET-Routen schützen die geprüften CSRF-Szenarien.
-- Das produktive externe Ziel ist die feste HTTPS-Adresse von DIVERA; nur Tests dürfen sie serverseitig überschreiben. Alle DIVERA-Aufrufe verwenden ausschließlich `GET`; ein durch Benutzer steuerbarer SSRF- oder Schreibpfad wurde nicht gefunden.
+- Das produktive externe Ziel ist die feste HTTPS-Adresse von DIVERA; nur Tests und das lokale Demo-Profil dürfen sie serverseitig überschreiben. Alle DIVERA-Aufrufe verwenden ausschließlich `GET`; ein durch Benutzer steuerbarer SSRF- oder Schreibpfad wurde nicht gefunden.
 - Passwort-Hashes, Sitzungswerte, Datenbankzugangsdaten und DIVERA-Schlüssel
   werden nicht über die API ausgegeben.
 - Patienten- und Anruferdaten bleiben an authentifizierte,

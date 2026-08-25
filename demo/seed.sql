@@ -1,7 +1,7 @@
 SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 START TRANSACTION;
 
-SET @demo_name = 'Freiwillige Feuerwehr Musterstadt';
+SET @demo_name = 'Freiwillige Feuerwehr Amt Keppel';
 SET @old_org = (SELECT organization_id FROM users WHERE email='wehrleitung@demo.local');
 
 DELETE rc FROM report_crew rc JOIN reports r ON r.id=rc.report_id JOIN incidents i ON i.id=r.incident_id WHERE i.organization_id=@old_org;
@@ -26,10 +26,10 @@ DELETE FROM organizations WHERE id=@old_org;
 INSERT INTO organizations(name) VALUES(@demo_name);
 SET @org = LAST_INSERT_ID();
 
-INSERT INTO units(organization_id,name) VALUES
-  (@org,'Löschzug Mitte'),
-  (@org,'Löschgruppe Nord'),
-  (@org,'Löschgruppe Süd');
+INSERT INTO units(organization_id,name,divera_access_key) VALUES
+  (@org,'Löschzug Mitte','demo-local-mitte'),
+  (@org,'Löschgruppe Nord','demo-local-nord'),
+  (@org,'Löschgruppe Süd','demo-local-sued');
 SET @mitte = (SELECT id FROM units WHERE organization_id=@org AND name='Löschzug Mitte');
 SET @nord = (SELECT id FROM units WHERE organization_id=@org AND name='Löschgruppe Nord');
 SET @sued = (SELECT id FROM units WHERE organization_id=@org AND name='Löschgruppe Süd');
@@ -118,35 +118,33 @@ INSERT INTO vehicles(unit_id,divera_id,name,shortname,fullname) VALUES
   (@sued,'demo-sued-mtf','MTF Süd','MTF','Mannschaftstransportfahrzeug');
 
 INSERT INTO incidents(organization_id,divera_id,foreign_id,divera_date,title,started_at,message,address,lat,lng,remark,patient,caller,consolidated_text,consolidated_at) VALUES
-  (@org,'demo-001','D-2026-001',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 1 DAY),'Kleinbrand Müllbehälter',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 1 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Brennender Müllbehälter','Musterstraße 1, Musterstadt',50.1001,8.6001,'Demo: Entwurf noch offen','','Leitstelle','',NULL),
-  (@org,'demo-002','D-2026-002',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 3 DAY),'Technische Hilfeleistung',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 3 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Wasser im Keller','Nordweg 12, Musterstadt',50.1102,8.6102,'Demo: Prüfung durch Einheitsführung','','Leitstelle','',NULL),
-  (@org,'demo-003','D-2026-003',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 5 DAY),'Ausgelöste Brandmeldeanlage',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 5 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Brandmeldeanlage ausgelöst','Südallee 8, Musterstadt',50.0903,8.6203,'Demo: bei Wehrführung','','Automatische Meldung','',NULL),
-  (@org,'demo-004','D-2026-004',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 8 DAY),'Wohnungsbrand',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 8 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Rauch aus Wohnung','Marktplatz 4, Musterstadt',50.1014,8.6044,'Demo: konsolidierter Einsatz','','Leitstelle','Brand auf Küche begrenzt; zwei Einheiten eingesetzt.',UTC_TIMESTAMP()-INTERVAL 7 DAY),
-  (@org,'demo-005','D-2026-005',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 12 DAY),'Scheunenbrand',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 12 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Feuerschein an Scheune','Feldstraße 20, Musterstadt',50.1225,8.6335,'Demo: alle Einheiten','','Leitstelle','Umfassender Löschangriff aller drei Einheiten; Einsatzstelle an Eigentümer übergeben.',UTC_TIMESTAMP()-INTERVAL 11 DAY),
-  (@org,'demo-006','D-2026-006',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 16 DAY),'Verkehrsunfall',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 16 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Zwei Fahrzeuge kollidiert','Landstraße 7, Musterstadt',50.1326,8.6446,'Demo: Rückgabe und erneute Übergabe','','Leitstelle','',NULL),
-  (@org,'demo-007','D-2026-007',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 20 DAY),'Sturmschaden',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 20 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Ast blockiert Fahrbahn','Nordring 31, Musterstadt',50.1427,8.6557,'Demo: Bericht fehlt','','Bürgertelefon','',NULL),
-  (@org,'demo-008','D-2026-008',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 24 DAY),'Flächenbrand',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 24 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Böschung brennt','Am Sportplatz, Musterstadt',50.1528,8.6668,'Demo: mehrere Einheiten, unvollständig','','Leitstelle','',NULL),
-  (@org,'demo-009','D-2026-009',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 29 DAY),'Tragehilfe Rettungsdienst',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 29 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Unterstützung angefordert','Südweg 5, Musterstadt',50.0829,8.6779,'Demo: in Einheitsprüfung','','Rettungsdienst','',NULL),
-  (@org,'demo-010','D-2026-010',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 35 DAY),'Garagenbrand',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 35 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Rauchentwicklung aus Garage','Gartenstraße 17, Musterstadt',50.0930,8.6890,'Demo: Berichte in verschiedenen Stufen','','Leitstelle','',NULL),
-  (@org,'demo-011','D-2026-011',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 42 DAY),'Ölspur',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 42 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Öl auf Fahrbahn','Hauptstraße 42, Musterstadt',50.1031,8.6901,'Demo: noch ohne Bericht','','Polizei','',NULL),
-  (@org,'demo-012','D-2026-012',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 50 DAY),'Tierrettung',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 50 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Tier in Notlage','Nordpark, Musterstadt',50.1132,8.6012,'Demo: bei Wehrführung','','Bürgertelefon','',NULL),
-  (@org,'demo-013','D-2026-013',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 61 DAY),'Unklare Rauchentwicklung',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 61 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Rauch im Freien','Industrieweg 9, Musterstadt',50.1233,8.6123,'Demo: ein Bericht fehlt','','Leitstelle','',NULL),
-  (@org,'demo-014','D-2026-014',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 73 DAY),'Wasserschaden',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 73 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Rohrbruch im Gebäude','Nordplatz 3, Musterstadt',50.1334,8.6234,'Demo: Entwurf','','Hausverwaltung','',NULL),
-  (@org,'demo-015','D-2026-015',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 88 DAY),'Brandnachschau',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 88 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Kontrolle nach Kleinbrand','Mühlenweg 6, Musterstadt',50.1435,8.6345,'Demo: abgeschlossener Einheitsbericht','','Leitstelle','',NULL),
-  (@org,'demo-flow-single','D-FLOW-001',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 2 HOUR),'Demo-Flow: Baum auf Fahrbahn',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 2 HOUR,'%Y-%m-%dT%H:%i:%s.000Z'),'Umgestürzter Baum blockiert die Fahrbahn','Waldstraße 18, Musterstadt',50.1040,8.6080,'Demo-Flow mit einer Einheit: unbearbeitet','','Leitstelle','',NULL),
-  (@org,'demo-flow-multi','D-FLOW-002',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 4 HOUR),'Demo-Flow: Kellerbrand',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 4 HOUR,'%Y-%m-%dT%H:%i:%s.000Z'),'Rauchentwicklung aus einem Keller','Ringstraße 27, Musterstadt',50.1160,8.6160,'Demo-Flow mit zwei Einheiten: unbearbeitet','','Leitstelle','',NULL);
+  (@org,'demo-001','D-2026-001',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 1 DAY),'Kleinbrand Müllbehälter',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 1 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Brennender Müllbehälter','Musterstraße 1, Musterstadt',50.1001,8.6001,'Entwurf noch offen','','Leitstelle','',NULL),
+  (@org,'demo-002','D-2026-002',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 3 DAY),'Technische Hilfeleistung',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 3 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Wasser im Keller','Nordweg 12, Musterstadt',50.1102,8.6102,'Prüfung durch Einheitsführung','','Leitstelle','',NULL),
+  (@org,'demo-003','D-2026-003',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 5 DAY),'Ausgelöste Brandmeldeanlage',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 5 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Brandmeldeanlage ausgelöst','Südallee 8, Musterstadt',50.0903,8.6203,'Bei Wehrführung','','Automatische Meldung','',NULL),
+  (@org,'demo-004','D-2026-004',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 8 DAY),'Wohnungsbrand',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 8 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Rauch aus Wohnung','Marktplatz 4, Musterstadt',50.1014,8.6044,'Konsolidierter Einsatz','','Leitstelle','Brand auf Küche begrenzt; zwei Einheiten eingesetzt.',UTC_TIMESTAMP()-INTERVAL 7 DAY),
+  (@org,'demo-005','D-2026-005',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 12 DAY),'Scheunenbrand',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 12 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Feuerschein an Scheune','Feldstraße 20, Musterstadt',50.1225,8.6335,'Alle Einheiten alarmiert','','Leitstelle','Umfassender Löschangriff aller drei Einheiten; Einsatzstelle an Eigentümer übergeben.',UTC_TIMESTAMP()-INTERVAL 11 DAY),
+  (@org,'demo-006','D-2026-006',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 16 DAY),'Verkehrsunfall',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 16 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Zwei Fahrzeuge kollidiert','Landstraße 7, Musterstadt',50.1326,8.6446,'Fahrzeugaufstellung ergänzt','','Leitstelle','',NULL),
+  (@org,'demo-007','D-2026-007',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 20 DAY),'Sturmschaden',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 20 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Ast blockiert Fahrbahn','Nordring 31, Musterstadt',50.1427,8.6557,'Bericht ausstehend','','Bürgertelefon','',NULL),
+  (@org,'demo-008','D-2026-008',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 24 DAY),'Flächenbrand',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 24 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Böschung brennt','Am Sportplatz, Musterstadt',50.1528,8.6668,'Mehrere Einheiten alarmiert','','Leitstelle','',NULL),
+  (@org,'demo-009','D-2026-009',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 29 DAY),'Tragehilfe Rettungsdienst',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 29 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Unterstützung angefordert','Südweg 5, Musterstadt',50.0829,8.6779,'In Einheitsprüfung','','Rettungsdienst','',NULL),
+  (@org,'demo-010','D-2026-010',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 35 DAY),'Garagenbrand',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 35 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Rauchentwicklung aus Garage','Gartenstraße 17, Musterstadt',50.0930,8.6890,'Berichte in verschiedenen Bearbeitungsständen','','Leitstelle','',NULL),
+  (@org,'demo-011','D-2026-011',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 42 DAY),'Ölspur',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 42 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Öl auf Fahrbahn','Hauptstraße 42, Musterstadt',50.1031,8.6901,'Bericht ausstehend','','Polizei','',NULL),
+  (@org,'demo-012','D-2026-012',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 50 DAY),'Tierrettung',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 50 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Tier in Notlage','Nordpark, Musterstadt',50.1132,8.6012,'Bei Wehrführung','','Bürgertelefon','',NULL),
+  (@org,'demo-013','D-2026-013',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 61 DAY),'Unklare Rauchentwicklung',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 61 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Rauch im Freien','Industrieweg 9, Musterstadt',50.1233,8.6123,'Ein Bericht ausstehend','','Leitstelle','',NULL),
+  (@org,'demo-014','D-2026-014',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 73 DAY),'Wasserschaden',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 73 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Rohrbruch im Gebäude','Nordplatz 3, Musterstadt',50.1334,8.6234,'Entwurf','','Hausverwaltung','',NULL),
+  (@org,'demo-015','D-2026-015',UNIX_TIMESTAMP(UTC_TIMESTAMP()-INTERVAL 88 DAY),'Brandnachschau',DATE_FORMAT(UTC_TIMESTAMP()-INTERVAL 88 DAY,'%Y-%m-%dT%H:%i:%s.000Z'),'Kontrolle nach Kleinbrand','Mühlenweg 6, Musterstadt',50.1435,8.6345,'Einheitsbericht abgeschlossen','','Leitstelle','',NULL);
 
 INSERT INTO incident_units(incident_id,unit_id,vehicles)
 SELECT i.id,@mitte,JSON_ARRAY(
   JSON_OBJECT('id','demo-mitte-elw','name','ELW 1','own',TRUE),
   JSON_OBJECT('id','demo-mitte-hlf','name','HLF 20','own',TRUE),
   JSON_OBJECT('id','demo-mitte-dlk','name','DLK 23','own',TRUE)
-) FROM incidents i WHERE i.organization_id=@org AND i.divera_id IN ('demo-001','demo-004','demo-005','demo-006','demo-008','demo-010','demo-011','demo-013','demo-015','demo-flow-single','demo-flow-multi')
+) FROM incidents i WHERE i.organization_id=@org AND i.divera_id IN ('demo-001','demo-004','demo-005','demo-006','demo-008','demo-010','demo-011','demo-013','demo-015')
 UNION ALL
 SELECT i.id,@nord,JSON_ARRAY(
   JSON_OBJECT('id','demo-nord-lf','name','LF 10','own',TRUE),
   JSON_OBJECT('id','demo-nord-mtf','name','MTF Nord','own',TRUE)
-) FROM incidents i WHERE i.organization_id=@org AND i.divera_id IN ('demo-002','demo-004','demo-005','demo-007','demo-008','demo-012','demo-014','demo-flow-multi')
+) FROM incidents i WHERE i.organization_id=@org AND i.divera_id IN ('demo-002','demo-004','demo-005','demo-007','demo-008','demo-012','demo-014')
 UNION ALL
 SELECT i.id,@sued,JSON_ARRAY(
   JSON_OBJECT('id','demo-sued-tsf','name','TSF-W Süd','own',TRUE),
@@ -247,5 +245,6 @@ SELECT CONCAT_WS('|',
   (SELECT COUNT(DISTINCT r.status) FROM reports r JOIN incidents i ON i.id=r.incident_id WHERE i.organization_id=o.id),
   (SELECT COUNT(*) FROM incidents i WHERE i.organization_id=o.id AND i.consolidated_at IS NOT NULL),
   (SELECT COUNT(*) FROM report_transitions rt JOIN reports r ON r.id=rt.report_id JOIN incidents i ON i.id=r.incident_id
-    WHERE i.organization_id=o.id AND rt.from_status='wehr_review' AND rt.to_status='unit_review')
+    WHERE i.organization_id=o.id AND rt.from_status='wehr_review' AND rt.to_status='unit_review'),
+  (SELECT COUNT(*) FROM units u WHERE u.organization_id=o.id AND u.divera_access_key LIKE 'demo-local-%')
 ) FROM organizations o WHERE o.id=@org;

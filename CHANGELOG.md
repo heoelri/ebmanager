@@ -6,9 +6,9 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Added
 
+- Das lokale Demo-Profil stellt für alle drei Demo-Einheiten vorkonfigurierte Fake-DIVERA-Stammdaten sowie importierbare Einzel- und Mehrfacheinheiten-Einsätze bereit.
 - Die Wehrführung sieht im Gesamtbericht alle alarmierten Einheiten mit Fahrzeug-Snapshots und zugeordneter Besatzung.
 - Die Auswahl „Status filtern“ bleibt im Browser pro Benutzer über Seitenaufrufe hinweg erhalten.
-- Der lokale Demo-Seed enthält je einen unbearbeiteten Flow-Einsatz mit einer und mit zwei alarmierten Einheiten.
 - Führungskräfte sehen Einheit und Verfasser eines bereits vorhandenen fremden Einheitsberichts, ohne dessen Inhalte oder Workflowdaten einsehen zu können.
 - Rollenabhängige PDF-Downloads exportieren Einsatzakten, sichtbare Einzelberichte und abgeschlossene Gesamtberichte mit Exportzeitpunkt, Nutzer und Rolle.
 - Die Einsatzübersicht zeigt und filtert rollenbezogen fehlende, zu prüfende, zur Konsolidierung bereite und abgeschlossene Einsatzberichte.
