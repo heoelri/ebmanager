@@ -43,15 +43,15 @@ function demoAlarms(string $prefix): array
     $date = strtotime('tomorrow 12:00 UTC');
     $shared = [
         'id' => 'demo-live-shared', 'foreign_id' => 'D-LIVE-001', 'date' => $date,
-        'title' => 'Demo-Live: Gebäudebrand', 'text' => 'Rauch aus einem Wohngebäude',
+        'title' => 'Gebäudebrand', 'text' => 'Rauch aus einem Wohngebäude',
         'address' => 'Rathausplatz 1, Musterstadt', 'lat' => 50.101, 'lng' => 8.611,
-        'remark' => 'Gemeinsamer Fake-Einsatz für Mitte und Nord', 'patient' => '', 'caller' => 'Leitstelle'
+        'remark' => 'Alarmierung der Einheiten Mitte und Nord', 'patient' => '', 'caller' => 'Leitstelle'
     ];
     return match ($prefix) {
         'demo-mitte' => [
             'demo-live-mitte' => [
                 'id' => 'demo-live-mitte', 'foreign_id' => 'D-LIVE-002', 'date' => $date - 900,
-                'title' => 'Demo-Live: Türöffnung', 'text' => 'Hilflose Person hinter Tür',
+                'title' => 'Türöffnung', 'text' => 'Hilflose Person hinter Tür',
                 'address' => 'Mittelweg 4, Musterstadt', 'lat' => 50.102, 'lng' => 8.612,
                 'remark' => '', 'patient' => '', 'caller' => 'Leitstelle', 'vehicles' => ['demo-mitte-hlf']
             ],
@@ -60,7 +60,7 @@ function demoAlarms(string $prefix): array
         'demo-nord' => [
             'demo-live-nord' => [
                 'id' => 'demo-live-nord', 'foreign_id' => 'D-LIVE-003', 'date' => $date - 600,
-                'title' => 'Demo-Live: Sturmschaden', 'text' => 'Baum auf Fahrbahn',
+                'title' => 'Sturmschaden', 'text' => 'Baum auf Fahrbahn',
                 'address' => 'Nordring 8, Musterstadt', 'lat' => 50.112, 'lng' => 8.622,
                 'remark' => '', 'patient' => '', 'caller' => 'Polizei', 'vehicles' => ['demo-nord-lf']
             ],
@@ -69,7 +69,7 @@ function demoAlarms(string $prefix): array
         'demo-sued' => [
             'demo-live-sued' => [
                 'id' => 'demo-live-sued', 'foreign_id' => 'D-LIVE-004', 'date' => $date - 300,
-                'title' => 'Demo-Live: Flächenbrand', 'text' => 'Brennende Böschung',
+                'title' => 'Flächenbrand', 'text' => 'Brennende Böschung',
                 'address' => 'Südallee 19, Musterstadt', 'lat' => 50.092, 'lng' => 8.632,
                 'remark' => '', 'patient' => '', 'caller' => 'Leitstelle', 'vehicles' => ['demo-sued-tsf', 'demo-sued-gwl']
             ]
