@@ -69,18 +69,20 @@ php -r '
 # Das Frontend enthält die erwarteten Accessibility- und DIVERA-Elemente, aber keine duplizierten Fachoptionen.
 php -r '
   $html=file_get_contents("public/index.html");
+  $javascript=file_get_contents("public/app.js");
+  $frontend=$html.$javascript;
   $css=file_get_contents("public/styles.css");
-  foreach (["viewport-fit=cover","public/styles.css","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:","rankOptions","pendingWarning","initialView","DIVERA-Einsatznummer","class=\"command-row\"","class=\"form-section\"","class=\"report-times\"","restoreDialogFocus","<select name=\"commandRank\">","<select name=\"additionalCommandRank\">"] as $required) {
-    if (!str_contains($html,$required)) exit(1);
+  foreach (["viewport-fit=cover","public/styles.css","public/app.js","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:","rankOptions","pendingWarning","initialView","DIVERA-Einsatznummer","class=\"command-row\"","class=\"form-section\"","class=\"report-times\"","restoreDialogFocus","<select name=\"commandRank\">","<select name=\"additionalCommandRank\">"] as $required) {
+    if (!str_contains($frontend,$required)) exit(1);
   }
   foreach (["--control-height: 44px",":focus-visible","safe-area-inset-bottom","forced-colors: active"] as $required) {
     if (!str_contains($css,$required)) exit(1);
   }
-  if (str_contains($html,"<style") || preg_match("/\\sstyle=\"/i",$html)) exit(1);
+  if (str_contains($html,"<style") || str_contains($html,"<script>") || preg_match("/\\son[a-z]+=/i",$frontend) || preg_match("/\\sstyle=\"/i",$frontend)) exit(1);
   foreach (["Kleinbrand","Wohngebäude","Menschen in Notlage","Feuerwehrmann-Anwärter"] as $duplicatedOption) {
-    if (str_contains($html,$duplicatedOption)) exit(1);
+    if (str_contains($frontend,$duplicatedOption)) exit(1);
   }
-  if (preg_match("/<select[^>]+multiple/i",$html)) exit(1);
+  if (preg_match("/<select[^>]+multiple/i",$frontend)) exit(1);
 '
 
 # Fachoptionen sind vorhanden und ihre Klassifikationsschlüssel stimmen mit den Gruppenbezeichnungen überein.

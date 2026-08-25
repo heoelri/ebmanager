@@ -33,6 +33,8 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Changed
 
+- Das Frontend lädt JavaScript als separat cachebare Datei ohne Inline-Eventhandler, erzwingt eine restriktivere Content Security Policy und zeigt Benutzerrollen einheitlich auf Deutsch.
+- Einzeilige Controls verwenden eine barrierefreundliche Mindesthöhe; gemeinsame Summary-Regeln und semantische Benutzerlisten vereinfachen Styles und Struktur.
 - Einsatzanlage und Benutzerverwaltung zeigen Mehrfach-Einheitenauswahlen als kompakte Dropdowns; einzeilige Eingaben, Dropdowns und Buttons verwenden einheitlich 44 Pixel Höhe.
 - Mehrfach-Einheitenauswahlen zeigen die Anzahl gewählter Einheiten und verlangen mindestens eine Auswahl; API-, Formular- und Ressourcenabfragen unterscheiden Fehlerzustände und konkurrierende Anfragen zuverlässig.
 - Wehrführungen benötigen keine Einheitszuordnung, Einheitsführungen gehören exakt einer Einheit an und Führungskräfte dürfen DIVERA-Einsätze ihrer zugeordneten Einheiten selbst erkennen und importieren.

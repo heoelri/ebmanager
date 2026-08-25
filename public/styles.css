@@ -60,7 +60,7 @@ textarea {
 button,
 input:not([type="checkbox"]):not([type="radio"]),
 select {
-  height: var(--control-height);
+  min-height: var(--control-height);
 }
 
 input,
@@ -256,7 +256,8 @@ main {
   border-radius: var(--radius);
 }
 
-.form-section > summary {
+.form-section > summary,
+.crew-available summary {
   min-height: var(--control-height);
   padding: .7rem;
   font-weight: 700;
@@ -335,7 +336,7 @@ main {
 }
 
 .unit-picker summary {
-  height: var(--control-height);
+  min-height: var(--control-height);
   padding: .65rem;
   cursor: pointer;
   background: var(--color-surface);
@@ -403,12 +404,16 @@ main {
 }
 
 .crew-available summary {
-  min-height: var(--control-height);
-  padding: .7rem;
-  font-weight: 700;
-  cursor: pointer;
-  background: var(--color-summary);
   border-radius: .4rem;
+}
+
+.user-list {
+  padding: 0;
+  list-style: none;
+}
+
+.user-list li + li {
+  margin-top: var(--space);
 }
 
 .vehicle-board {

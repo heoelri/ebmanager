@@ -108,6 +108,7 @@ jobs:
             printf 'put "constants.php" "constants.php"\n'
             printf 'put "support.php" "support.php"\n'
             printf 'put "public/index.html" "public/index.html"\n'
+            printf 'put "public/app.js" "public/app.js"\n'
             printf 'put "public/styles.css" "public/styles.css"\n'
           } >"$workdir/batch"
 
