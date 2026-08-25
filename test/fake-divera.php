@@ -27,6 +27,7 @@ function demoCluster(array $unit): array
     ];
     $consumers = [];
     foreach ($unit['members'] as $suffix => $name) {
+        $suffix = str_pad((string)$suffix, 2, '0', STR_PAD_LEFT);
         $id = "{$unit['prefix']}-$suffix";
         $consumers[$id] = [
             'id' => $id, 'stdformat_name' => $name,

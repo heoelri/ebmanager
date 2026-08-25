@@ -73,6 +73,7 @@ for round in 1 2; do
   done
 done
 [[ "$("${mysql[@]}" --execute="SELECT GROUP_CONCAT(CONCAT((SELECT COUNT(*) FROM member_units mu WHERE mu.unit_id=u.id),':',(SELECT COUNT(*) FROM qualifications q WHERE q.unit_id=u.id),':',(SELECT COUNT(*) FROM vehicles v WHERE v.unit_id=u.id)) ORDER BY u.divera_access_key SEPARATOR '|') FROM units u WHERE u.organization_id=$demo_org_id")" == '8:4:3|8:4:2|8:4:3' ]]
+[[ "$("${mysql[@]}" --execute="SELECT COUNT(*) FROM members WHERE organization_id=$demo_org_id AND divera_id REGEXP '^demo-(mitte|nord|sued)-0[1-8]$'")" == 24 ]]
 [[ "$("${mysql[@]}" --execute="SELECT COUNT(*) FROM incidents WHERE organization_id=$demo_org_id AND divera_id LIKE 'demo-live-%'")" == 4 ]]
 [[ "$("${mysql[@]}" --execute="SELECT COUNT(*) FROM incident_units iu JOIN incidents i ON i.id=iu.incident_id WHERE i.organization_id=$demo_org_id AND i.divera_id LIKE 'demo-live-%'")" == 5 ]]
 [[ "$("${mysql[@]}" --execute="SELECT COUNT(*) FROM incident_units iu JOIN incidents i ON i.id=iu.incident_id WHERE i.organization_id=$demo_org_id AND i.divera_id='demo-live-shared'")" == 2 ]]
