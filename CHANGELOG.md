@@ -32,6 +32,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 ### Changed
 
 - Einsatzanlage und Benutzerverwaltung zeigen Mehrfach-Einheitenauswahlen als kompakte Dropdowns; einzeilige Eingaben, Dropdowns und Buttons verwenden einheitlich 44 Pixel Höhe.
+- Mehrfach-Einheitenauswahlen zeigen die Anzahl gewählter Einheiten und verlangen mindestens eine Auswahl; API-, Formular- und Ressourcenabfragen unterscheiden Fehlerzustände und konkurrierende Anfragen zuverlässig.
 - Wehrführungen benötigen keine Einheitszuordnung, Einheitsführungen gehören exakt einer Einheit an und Führungskräfte dürfen DIVERA-Einsätze ihrer zugeordneten Einheiten selbst erkennen und importieren.
 - Nicht mehr von DIVERA gelieferte Stammdatenzuordnungen werden einheitsspezifisch entfernt; historische Einsatz- und Besatzungssnapshots bleiben erhalten.
 - Führungskräfte sehen nach dem Absenden den Übergabezeitpunkt und einen eindeutigen Nur-Lese-Hinweis; die Wehrführung sieht vor der Konsolidierung, welche alarmierten Einheiten noch keinen prüfbereiten Bericht geliefert haben.
