@@ -51,7 +51,8 @@ assert.match(html, /<fieldset class="unit-picker"><legend>Einheiten<\/legend><de
 assert.match(css, /button,\s*input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\),\s*select\s*\{\s*height:\s*var\(--control-height\)/);
 assert.match(css, /\.unit-picker summary\s*\{[\s\S]*?height:\s*var\(--control-height\)/);
 assert.match(css, /\.unit-picker \.check-grid\s*\{[\s\S]*?position:\s*absolute/);
-assert.equal((html.match(/<button class="form-action">(?:Anlegen|Einladung senden|Speichern)<\/button>/g) ?? []).length, 3);
+assert.equal((html.match(/<button class="form-action">(?:Anmelden|Anlegen|Einladung senden|Speichern)<\/button>/g) ?? []).length, 4);
+assert.match(html, /<form id="login" class="grid">[\s\S]*?<button class="form-action">Anmelden<\/button>/);
 assert.match(html, /<form id="divera" class="grid">[\s\S]*?<button class="form-action">Speichern<\/button>/);
 assert.match(css, /\.form-action\s*\{[\s\S]*?align-self:\s*end/);
 
