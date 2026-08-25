@@ -12,7 +12,7 @@ export DIVERA_API_BASE_URL=http://divera:8090
 [[ "$("${mysql[@]}" --execute='SELECT COUNT(*) FROM organizations')" == 0 ]]
 
 "${mysql[@]}" --execute="
-  INSERT INTO organizations(name) VALUES('Freiwillige Feuerwehr Musterstadt');
+  INSERT INTO organizations(name) VALUES('Freiwillige Feuerwehr Amt Keppel');
   SET @real_org=LAST_INSERT_ID();
   INSERT INTO users(organization_id,unit_id,name,email,password_hash,role)
   VALUES(@real_org,NULL,'Nicht-Demo-Wehrführung','real@example.test','unbenutzbar','wehrleitung');"
@@ -21,7 +21,7 @@ export DIVERA_API_BASE_URL=http://divera:8090
 "${compose[@]}" --profile demo run --rm demo-seed
 
 [[ "$("${mysql[@]}" --execute="SELECT COUNT(*) FROM users WHERE email='real@example.test'")" == 1 ]]
-[[ "$("${mysql[@]}" --execute="SELECT COUNT(*) FROM organizations WHERE name='Freiwillige Feuerwehr Musterstadt'")" == 2 ]]
+[[ "$("${mysql[@]}" --execute="SELECT COUNT(*) FROM organizations WHERE name='Freiwillige Feuerwehr Amt Keppel'")" == 2 ]]
 [[ "$("${mysql[@]}" --execute="SELECT COUNT(*) FROM users WHERE email='wehrleitung@demo.local'")" == 1 ]]
 
 demo_org_id=$("${mysql[@]}" --execute="SELECT organization_id FROM users WHERE email='wehrleitung@demo.local'")

@@ -1,7 +1,7 @@
 SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 START TRANSACTION;
 
-SET @demo_name = 'Freiwillige Feuerwehr Musterstadt';
+SET @demo_name = 'Freiwillige Feuerwehr Amt Keppel';
 SET @old_org = (SELECT organization_id FROM users WHERE email='wehrleitung@demo.local');
 
 DELETE rc FROM report_crew rc JOIN reports r ON r.id=rc.report_id JOIN incidents i ON i.id=r.incident_id WHERE i.organization_id=@old_org;
