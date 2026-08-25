@@ -82,6 +82,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      divera:
+        condition: service_healthy
     environment:
       DB_HOST: db
       DB_NAME: einsatzberichte

@@ -6,6 +6,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Added
 
+- DIVERA-Fehler unterscheiden sichere Verbindungs-, HTTP- und Antwortursachen, ohne Access-Keys offenzulegen; der Demo-Start erzeugt einen veralteten Fake-DIVERA-Container zuverlässig neu.
 - Das lokale Demo-Profil stellt für alle drei Demo-Einheiten vorkonfigurierte Fake-DIVERA-Stammdaten sowie importierbare Einzel- und Mehrfacheinheiten-Einsätze bereit.
 - Die Wehrführung sieht im Gesamtbericht alle alarmierten Einheiten mit Fahrzeug-Snapshots und zugeordneter Besatzung.
 - Die Auswahl „Status filtern“ bleibt im Browser pro Benutzer über Seitenaufrufe hinweg erhalten.

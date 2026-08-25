@@ -634,6 +634,16 @@ curl --insecure --silent --fail \
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units/1/divera" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($data["alarms"])===2); assert(count($data["vehicles"])===2);'
 
+# HTTP-Fehler der DIVERA-Quelle nennen den konkreten Statuscode, ohne den Access-Key offenzulegen.
+curl --insecure --silent --fail \
+  --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request PUT \
+  --data '{"accessKey":"http-error"}' "$base_url/api/units/1/divera" >/dev/null
+curl --insecure --silent --cookie "$session_cookie=$force_token" "$base_url/api/units/1/divera?summary=1" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($data["error"]==="DIVERA-Abfrage fehlgeschlagen (HTTP 503)"); assert(!str_contains($data["error"],"http-error"));'
+curl --insecure --silent --fail \
+  --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request PUT \
+  --data '{"accessKey":"test"}' "$base_url/api/units/1/divera" >/dev/null
+
 # Die periodische DIVERA-Kurzabfrage lädt Alarme, aber keine Stammdaten.
 : > "$divera_log"
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units/1/divera?summary=1" |

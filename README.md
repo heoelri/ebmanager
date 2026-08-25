@@ -134,7 +134,7 @@ Eine ausschließlich lokale Demofeuerwehr mit drei Einheiten, allen Rollen, Mitg
 
 ```powershell
 $env:DIVERA_API_BASE_URL='http://divera:8090'
-docker compose --profile demo up --build --detach --wait divera web
+docker compose --profile demo up --build --detach --wait --force-recreate divera web
 docker compose --profile demo run --rm demo-seed
 ```
 

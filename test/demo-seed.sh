@@ -57,8 +57,11 @@ done
 mitte_id=$("${mysql[@]}" --execute="SELECT id FROM units WHERE organization_id=$demo_org_id AND divera_access_key='demo-local-mitte'")
 mapfile -t demo_unit_ids < <("${mysql[@]}" --execute="SELECT id FROM units WHERE organization_id=$demo_org_id ORDER BY name")
 for unit_id in "${demo_unit_ids[@]}"; do
-  "${compose[@]}" exec -T web curl --insecure --silent --fail --cookie /tmp/wehr-demo-cookie \
-    "https://localhost/api/units/$unit_id/divera?summary=1" >/dev/null
+  if ! response=$("${compose[@]}" exec -T web curl --insecure --silent --fail-with-body --cookie /tmp/wehr-demo-cookie \
+    "https://localhost/api/units/$unit_id/divera?summary=1"); then
+    echo "$response" >&2
+    exit 1
+  fi
 done
 
 # Einzelimport und zweimalige Gesamtsynchronisation bleiben ohne Bestandsverlust oder Duplikate.
@@ -100,3 +103,13 @@ done
 demo_015_id=$("${mysql[@]}" --execute="SELECT id FROM incidents WHERE foreign_id='D-2026-015'")
 [[ "$("${compose[@]}" exec -T web curl --insecure --silent --fail --cookie /tmp/daniel-demo-cookie \
   "https://localhost/api/incidents/$demo_015_id/reports")" == '[]' ]]
+
+# Ein ausgefallener Fake-DIVERA-Dienst liefert einen konkreten, aber schlüsselfreien Verbindungsfehler.
+"${compose[@]}" stop divera >/dev/null
+"${compose[@]}" exec -T web curl --insecure --silent --cookie /tmp/wehr-demo-cookie \
+  "https://localhost/api/units/$mitte_id/divera?summary=1" |
+  "${compose[@]}" exec -T web php -r '
+    $data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+    assert(str_contains($data["error"],"nicht erreichbar"));
+    assert(!str_contains($data["error"],"demo-local-mitte"));
+  '
