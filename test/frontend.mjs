@@ -14,6 +14,19 @@ assert.match(css, /@media \(forced-colors: active\)/);
 assert.match(css, /@media \(forced-colors: active\)[\s\S]*?\.error\s*\{[\s\S]*?border-inline-start-width:\s*4px/);
 assert.match(deployment, /put "public\/styles\.css" "public\/styles\.css"/);
 
+const apiSource = html.match(/async function api[^\n]+/)?.[0];
+assert(apiSource, 'API-Helfer fehlt');
+const apiFor = response => new Function('fetch', `let pendingWarning='';${apiSource}; return api;`)(async () => response);
+await assert.rejects(
+  apiFor(new Response('{"error":"Anmeldung erforderlich"}', {status: 401}))('/api/me'),
+  error => error.status === 401 && error.message === 'Anmeldung erforderlich'
+);
+await assert.rejects(
+  apiFor(new Response('Dienst nicht verfügbar', {status: 503}))('/api/me'),
+  error => error.status === 503 && error.message === 'Dienst nicht verfügbar'
+);
+assert.deepEqual(await apiFor(new Response(null, {status: 204}))('/api/empty'), {});
+
 const resetPasswordSource = html.match(/async function resetPassword[^\n]+/)?.[0];
 assert(resetPasswordSource, 'resetPassword fehlt');
 assert.match(resetPasswordSource, /password-reset\/context.*method:'POST'.*JSON\.stringify\(\{token\}\)/);
@@ -47,6 +60,19 @@ for (const label of ['Bericht erforderlich', 'Prüfung erforderlich', 'Bereit zu
   assert.match(incidentStatus({reportStatus: {label}}), new RegExp(`<b>Status:</b> ${label}`));
 }
 assert.match(css, /\.incident-status\s*\{[\s\S]*?border-inline-start:\s*4px solid/);
+assert.match(html, /<fieldset class="unit-picker"><legend>Einheiten<\/legend><details><summary>Einheiten auswählen<\/summary><div class="check-grid">/);
+assert.match(css, /button,\s*input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\),\s*select\s*\{\s*height:\s*var\(--control-height\)/);
+assert.match(css, /\.unit-picker summary\s*\{[\s\S]*?height:\s*var\(--control-height\)/);
+assert.match(css, /\.unit-picker \.check-grid\s*\{[\s\S]*?position:\s*absolute[\s\S]*?top:\s*calc\(100% \+ \.25rem\)[\s\S]*?inset-inline:\s*0/);
+assert.match(html, /const error=Error\(r\.ok\?'Ungültige Serverantwort':text\);error\.status=r\.status;throw error/);
+assert.match(html, /boxes\.forEach\(box=>box\.setCustomValidity\(count\?'':'Wählen Sie mindestens eine Einheit aus\.'\)\)/);
+assert.match(html, /if\(form\.getAttribute\('aria-busy'\)==='true'\)return/);
+assert.match(html, /e\.submitter\|\|form\.querySelector\('button\[type=submit\],button:not\(\[type\]\)'\)/);
+assert.equal((html.match(/<button class="form-action">(?:Anmelden|Anlegen|Einladung senden|Speichern)<\/button>/g) ?? []).length, 5);
+assert.match(html, /<form id="login" class="grid">[\s\S]*?<button class="form-action">Anmelden<\/button>/);
+assert.match(html, /<form id="incident" class="grid">[\s\S]*?<button class="form-action">Anlegen<\/button>/);
+assert.match(html, /<form id="divera" class="grid">[\s\S]*?<button class="form-action">Speichern<\/button>/);
+assert.match(css, /\.form-action\s*\{[\s\S]*?align-self:\s*end/);
 
 const filterOptionsSource = html.match(/function incidentFilterOptions[^\n]+/)?.[0];
 assert(filterOptionsSource, 'incidentFilterOptions fehlt');
@@ -265,8 +291,23 @@ const inaccessibleNotice = inaccessibleReportNotices([
 assert.match(inaccessibleNotice, /Löschzug Mitte.*Franziska &lt;Roth>.*Berichtsinhalte/s);
 assert.doesNotMatch(inaccessibleNotice, /Nils Weber|Löschgruppe Nord/);
 assert.doesNotMatch(html, /\/release/);
-assert.match(html, /type="\$\{type\}" name="unitIds"/);
-assert.match(html, /role==='einheitsleitung'\?'radio':'checkbox'/);
+const membershipFieldsSource = html.match(/function membershipFields[^\n]+/)?.[0];
+assert(membershipFieldsSource, 'Einheitsauswahl für Benutzer fehlt');
+const membershipFields = new Function('units', 'esc', `${membershipFieldsSource}; return membershipFields;`)(
+  [{id: 1, name: 'Löschzug'}, {id: 2, name: 'Löschgruppe'}],
+  value => String(value)
+);
+assert.match(membershipFields('fuehrungskraft', [2]), /class="unit-picker".*<details><summary>Einheiten auswählen<\/summary>.*type="checkbox".*value="2" checked/s);
+assert.doesNotMatch(membershipFields('einheitsleitung'), /unit-picker|<details>/);
+assert.match(membershipFields('einheitsleitung'), /<legend>Einheit<\/legend>.*type="radio".*required/s);
+const unitPickerLabelSource = html.match(/function unitPickerLabel[^\n]+/)?.[0];
+assert(unitPickerLabelSource, 'Beschriftung der Einheitsauswahl fehlt');
+const unitPickerLabel = new Function(`${unitPickerLabelSource}; return unitPickerLabel;`)();
+assert.equal(unitPickerLabel(0), 'Einheiten auswählen');
+assert.equal(unitPickerLabel(1), '1 Einheit ausgewählt');
+assert.equal(unitPickerLabel(2), '2 Einheiten ausgewählt');
+assert.match(html, /setCustomValidity\(count\?'':'Wählen Sie mindestens eine Einheit aus\.'\)/);
+assert.match(html, /addEventListener\('invalid',\(\)=>details\.open=true,true\)/);
 assert.match(html, /Alles synchronisieren/);
 assert.match(html, /Fahrzeuge synchronisieren/);
 assert.match(html, /\/resources/);
@@ -280,6 +321,11 @@ assert.match(loadCrewSource, /root\.dataset\.crewRequest!==request/);
 assert.match(loadCrewSource, /unitSelect\?\.value\|\|unitId/);
 assert.match(loadCrewSource, /Erneut laden/);
 assert.match(loadCrewSource, /if\(restoreFocus\)retry\.focus\(\)/);
+const renderResourcesSource = html.match(/async function renderResources[^\n]+/)?.[0];
+assert(renderResourcesSource, 'Ressourcenansicht fehlt');
+assert.match(renderResourcesSource, /root\.dataset\.request=request/);
+assert.match(renderResourcesSource, /if\(!root\.isConnected\|\|root\.dataset\.request!==request\)return/);
+assert.match(renderResourcesSource, /catch\(error\)\{if\(!root\.isConnected\|\|root\.dataset\.request!==request\)return;throw error\}/);
 
 const renderCrewSource = html.match(/async function renderCrew[\s\S]*?(?=\nfunction bindCrewBoard)/)?.[0];
 assert(renderCrewSource, 'renderCrew fehlt');
@@ -288,6 +334,7 @@ assert.match(renderCrewSource, /if\(restoreFocus\)root\.querySelector\('h3'\)\.f
 
 const initialViewSource = html.match(/async function initialView[\s\S]*?(?=\nasync function start)/)?.[0];
 assert(initialViewSource, 'initialView fehlt');
+assert.match(html, /catch\(e\)\{if\(e\.status===401\)return login\(\)/);
 
 let opened = 0;
 let homeOpened = false;

@@ -23,6 +23,8 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Fixed
 
+- Der Docker-Compose-Smoke-Test nutzt die bereits gesund gestarteten Dienste, statt Abhängigkeiten beim Testlauf erneut zu starten.
+- Ungültige JSON-Antworten behalten im Frontend ihren HTTP-Status; kompakte Einheitenauswahlen setzen Validierungsfehler auf alle Kontrollfelder.
 - Der Docker-Compose-Smoke-Test wartet explizit auf den Bootstrap-Endpunkt, wenn Compose den Webcontainer vor dem Testlauf neu startet.
 - Einheitenlisten, Einsatzzuordnungen, Fahrzeug-Snapshots und PDF-Einsatzakten zeigen Führungskräften und Einheitsführungen nur noch ihre aktuell zugeordneten Einheiten.
 - Erfolgreiche Anmeldungen aktualisieren veraltete Passwort-Hashes auf die aktuellen `PASSWORD_DEFAULT`-Parameter.
@@ -31,6 +33,8 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Changed
 
+- Einsatzanlage und Benutzerverwaltung zeigen Mehrfach-Einheitenauswahlen als kompakte Dropdowns; einzeilige Eingaben, Dropdowns und Buttons verwenden einheitlich 44 Pixel Höhe.
+- Mehrfach-Einheitenauswahlen zeigen die Anzahl gewählter Einheiten und verlangen mindestens eine Auswahl; API-, Formular- und Ressourcenabfragen unterscheiden Fehlerzustände und konkurrierende Anfragen zuverlässig.
 - Wehrführungen benötigen keine Einheitszuordnung, Einheitsführungen gehören exakt einer Einheit an und Führungskräfte dürfen DIVERA-Einsätze ihrer zugeordneten Einheiten selbst erkennen und importieren.
 - Nicht mehr von DIVERA gelieferte Stammdatenzuordnungen werden einheitsspezifisch entfernt; historische Einsatz- und Besatzungssnapshots bleiben erhalten.
 - Führungskräfte sehen nach dem Absenden den Übergabezeitpunkt und einen eindeutigen Nur-Lese-Hinweis; die Wehrführung sieht vor der Konsolidierung, welche alarmierten Einheiten noch keinen prüfbereiten Bericht geliefert haben.
