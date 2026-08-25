@@ -68,8 +68,9 @@ assert.match(html, /const error=Error\(r\.ok\?'Ungültige Serverantwort':text\);
 assert.match(html, /boxes\.forEach\(box=>box\.setCustomValidity\(count\?'':'Wählen Sie mindestens eine Einheit aus\.'\)\)/);
 assert.match(html, /if\(form\.getAttribute\('aria-busy'\)==='true'\)return/);
 assert.match(html, /e\.submitter\|\|form\.querySelector\('button\[type=submit\],button:not\(\[type\]\)'\)/);
-assert.equal((html.match(/<button class="form-action">(?:Anmelden|Anlegen|Einladung senden|Speichern)<\/button>/g) ?? []).length, 4);
+assert.equal((html.match(/<button class="form-action">(?:Anmelden|Anlegen|Einladung senden|Speichern)<\/button>/g) ?? []).length, 5);
 assert.match(html, /<form id="login" class="grid">[\s\S]*?<button class="form-action">Anmelden<\/button>/);
+assert.match(html, /<form id="incident" class="grid">[\s\S]*?<button class="form-action">Anlegen<\/button>/);
 assert.match(html, /<form id="divera" class="grid">[\s\S]*?<button class="form-action">Speichern<\/button>/);
 assert.match(css, /\.form-action\s*\{[\s\S]*?align-self:\s*end/);
 
