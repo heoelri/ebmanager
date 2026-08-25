@@ -133,11 +133,12 @@ Aktualisierte Basis-Images werden mit `docker compose build --pull` geladen.
 Eine ausschließlich lokale Demofeuerwehr mit drei Einheiten, allen Rollen, Mitgliedern, Fahrzeugen und zahlreichen Einsätzen wird auf Wunsch in die laufende Compose-Datenbank importiert:
 
 ```powershell
+$env:DIVERA_API_BASE_URL='http://divera:8090'
+docker compose --profile demo up --build --detach --wait divera web
 docker compose --profile demo run --rm demo-seed
-docker compose up --build
 ```
 
-Der Seed erkennt seine Organisation ausschließlich über das reservierte Konto `wehrleitung@demo.local`, setzt nur diese auf ihren definierten Demo-Stand zurück und verändert keine anderen Organisationen. Wiederholtes Ausführen erzeugt daher keine Duplikate. Ein kompletter Neustart ist mit `docker compose down --volumes` möglich.
+Der Seed erkennt seine Organisation ausschließlich über das reservierte Konto `wehrleitung@demo.local`, setzt nur diese auf ihren definierten Demo-Stand zurück und verändert keine anderen Organisationen. Wiederholtes Ausführen erzeugt daher keine Duplikate. Die drei Demo-Einheiten sind mit offensichtlich unechten lokalen Access-Keys vorkonfiguriert. Das Demo-Profil startet `test/fake-divera.php`, sodass Stammdaten synchronisiert und zusätzliche Einzel- sowie Mehrfacheinheiten-Einsätze importiert werden können, ohne die echte DIVERA-API aufzurufen. Ein kompletter Neustart ist mit `docker compose --profile demo down --volumes` möglich.
 
 Alle Demo-Konten verwenden ausschließlich lokal das Kennwort `Demo-Feuerwehr-2026!`:
 
@@ -152,7 +153,7 @@ Alle Demo-Konten verwenden ausschließlich lokal das Kennwort `Demo-Feuerwehr-20
 | Führungskraft Süd | `fuehrung.sued@demo.local` |
 | Führungskraft Mitte und Nord | `fuehrung.springer@demo.local` |
 
-Demodaten und Demo-Zugangsdaten dürfen nicht außerhalb der lokalen Docker-Compose-Umgebung verwendet werden. Der normale Aufruf `docker compose up` importiert keine Demodaten; Produktionsschema, Migrationen, CI und Deploymentpfade enthalten den Seed nicht.
+Demodaten, Demo-Zugangsdaten und die reservierten `demo-local-*`-Keys dürfen nicht außerhalb der lokalen Docker-Compose-Umgebung verwendet werden. Der normale Aufruf `docker compose up` importiert keine Demodaten; Produktionsschema, Migrationen, CI und Deploymentpfade enthalten den Seed nicht.
 
 Die Docker-Tests verwenden dieselben MySQL- und HTTP-Prüfungen wie CI:
 

@@ -91,7 +91,7 @@
 - Rufe `pull/vehicle-status` und DIVERA-Besatzungsendpunkte nicht auf.
 - `cluster.vehicle` definiert die eigenen Fahrzeuge einer Einheit. Importiere Alarmfahrzeuge als eigene oder fremde Fahrzeuge; nur eigene Fahrzeuge sind Besatzungsziele.
 - Lokale POST-Importe und Synchronisationen schreiben ausschließlich in MySQL.
-- Access-Keys werden nie protokolliert, an den Browser ausgegeben oder committed.
+- Echte Access-Keys werden nie protokolliert, an den Browser ausgegeben oder committed. Ausschließlich die offensichtlich unechten `demo-local-*`-Keys aus `demo/seed.sql` dürfen für den lokalen Fake versioniert werden.
 - Ein DIVERA-Einsatz ist innerhalb einer Organisation über `divera_id` eindeutig. Wiederholter Import aktualisiert Einsatz und `incident_units`, statt sie zu duplizieren.
 - Führungskräfte dürfen für ihre Einheiten Einsätze erkennen und einzeln importieren. Nur Einheits- und Wehrführung dürfen Access-Keys ändern oder Mitglieder, Qualifikationen und Fahrzeuge synchronisieren.
 - „Alles synchronisieren“ ruft `pull/all` und `alarms` je höchstens einmal ab, ersetzt die Stammdaten und importiert beziehungsweise aktualisiert alle gelieferten Einsätze.
@@ -122,7 +122,7 @@
 - Ergänze für nicht triviale Änderungen einen fokussierten Check in `test/smoke.sh`, insbesondere für Mandantentrennung, Rollen, Zustandsübergänge, Import-Idempotenz und externe Nur-Lese-Grenzen.
 - Jeder neu hinzugefügte oder veränderte Testfall in `test/smoke.sh` erhält unmittelbar davor einen aussagekräftigen Kommentar, der das erwartete Verhalten beschreibt.
 - `test/migrations.sh` prüft, dass spätere Migrationen in Dev-Volumes genau einmal ausgeführt werden.
-- `test/fake-divera.php` verweist auf die offiziellen OpenAPI-Dokumente. Halte seine GET-Antworten damit konsistent; `.github/workflows/divera-api-contract.yml` prüft Pfade und dokumentierte Felder monatlich, während undokumentierte Antwortdetails vor Änderungen manuell mit einer separaten DIVERA-Testeinheit geprüft werden müssen.
+- `test/fake-divera.php` verweist auf die offiziellen OpenAPI-Dokumente. Halte seine GET-Antworten damit konsistent und die `demo-local-*`-Fixtures deckungsgleich mit `demo/seed.sql`; `.github/workflows/divera-api-contract.yml` prüft Pfade und dokumentierte Felder monatlich, während undokumentierte Antwortdetails vor Änderungen manuell mit einer separaten DIVERA-Testeinheit geprüft werden müssen.
 - GitHub Actions prüft PHP- und JavaScript-Syntax, Shellskripte, `schema.sql`, den HTTP-End-to-End-Fluss sowie Docker Compose gegen Apache/HTTPS und MySQL.
 - Pull Requests erhalten keinen Zugriff auf Deployment-Secrets.
 - Nach erfolgreichen Tests eines Pushs auf `main` lädt der Workflow nur `.htaccess`, `api.php`, `constants.php`, `support.php`, `public/index.html`, `public/app.js` und `public/styles.css` per SFTP mit geprüftem Host-Key hoch. Lokale Konfiguration, Schema und Migrationen werden nie automatisch deployt.

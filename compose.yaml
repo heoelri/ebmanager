@@ -94,7 +94,7 @@ services:
     restart: "no"
 
   divera:
-    profiles: [test]
+    profiles: [test, demo]
     image: php:8.5-cli
     working_dir: /app
     environment:

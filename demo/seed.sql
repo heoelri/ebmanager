@@ -26,10 +26,10 @@ DELETE FROM organizations WHERE id=@old_org;
 INSERT INTO organizations(name) VALUES(@demo_name);
 SET @org = LAST_INSERT_ID();
 
-INSERT INTO units(organization_id,name) VALUES
-  (@org,'Löschzug Mitte'),
-  (@org,'Löschgruppe Nord'),
-  (@org,'Löschgruppe Süd');
+INSERT INTO units(organization_id,name,divera_access_key) VALUES
+  (@org,'Löschzug Mitte','demo-local-mitte'),
+  (@org,'Löschgruppe Nord','demo-local-nord'),
+  (@org,'Löschgruppe Süd','demo-local-sued');
 SET @mitte = (SELECT id FROM units WHERE organization_id=@org AND name='Löschzug Mitte');
 SET @nord = (SELECT id FROM units WHERE organization_id=@org AND name='Löschgruppe Nord');
 SET @sued = (SELECT id FROM units WHERE organization_id=@org AND name='Löschgruppe Süd');
@@ -247,5 +247,6 @@ SELECT CONCAT_WS('|',
   (SELECT COUNT(DISTINCT r.status) FROM reports r JOIN incidents i ON i.id=r.incident_id WHERE i.organization_id=o.id),
   (SELECT COUNT(*) FROM incidents i WHERE i.organization_id=o.id AND i.consolidated_at IS NOT NULL),
   (SELECT COUNT(*) FROM report_transitions rt JOIN reports r ON r.id=rt.report_id JOIN incidents i ON i.id=r.incident_id
-    WHERE i.organization_id=o.id AND rt.from_status='wehr_review' AND rt.to_status='unit_review')
+    WHERE i.organization_id=o.id AND rt.from_status='wehr_review' AND rt.to_status='unit_review'),
+  (SELECT COUNT(*) FROM units u WHERE u.organization_id=o.id AND u.divera_access_key LIKE 'demo-local-%')
 ) FROM organizations o WHERE o.id=@org;
