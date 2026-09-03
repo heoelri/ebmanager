@@ -40,6 +40,7 @@ flowchart LR
   UI-relevanten Werte authentifiziert bereit.
 - `support.php` enthält die wiederverwendbaren HTTP-, Datenbank-, Validierungs- und Mailfunktionen und ist nicht direkt öffentlich abrufbar.
 - `GET /api/system` liefert ausschließlich der Wehrleitung eine kuratierte, read-only Systemübersicht ohne Zugangsdaten oder Schlüssel.
+- Die Browsernavigation verwendet Query-basierte Deep Links (`view` beziehungsweise `incident`) und die native History API. Dadurch bleiben Refresh sowie Vorwärts-/Zurücknavigation auch bei Unterverzeichnis-Deployments ohne zusätzliche Apache-Routen funktionsfähig.
 - `schema.sql` ist die maßgebliche Definition des MySQL-Schemas.
 - `docker/migrate.sh` führt in der lokalen Compose-Umgebung vor dem Webstart
   ausstehende Dateien aus `migrations/` genau einmal aus.

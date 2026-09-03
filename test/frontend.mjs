@@ -431,27 +431,39 @@ assert(renderCrewSource, 'renderCrew fehlt');
 assert.match(renderCrewSource, /if\(!root\.isConnected\|\|/);
 assert.match(renderCrewSource, /if\(restoreFocus\)root\.querySelector\('h3'\)\.focus\(\)/);
 
-const initialViewSource = html.match(/async function initialView[\s\S]*?(?=\nasync function start)/)?.[0];
-assert(initialViewSource, 'initialView fehlt');
+const navigationSource = html.match(/function viewAllowed[\s\S]*?(?=\nasync function start)/)?.[0];
+assert(navigationSource, 'Deep-Link-Navigation fehlt');
 assert.match(html, /catch\(e\)\{if\(e\.status===401\)return login\(\)/);
+assert.match(html, /addEventListener\('popstate',\(\)=>\{if\(me\)initialView\(\)\.catch\(showError\)\}\)/);
 
-let opened = 0;
-let homeOpened = false;
-const location = {search: '?incident=42'};
-const initialView = new Function(
-  'location', 'incidents', 'incident', 'home',
-  `${initialViewSource}; return initialView;`
-)(
-  location,
-  [{id: 42}],
-  async id => { opened = id; },
-  () => { homeOpened = true; }
-);
-await initialView();
-assert.equal(opened, 42);
-assert.equal(homeOpened, false);
-
-location.search = '?incident=43';
-await initialView();
-assert.equal(opened, 42);
-assert.equal(homeOpened, true);
+const requested = [];
+const location = {href: 'https://example.test/app/?view=resources', search: '?view=resources'};
+const history = {
+  pushState: (_state, _title, url) => { location.href = String(url); location.search = new URL(url).search; },
+  replaceState: (_state, _title, url) => { location.href = String(url); location.search = new URL(url, location.href).search; }
+};
+const dialog = {open: false, close() {}};
+const me = {role: 'wehrleitung'};
+const views = Object.fromEntries(['home','resources','statistics','admin','systemOverview','divera'].map(view=>[view,()=>{requested.push(view);if(view==='admin')return false}]));
+const navigation = new Function(
+  'location','history','dialog','me','incidents','incident',...Object.keys(views),
+  `${navigationSource}; return {viewAllowed,setViewLocation,navigate,initialView};`
+)(location,history,dialog,me,[{id:42}],id=>{requested.push(`incident:${id}`)},...Object.values(views));
+await navigation.initialView();
+assert.deepEqual(requested,['resources']);
+assert.equal(location.search,'?view=resources');
+await navigation.navigate('incident',42);
+assert.equal(location.search,'?incident=42');
+assert.deepEqual(requested,['resources','incident:42']);
+await navigation.navigate('unknown');
+assert.equal(location.search,'?view=home');
+assert.deepEqual(requested,['resources','incident:42','home']);
+await navigation.navigate('admin');
+assert.equal(location.search,'?view=home');
+assert.deepEqual(requested,['resources','incident:42','home','admin']);
+me.role='fuehrungskraft';
+await navigation.navigate('system');
+assert.equal(location.search,'?view=home');
+me.role='einheitsleitung';
+assert.equal(navigation.viewAllowed('statistics'),true);
+assert.equal(navigation.viewAllowed('admin'),false);

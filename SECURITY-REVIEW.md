@@ -79,6 +79,10 @@ Die im vollständigen API-Review priorisierten Befunde zu Transport, Sitzungen u
 
 `GET /api/system` wurde auf Rollenprüfung und Konfigurationslecks geprüft. Nur `wehrleitung` erhält die Übersicht. Die API gibt ausschließlich kuratierte Statuswerte, Versionen, Namen, Rollen und boolesche Konfigurationsmerkmale aus; DSN, Datenbank- und SMTP-Kennwörter, Einrichtungstoken sowie DIVERA-Schlüssel bleiben serverseitig. Ein Smoke-Test prüft sowohl die Sperre für andere Rollen als auch das Fehlen geheimnisverdächtiger Schlüsselnamen.
 
+## Deep Links vom 3. September 2026
+
+Query-Parameter wählen ausschließlich bereits vorhandene Browseransichten aus und erweitern keine API-Berechtigung. Nicht erlaubte Rollenansichten und nicht sichtbare Einsatz-IDs fallen auf die Einsatzübersicht zurück; alle fachlichen Daten bleiben zusätzlich serverseitig rollen-, einheits- und mandantengebunden. Einladungs- und Wiederherstellungstoken verbleiben in den bestehenden Hash-Fragmenten und werden nicht in die neue Navigation übernommen.
+
 ## SMTP-Versand vom 23. August 2026
 
 Der optionale SMTP-Versand verwendet Port 587 mit verpflichtendem STARTTLS, aktiviert Zertifikats- und Hostnamenprüfung und authentifiziert sich erst nach dem TLS-Handshake. SMTP-Passwörter werden ausschließlich aus der nicht versionierten Konfiguration oder aus Umgebungsvariablen gelesen und weder geloggt noch an den Browser übertragen. Unvollständige SMTP-Konfigurationen werden abgelehnt; ohne `smtp_host` bleibt PHP `mail()` der Fallback.
