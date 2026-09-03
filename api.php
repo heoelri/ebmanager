@@ -19,6 +19,11 @@ function databaseConfigurationError(): ?string
              AND column_name IN ('report_year','running_number','damaged_party','damaging_party','incident_command')"
         )->fetchColumn();
         if ((int)$reportColumns !== 5) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
+        $memberUnitColumns = db()->query(
+            "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='member_units'
+             AND column_name='active'"
+        )->fetchColumn();
+        if ((int)$memberUnitColumns !== 1) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
     } catch (PDOException $error) {
         error_log((string)$error);
         return 'Datenbankverbindung fehlgeschlagen. Prüfen Sie DSN, Benutzername, Passwort und Erreichbarkeit.';

@@ -24,6 +24,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Fixed
 
+- Der Bootstrap-Endpunkt erkennt eine fehlende `member_units.active`-Spalte als unvollständiges Schema und antwortet mit HTTP 503.
 - Inaktive Mitglieder und ihre historischen Fahrzeugzuordnungen bleiben beim Bearbeiten erhalten, können entfernt, aber nicht neu zugeordnet werden.
 - Datums- und Uhrzeitwerte folgen dem Browserformat des Nutzers; Ausrücke- und Eintreffzeit können bei abgebrochenen Einsätzen geleert werden.
 - Der Docker-Compose-Smoke-Test nutzt die bereits gesund gestarteten Dienste, statt Abhängigkeiten beim Testlauf erneut zu starten.

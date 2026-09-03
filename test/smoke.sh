@@ -222,6 +222,13 @@ curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="RENAME TABLE divera_imports_missing TO divera_imports"
 
+# Eine fehlende Spalte aus Migration 002 liefert am Bootstrap-Endpunkt HTTP 503.
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="ALTER TABLE member_units DROP COLUMN active"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' "$base_url/api/bootstrap")" = 503
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="ALTER TABLE member_units ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE AFTER unit_id"
+
 # Führungskräfte ohne Wehrleitungsrolle dürfen weder Systemübersicht noch Nutzerverwaltung aufrufen.
 regular_token='dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
 regular_hash=$(php -r "echo hash('sha256', '$regular_token');")
