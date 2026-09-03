@@ -41,7 +41,7 @@
 - Eine Organisation muss immer mindestens eine `wehrleitung` behalten.
 - Neue Benutzer erhalten kein Startpasswort, sondern einen sieben Tage gültigen Einmallink zur Aktivierung; die Einladung nennt den Ablaufzeitpunkt in `Europe/Berlin`. Vergessene Passwörter bleiben 30 Minuten gültig, verwenden denselben gehashten Tokenmechanismus und sind pro Benutzer fünf Minuten gesperrt.
 - Eine Passwortänderung widerruft alle Sitzungen des Benutzers.
-- Erfolgreiche Anmeldungen werden mit Benutzer und UTC-Zeitpunkt in `login_history` gespeichert. Nur die Wehrleitung sieht die fünf neuesten Einträge je Benutzer. Speichere keine IP-Adressen, Browserdaten oder fehlgeschlagenen Anmeldungen.
+- Erfolgreiche Anmeldungen werden mit Benutzer und UTC-Zeitpunkt in `login_history` gespeichert. Nur die Wehrleitung sieht den neuesten Eintrag je Benutzer. Speichere keine IP-Adressen, Browserdaten oder fehlgeschlagenen Anmeldungen.
 
 ## Sitzungen, Requests und E-Mail
 

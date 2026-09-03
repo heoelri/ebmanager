@@ -180,7 +180,7 @@ if [[ "$base_url" == https://* ]]; then
   test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' "$base_url/constants.php")" = 403
 fi
 
-# Wiederholte Anmeldungen erscheinen vollständig und absteigend sortiert in der Login-Historie.
+# Die Benutzerverwaltung zeigt auch nach wiederholten Anmeldungen nur die letzte Anmeldung.
 weak_password_hash=$(php -r 'echo password_hash("geheimes-passwort", PASSWORD_BCRYPT, ["cost"=>4]);')
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE users SET password_hash='$weak_password_hash' WHERE email='admin@example.test'"
@@ -197,7 +197,7 @@ WEAK_HASH="$weak_password_hash" CURRENT_HASH="$current_password_hash" php -r '
   assert(!password_needs_rehash(getenv("CURRENT_HASH"),PASSWORD_DEFAULT));
 '
 users_json=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/users")
-printf '%s' "$users_json" | php -r '$users=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($users[0]["loginHistory"])===2); assert($users[0]["loginHistory"][0]>=$users[0]["loginHistory"][1]);'
+printf '%s' "$users_json" | php -r '$users=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); exit(count($users[0]["loginHistory"])===1 ? 0 : 1);'
 rm -f second-login-cookies.txt
 
 # Die Systemübersicht enthält erwartete Statusdaten, aber keine Zugangsdaten oder Tokens.

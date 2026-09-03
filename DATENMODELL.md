@@ -127,7 +127,7 @@ Speichert ausschließlich erfolgreiche Anmeldungen. IP-Adresse, Browserdaten und
 | `user_id` | BIGINT UNSIGNED, FK | Angemeldeter Benutzer |
 | `logged_in_at` | DATETIME, NOT NULL | Anmeldezeitpunkt in UTC |
 
-Die Verwaltung zeigt der Wehrleitung die fünf neuesten Einträge pro Benutzer. Beim Löschen eines Benutzers wird seine Login-Historie mitgelöscht.
+Die Verwaltung zeigt der Wehrleitung den neuesten Eintrag pro Benutzer. Beim Löschen eines Benutzers wird seine Login-Historie mitgelöscht.
 
 ### `password_resets`
 

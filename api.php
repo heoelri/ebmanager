@@ -1095,10 +1095,9 @@ try {
             [$user['organization_id']]
         )->fetchAll();
         $history = query(
-            "SELECT user_id,DATE_FORMAT(logged_in_at,'%Y-%m-%dT%H:%i:%sZ') logged_in_at FROM
-             (SELECT h.*,ROW_NUMBER() OVER(PARTITION BY h.user_id ORDER BY h.logged_in_at DESC,h.id DESC) history_position
-              FROM login_history h JOIN users u ON u.id=h.user_id WHERE u.organization_id=?) recent
-             WHERE history_position<=5 ORDER BY user_id,history_position",
+            "SELECT h.user_id,DATE_FORMAT(MAX(h.logged_in_at),'%Y-%m-%dT%H:%i:%sZ') logged_in_at
+             FROM login_history h JOIN users u ON u.id=h.user_id
+             WHERE u.organization_id=? GROUP BY h.user_id ORDER BY h.user_id",
             [$user['organization_id']]
         )->fetchAll();
         $historyByUser = [];

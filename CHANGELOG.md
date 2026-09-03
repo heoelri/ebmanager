@@ -35,6 +35,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Changed
 
+- Die Benutzerverwaltung weist beim Anlegen auf die siebentägige Gültigkeit des Einladungslinks hin und zeigt je Benutzer nur die letzte erfolgreiche Anmeldung.
 - Einladungslinks sind sieben Tage gültig und nennen ihren Ablaufzeitpunkt in `Europe/Berlin`; Links für vergessene Passwörter bleiben 30 Minuten gültig.
 - Das Frontend lädt JavaScript als separat cachebare Datei ohne Inline-Eventhandler, erzwingt eine restriktivere Content Security Policy und zeigt Benutzerrollen einheitlich auf Deutsch.
 - Einzeilige Controls verwenden eine barrierefreundliche Mindesthöhe; gemeinsame Summary-Regeln und semantische Benutzerlisten vereinfachen Styles und Struktur.
