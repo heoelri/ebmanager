@@ -11,9 +11,10 @@ function databaseConfigurationError(): ?string
         $tables = db()->query(
             "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN
              ('organizations','units','users','user_units','sessions','login_history','password_resets','incidents','incident_units',
-              'divera_imports','members','member_units','qualifications','member_qualifications','vehicles','reports','report_transitions','report_crew')"
+              'divera_imports','members','member_units','qualifications','member_qualifications','vehicles','reports','report_transitions','report_crew',
+              'report_additional_vehicles')"
         )->fetchColumn();
-        if ((int)$tables !== 18) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
+        if ((int)$tables !== 19) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
         $reportColumns = db()->query(
             "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='reports'
              AND column_name IN ('report_year','running_number','damaged_party','damaging_party','incident_command')"
@@ -307,6 +308,7 @@ function visibleIncidentReports(int $incidentId, array $user): array
         $crew[$reportId][] = $person;
     }
     $history = [];
+    $additionalVehicles = [];
     if ($rows) {
         $ids = array_map(fn($row) => (int)$row['id'], $rows);
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
@@ -318,10 +320,18 @@ function visibleIncidentReports(int $incidentId, array $user): array
         )->fetchAll() as $transition) {
             $history[(int)$transition['report_id']][] = $transition;
         }
+        foreach (query(
+            "SELECT report_id,vehicle FROM report_additional_vehicles
+             WHERE report_id IN ($placeholders) ORDER BY vehicle",
+            $ids
+        )->fetchAll() as $vehicle) {
+            $additionalVehicles[(int)$vehicle['report_id']][] = $vehicle['vehicle'];
+        }
     }
     foreach ($rows as &$row) {
         $row['crew'] = json_encode($crew[(int)$row['id']] ?? [], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
         $row['history'] = $history[(int)$row['id']] ?? [];
+        $row['additionalVehicles'] = $additionalVehicles[(int)$row['id']] ?? [];
         $row['editable'] = canEditReport($row, $user);
         $row['duration_minutes'] = $row['ended_at'] && $row['alarmed_at']
             ? (int)round((strtotime($row['ended_at']) - strtotime($row['alarmed_at'])) / 60)
@@ -413,6 +423,7 @@ function reportExportLines(array $report): array
     foreach (exportJson($report['classification']) as $group => $values) {
         if ($values) exportLine($lines, (CLASSIFICATION_LABELS[$group] ?? $group) . ': ' . implode(', ', $values));
     }
+    exportLine($lines, 'Zusätzliche Fahrzeuge: ' . (($report['additionalVehicles'] ?? []) ? implode(', ', $report['additionalVehicles']) : '–'));
     exportLine($lines, 'Fahrzeuge: ' . ($report['vehicles'] ?: '–'));
     exportLine($lines, 'Personal: ' . ($report['personnel'] ?: '–'));
     exportLine($lines, 'Besatzung', true);
@@ -569,13 +580,71 @@ function reportDetails(array $data, array $incident): array
     ];
 }
 
-function replaceCrew(int $reportId, int $incidentId, int $unitId, mixed $crew, int $organizationId): array
+function ownIncidentVehicleNames(int $incidentId, int $unitId): array
 {
-    if (!is_array($crew) || !array_is_list($crew)) throw new ApiError(400, 'Besatzung ist ungültig');
     $assignment = one('SELECT vehicles FROM incident_units WHERE incident_id=? AND unit_id=?', [$incidentId, $unitId]);
     $snapshots = json_decode($assignment['vehicles'] ?? '[]', true) ?: [];
-    $vehicles = array_map(fn($vehicle) => is_string($vehicle) ? $vehicle : $vehicle['name'],
-        array_values(array_filter($snapshots, fn($vehicle) => is_string($vehicle) || ($vehicle['own'] ?? true) !== false)));
+    return array_values(array_unique(array_map(
+        fn($vehicle) => is_string($vehicle) ? $vehicle : $vehicle['name'],
+        array_values(array_filter($snapshots, fn($vehicle) => is_string($vehicle) || ($vehicle['own'] ?? true) !== false))
+    )));
+}
+
+function additionalVehicleSelection(
+    int $reportId,
+    int $incidentId,
+    int $unitId,
+    int $organizationId,
+    mixed $value
+): array {
+    if (!is_array($value) || !array_is_list($value)) throw new ApiError(400, 'Zusätzliche Fahrzeuge sind ungültig');
+    $base = array_fill_keys(ownIncidentVehicleNames($incidentId, $unitId), true);
+    $current = array_fill_keys(array_column(query(
+        'SELECT v.name FROM vehicles v JOIN units u ON u.id=v.unit_id
+         WHERE v.unit_id=? AND u.organization_id=?',
+        [$unitId, $organizationId]
+    )->fetchAll(), 'name'), true);
+    $existing = array_fill_keys(array_column(query(
+        'SELECT vehicle FROM report_additional_vehicles WHERE report_id=?',
+        [$reportId]
+    )->fetchAll(), 'vehicle'), true);
+    $selected = $assignable = [];
+    foreach ($value as $vehicle) {
+        $vehicle = required($vehicle, 'Fahrzeug', 200);
+        if (isset($base[$vehicle])) continue;
+        if (isset($selected[$vehicle]) || (!isset($current[$vehicle]) && !isset($existing[$vehicle]))) {
+            throw new ApiError(400, 'Zusätzliche Fahrzeuge sind ungültig');
+        }
+        $selected[$vehicle] = true;
+        if (isset($current[$vehicle])) $assignable[] = $vehicle;
+    }
+    return [
+        'selected' => array_keys($selected),
+        'assignable' => $assignable,
+        'removed' => array_values(array_diff(array_keys($existing), array_keys($selected), array_keys($base)))
+    ];
+}
+
+function replaceAdditionalVehicles(int $reportId, array $vehicles): void
+{
+    query('DELETE FROM report_additional_vehicles WHERE report_id=?', [$reportId]);
+    foreach ($vehicles as $vehicle) {
+        query('INSERT INTO report_additional_vehicles(report_id,vehicle) VALUES(?,?)', [$reportId, $vehicle]);
+    }
+}
+
+function replaceCrew(
+    int $reportId,
+    int $incidentId,
+    int $unitId,
+    mixed $crew,
+    int $organizationId,
+    array $additionalVehicles = [],
+    array $removedAdditionalVehicles = []
+): array
+{
+    if (!is_array($crew) || !array_is_list($crew)) throw new ApiError(400, 'Besatzung ist ungültig');
+    $vehicles = array_values(array_unique(array_merge(ownIncidentVehicleNames($incidentId, $unitId), $additionalVehicles)));
     $members = [];
     foreach (query(
         'SELECT m.id,m.name,mu.active FROM members m JOIN member_units mu ON mu.member_id=m.id
@@ -596,10 +665,14 @@ function replaceCrew(int $reportId, int $incidentId, int $unitId, mixed $crew, i
         $unchanged = isset($existingCrew[$memberId])
             && $existingCrew[$memberId]['vehicle'] === $vehicle
             && $existingCrew[$memberId]['role'] === $role;
+        if ($vehicle && in_array($vehicle, $removedAdditionalVehicles, true)) {
+            throw new ApiError(400, 'Das zusätzliche Fahrzeug ist noch einer Besatzung zugeordnet');
+        }
         // Driver and unit leader are unique per vehicle; crew members are not.
         $slot = $vehicle && $role !== 'besatzung' ? "$vehicle:$role" : '';
         if (!$memberId || isset($seen[$memberId]) || !isset($members[$memberId]) || (!(int)$members[$memberId]['active'] && !$unchanged)
-            || ($vehicle && !in_array($vehicle, $vehicles, true) && !$unchanged)
+            || ($vehicle && !in_array($vehicle, $vehicles, true)
+                && (!$unchanged || in_array($vehicle, $removedAdditionalVehicles, true)))
             || !in_array($role, ['maschinist', 'einheitsfuehrer', 'besatzung'], true)
             || (!$vehicle && $role !== 'besatzung') || ($slot && isset($occupied[$slot]))) {
             throw new ApiError(400, 'Besatzung ist ungültig');
@@ -1406,7 +1479,14 @@ try {
                  $status === 'wehr_review' ? gmdate('Y-m-d H:i:s') : null]
             );
             $id = (int)db()->lastInsertId();
-            $summary = replaceCrew($id, $incidentId, $unitId, $data['crew'] ?? [], $user['organization_id']);
+            $vehicleSelection = additionalVehicleSelection(
+                $id, $incidentId, $unitId, (int)$user['organization_id'], $data['additionalVehicles'] ?? []
+            );
+            $summary = replaceCrew(
+                $id, $incidentId, $unitId, $data['crew'] ?? [], (int)$user['organization_id'],
+                $vehicleSelection['assignable'], $vehicleSelection['removed']
+            );
+            replaceAdditionalVehicles($id, $vehicleSelection['selected']);
             query('UPDATE reports SET vehicles=?,personnel=? WHERE id=?', [$summary['vehicles'], $summary['personnel'], $id]);
             query(
                 'INSERT INTO report_transitions(report_id,from_status,to_status,actor_id,actor_name,actor_role,created_at) VALUES(?,NULL,?,?,?,?,UTC_TIMESTAMP())',
@@ -1427,7 +1507,16 @@ try {
             if (!$lockedReport || !canEditReport($lockedReport, $user)) throw new ApiError(409, 'Der Bericht wurde bereits geändert');
             $foundIncident = incident((int)$lockedReport['incident_id'], $user['organization_id']);
             $details = reportDetails($data, $foundIncident);
-            $summary = replaceCrew((int)$lockedReport['id'], (int)$lockedReport['incident_id'], (int)$lockedReport['unit_id'], $data['crew'] ?? [], $user['organization_id']);
+            $vehicleSelection = additionalVehicleSelection(
+                (int)$lockedReport['id'], (int)$lockedReport['incident_id'], (int)$lockedReport['unit_id'],
+                (int)$user['organization_id'], $data['additionalVehicles'] ?? []
+            );
+            $summary = replaceCrew(
+                (int)$lockedReport['id'], (int)$lockedReport['incident_id'], (int)$lockedReport['unit_id'],
+                $data['crew'] ?? [], (int)$user['organization_id'],
+                $vehicleSelection['assignable'], $vehicleSelection['removed']
+            );
+            replaceAdditionalVehicles((int)$lockedReport['id'], $vehicleSelection['selected']);
             query(
                 'UPDATE reports SET report_year=?,running_number=?,damaged_party=?,damaging_party=?,incident_command=?,narrative=?,vehicles=?,personnel=?,alarmed_at=?,departed_at=?,arrived_at=?,ended_at=?,incident_type=?,classification=? WHERE id=?',
                 [$details['reportYear'], $details['runningNumber'], $details['damagedParty'], $details['damagingParty'], $details['incidentCommand'],

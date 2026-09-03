@@ -67,13 +67,13 @@ php -r '
   }
 '
 
-# Das Frontend enthält die erwarteten Accessibility-, Verwaltungs- und DIVERA-Elemente, lässt inaktive Besatzung entfernen und dupliziert keine Fachoptionen.
+# Das Frontend enthält die erwarteten barrierefreien Verwaltungs-, DIVERA-, Fahrzeug- und Besatzungselemente ohne duplizierte Fachoptionen.
 php -r '
   $html=file_get_contents("public/index.html");
   $javascript=file_get_contents("public/app.js");
   $frontend=$html.$javascript;
   $css=file_get_contents("public/styles.css");
-  foreach (["viewport-fit=cover","public/styles.css","public/app.js","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:","rankOptions","pendingWarning","initialView","DIVERA-Einsatznummer","class=\"command-row\"","class=\"form-section\"","class=\"report-times\"","restoreDialogFocus","Zugang zurücksetzen und neu einladen","resetUser","zone.key===current","zone.historical","zone.dataset.historical","<select name=\"commandRank\">","<select name=\"additionalCommandRank\">"] as $required) {
+  foreach (["viewport-fit=cover","public/styles.css","public/app.js","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:","rankOptions","pendingWarning","initialView","DIVERA-Einsatznummer","Weitere Fahrzeuge der eigenen Einheit","selectedAdditionalVehicles","class=\"command-row\"","class=\"form-section\"","class=\"report-times\"","restoreDialogFocus","Zugang zurücksetzen und neu einladen","resetUser","zone.key===current","zone.historical","zone.dataset.historical","<select name=\"commandRank\">","<select name=\"additionalCommandRank\">"] as $required) {
     if (!str_contains($frontend,$required)) { fwrite(STDERR,"Frontend-Marker fehlt: $required\n"); exit(1); }
   }
   foreach (["--control-height: 44px",":focus-visible","safe-area-inset-bottom","forced-colors: active"] as $required) {
@@ -424,11 +424,17 @@ test "$(incident_status "$force_token" "$incident_id")" = report_required
 test "$(incident_status "$leader_token" "$incident_id")" = report_required
 
 # Berichte starten rollenabhängig, bleiben bis zur jeweiligen Übergabe verborgen und speichern die Fachdaten.
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="INSERT INTO vehicles(unit_id,divera_id,name) VALUES(1,'manual-extra','Zusatzfahrzeug'),($second_unit_id,'foreign-extra','Fremdfahrzeug');
+    INSERT INTO members(id,organization_id,divera_id,name) VALUES(100,1,'test-100','Person 100');
+    INSERT INTO member_units(member_id,unit_id) VALUES(100,1)"
 report_payload='{"unitId":1,"foreign_id":"manipuliert","divera_id":"manipuliert","runningNumber":"69/2026","damagedParty":{"name":"Max Mustermann","phone":"02733 123","address":"Musterweg 1"},"damagingParty":{"name":"Erika Beispiel","phone":"","address":"Beispielweg 2"},"incidentCommand":{"rank":"BOI","name":"D. Gerlach","additionalRank":"BI","additionalName":"A. Busch"},"narrative":"Ursprünglich","departedAt":"2026-08-22T18:05:00.000Z","arrivedAt":"2026-08-22T18:10:00.000Z","endedAt":"2026-08-22T19:00:00.000Z","incidentType":"Technische Hilfe","classification":{"site":[],"cause":[],"technical":[]},"crew":[]}'
+base_report_payload="$report_payload"
+report_with_additional_vehicle="${report_payload/\"crew\":[]/\"additionalVehicles\":[\"Zusatzfahrzeug\"],\"crew\":[{\"memberId\":100,\"vehicle\":\"Zusatzfahrzeug\",\"role\":\"maschinist\"}]}"
 report_id=$(curl --insecure --silent --fail \
   --cookie "$session_cookie=$force_token" \
   --header 'Content-Type: application/json' \
-  --data "$report_payload" \
+  --data "$report_with_additional_vehicle" \
   "$base_url/api/incidents/$incident_id/reports" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
 [[ "$report_id" =~ ^[0-9]+$ ]] || {
@@ -440,6 +446,63 @@ test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-characte
   einsatzberichte --execute="SELECT CONCAT(status,'|',report_year,'|',running_number,'|',JSON_UNQUOTE(JSON_EXTRACT(damaged_party,'$.name')),'|',JSON_UNQUOTE(JSON_EXTRACT(damaging_party,'$.name')),'|',JSON_UNQUOTE(JSON_EXTRACT(incident_command,'$.rank')),'|',JSON_UNQUOTE(JSON_EXTRACT(incident_command,'$.name'))) FROM reports WHERE id=$report_id_int")" = 'author_draft|2026|69/2026|Max Mustermann|Erika Beispiel|BOI|D. Gerlach'
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT CONCAT(COALESCE(foreign_id,''),'|',COALESCE(divera_id,'')) FROM incidents WHERE id=$incident_id")" = '|'
+
+# Zusätzliche Fahrzeuge stammen aus dem aktuellen Stamm der Berichtseinheit, sind Besatzungsziele und für fremde Rollen sowie Einheiten gesperrt.
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT CONCAT((SELECT GROUP_CONCAT(vehicle) FROM report_additional_vehicles WHERE report_id=$report_id_int),'|',(SELECT vehicle FROM report_crew WHERE report_id=$report_id_int AND member_id=100))")" = 'Zusatzfahrzeug|Zusatzfahrzeug'
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$incident_id/reports" |
+  php -r '$reports=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($reports[0]["additionalVehicles"]===["Zusatzfahrzeug"]);'
+assert_pdf "$force_token" "/api/reports/$report_id/pdf" 'Zusätzliche Fahrzeuge: Zusatzfahrzeug|Zusatzfahrzeug | Maschinist: Person 100'
+foreign_vehicle_payload="${report_payload/\"crew\":[]/\"additionalVehicles\":[\"Fremdfahrzeug\"],\"crew\":[]}"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
+  --data "$foreign_vehicle_payload" "$base_url/api/reports/$report_id")" = 400
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$other_force_token" --header 'Content-Type: application/json' --request PUT \
+  --data "$report_with_additional_vehicle" "$base_url/api/reports/$report_id")" = 403
+
+# Ein aus dem aktuellen Stamm verschwundenes Zusatzfahrzeug bleibt unverändert erhalten, kann aber keiner anderen Person neu zugeordnet werden.
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DELETE FROM vehicles WHERE unit_id=1 AND divera_id='manual-extra';
+    INSERT INTO members(id,organization_id,divera_id,name) VALUES(99,1,'test-99','Person 99');
+    INSERT INTO member_units(member_id,unit_id) VALUES(99,1)"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
+  --data "$report_with_additional_vehicle" "$base_url/api/reports/$report_id")" = 200
+historical_new_assignment=$(printf '%s' "$report_with_additional_vehicle" | php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $data["crew"][0]["memberId"]=99; echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);')
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
+  --data "$historical_new_assignment" "$base_url/api/reports/$report_id")" = 400
+
+# Ein zusätzliches Fahrzeug kann erst entfernt werden, nachdem seine Besatzung im selben Speichervorgang entfernt wurde.
+vehicle_removed_with_crew=$(printf '%s' "$report_with_additional_vehicle" | php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $data["additionalVehicles"]=[]; echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);')
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
+  --data "$vehicle_removed_with_crew" "$base_url/api/reports/$report_id")" = 400
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DELETE FROM members WHERE id=99"
+
+# Wird das Zusatzfahrzeug später von DIVERA alarmiert, wird der doppelte Berichtseintrag beim Speichern entfernt, ohne die Besatzung zu blockieren.
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="UPDATE incident_units SET vehicles=JSON_ARRAY(JSON_OBJECT('id','manual-extra','name','Zusatzfahrzeug','own',TRUE)) WHERE incident_id=$incident_id AND unit_id=1"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
+  --data "$report_with_additional_vehicle" "$base_url/api/reports/$report_id")" = 200
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT COUNT(*) FROM report_additional_vehicles WHERE report_id=$report_id_int")" = 0
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="UPDATE incident_units SET vehicles=JSON_ARRAY() WHERE incident_id=$incident_id AND unit_id=1;
+    INSERT INTO vehicles(unit_id,divera_id,name) VALUES(1,'manual-extra','Zusatzfahrzeug')"
+curl --insecure --silent --fail \
+  --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
+  --data "$report_with_additional_vehicle" "$base_url/api/reports/$report_id" >/dev/null
+
+report_payload=$(printf '%s' "$base_report_payload" | php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $data["additionalVehicles"]=["Zusatzfahrzeug"]; echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);')
+curl --insecure --silent --fail \
+  --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
+  --data "$report_payload" "$base_url/api/reports/$report_id" >/dev/null
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DELETE FROM members WHERE id=100"
 
 # Ausrücke- und Eintreffzeit können bei einem abgebrochenen Einsatz geleert werden.
 report_without_travel_times="${report_payload/\"departedAt\":\"2026-08-22T18:05:00.000Z\",\"arrivedAt\":\"2026-08-22T18:10:00.000Z\"/\"departedAt\":null,\"arrivedAt\":null}"
@@ -574,9 +637,10 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' -
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$incident_id/consolidation/pdf")" = 409
 
 # Die Wehrführung kann erst nach Berichten aller alarmierten Einheiten konsolidieren und den Gesamtbericht exportieren.
+second_report_payload="${base_report_payload/\"unitId\":1/\"unitId\":$second_unit_id}"
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' \
-  --data "${report_payload/\"unitId\":1/\"unitId\":$second_unit_id}" \
+  --data "$second_report_payload" \
   "$base_url/api/incidents/$incident_id/reports" >/dev/null
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
   INCIDENT_ID="$incident_id" php -r '$items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $incident=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")))[0]; assert($incident["reportStatus"]["key"]==="ready");'
@@ -765,6 +829,10 @@ curl --insecure --silent --fail \
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($data["incidentsCreated"]===0); assert($data["incidentsUpdated"]===2); assert($data["assignmentsCreated"]===0);'
 test "$(grep --count '^GET /api/v2/pull/all$' "$divera_log")" = 1
 test "$(grep --count '^GET /api/v2/alarms$' "$divera_log")" = 1
+
+# Ein DIVERA-Neuimport verändert den Alarm-Snapshot, entfernt aber kein zusätzlich im Bericht gespeichertes Fahrzeug.
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT COUNT(*) FROM report_additional_vehicles WHERE report_id=$report_id_int AND vehicle='Zusatzfahrzeug'")" = 1
 
 # Fehlerhafte DIVERA-Antworten brechen den Abgleich ab, ohne bestehende Stammdaten zu verändern.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \

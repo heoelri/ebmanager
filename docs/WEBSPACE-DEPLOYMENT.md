@@ -237,6 +237,14 @@ Wenn das automatische Deployment verwendet wird, müssen erforderliche Migration
 6. `/api/bootstrap` aufrufen; der Endpunkt darf kein unvollständiges Schema melden.
 7. Anmeldung, Benutzerverwaltung, einen vorhandenen Bericht und die DIVERA-Ressourcenansicht prüfen.
 
+### Von `2026-09-03` auf einen Stand mit zusätzlichen Berichtsfahrzeugen aktualisieren
+
+1. Datenbank und bisherige Anwendungsdateien sichern.
+2. `migrations/003-report-additional-vehicles.sql` über die Datenbankverwaltung genau einmal importieren.
+3. Prüfen, dass `003-report-additional-vehicles.sql` in `schema_migrations` vorhanden ist.
+4. Erst danach den neuen Anwendungscode hochladen.
+5. `/api/bootstrap` und das Hinzufügen eines eigenen Fahrzeugs in einem bearbeitbaren Einheitsbericht prüfen.
+
 Für andere Ausgangs- oder Zielversionen gelten die jeweils datierten
 Upgrade-Hinweise im [Changelog](../CHANGELOG.md).
 

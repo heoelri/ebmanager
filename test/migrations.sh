@@ -16,8 +16,10 @@ for _ in {1..60}; do
 done
 "${compose[@]}" exec -T db mysql --host=127.0.0.1 --user=root -ptest-password einsatzberichte --execute="SELECT 1" >/dev/null
 
-# Simulate an installation before the report workflow, vehicle catalog, and inactive member state.
+# Eine Installation vor den Migrationen erhält Workflow, Stammdaten, Aktivstatus und zusätzliche Berichtsfahrzeuge genau einmal.
 "${compose[@]}" exec -T db mysql --user=root -ptest-password einsatzberichte --execute="
+  DROP TABLE report_additional_vehicles;
+  DELETE FROM schema_migrations WHERE name='003-report-additional-vehicles.sql';
   ALTER TABLE member_units DROP COLUMN active;
   DELETE FROM schema_migrations WHERE name='002-inactive-unit-members.sql';
   DROP TABLE report_transitions;
@@ -56,10 +58,12 @@ result="$("${compose[@]}" exec -T db mysql --user=root -ptest-password --batch -
     (SELECT COUNT(*) FROM report_transitions WHERE report_id BETWEEN 10 AND 13),'|',
     (SELECT COUNT(*) FROM schema_migrations WHERE name='001-report-workflow-and-vehicles.sql'),'|',
     (SELECT COUNT(*) FROM schema_migrations WHERE name='002-inactive-unit-members.sql'),'|',
+    (SELECT COUNT(*) FROM schema_migrations WHERE name='003-report-additional-vehicles.sql'),'|',
+    (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='report_additional_vehicles'),'|',
     (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='member_units' AND column_name='active'),'|',
     (SELECT CONCAT(COUNT(*),':',COALESCE(MAX(active),9)) FROM member_units WHERE member_id=10 AND unit_id=10)
   )")"
-test "$result" = '1|1|author_draft,unit_review,wehr_review,wehr_review|4|1|1|1|1:0'
+test "$result" = '1|1|author_draft,unit_review,wehr_review,wehr_review|4|1|1|1|1|1|1:0'
 
 # Migration 002 stellt keine historische Einheitszuordnung über Mandantengrenzen hinweg her.
 test "$("${compose[@]}" exec -T db mysql --user=root -ptest-password --batch --skip-column-names einsatzberichte \
