@@ -384,6 +384,18 @@ test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-characte
   einsatzberichte --execute="SELECT CONCAT(status,'|',report_year,'|',running_number,'|',JSON_UNQUOTE(JSON_EXTRACT(damaged_party,'$.name')),'|',JSON_UNQUOTE(JSON_EXTRACT(damaging_party,'$.name')),'|',JSON_UNQUOTE(JSON_EXTRACT(incident_command,'$.rank')),'|',JSON_UNQUOTE(JSON_EXTRACT(incident_command,'$.name'))) FROM reports WHERE id=$report_id_int")" = 'author_draft|2026|69/2026|Max Mustermann|Erika Beispiel|BOI|D. Gerlach'
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT CONCAT(COALESCE(foreign_id,''),'|',COALESCE(divera_id,'')) FROM incidents WHERE id=$incident_id")" = '|'
+
+# Ausrücke- und Eintreffzeit können bei einem abgebrochenen Einsatz geleert werden.
+report_without_travel_times="${report_payload/\"departedAt\":\"2026-08-22T18:05:00.000Z\",\"arrivedAt\":\"2026-08-22T18:10:00.000Z\"/\"departedAt\":null,\"arrivedAt\":null}"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$force_token" \
+  --header 'Content-Type: application/json' \
+  --request PUT \
+  --data "$report_without_travel_times" \
+  "$base_url/api/reports/$report_id")" = 200
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT departed_at IS NULL AND arrived_at IS NULL FROM reports WHERE id=$report_id_int")" = 1
+
 test "$(curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_url/api/incidents/$incident_id/reports")" = '[]'
 test "$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$incident_id/reports")" = '[]'
 test "$(incident_status "$force_token" "$incident_id")" = report_required
