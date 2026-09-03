@@ -744,9 +744,13 @@ inactive_member_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --def
 
 # Ein bereits zugeordnetes inaktives Mitglied kann auch im selben Bericht nicht manipuliert umgeordnet werden.
 inactive_reassignment="${report_without_travel_times/\"crew\":[]/\"crew\":[{\"memberId\":$inactive_member_id,\"vehicle\":\"HLF 20\",\"role\":\"besatzung\"}]}"
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="UPDATE reports SET status='unit_review' WHERE id=$report_id_int"
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request PUT \
   --data "$inactive_reassignment" "$base_url/api/reports/$report_id")" = 400
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="UPDATE reports SET status='wehr_review' WHERE id=$report_id_int"
 
 # Ein inaktives Mitglied kann nicht manipuliert einem weiteren Bericht hinzugefügt werden.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
