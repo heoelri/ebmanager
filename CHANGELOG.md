@@ -4,6 +4,15 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ## Unreleased
 
+### Added
+
+- Bearbeitbare Einheitsberichte können zusätzliche Fahrzeuge aus dem aktuellen Stamm der eigenen Einheit aufnehmen. Die Fahrzeuge stehen als Besatzungsziele bereit, bleiben von DIVERA-Neuimporten unberührt und erscheinen in Ansichten sowie PDF-Exporten.
+
+### Breaking Changes
+
+1. Bestehende Installationen auf Basis von `2026-09-03` müssen vor dem neuen Anwendungscode `migrations/003-report-additional-vehicles.sql` genau einmal importieren.
+2. Danach muss `003-report-additional-vehicles.sql` in `schema_migrations` vorhanden sein. Neue Installationen verwenden weiterhin ausschließlich das aktuelle `schema.sql`.
+
 ## 2026-09-03
 
 ### Added

@@ -51,6 +51,7 @@ erDiagram
     users ||--o{ report_transitions : startet
     reports ||--o{ report_crew : enthaelt
     members ||--o{ report_crew : nimmt_teil
+    reports ||--o{ report_additional_vehicles : verwendet
 ```
 
 Eine `organization` ist ein Mandant. Tabellen ohne eigene
@@ -206,6 +207,9 @@ Einsatzes wird die Zuordnung mitgelöscht.
 `own` bestimmt, ob das Fahrzeug in diesem Einheitsbericht als
 Besatzungsziel verwendet werden darf. Ältere Datensätze können aus
 Kompatibilitätsgründen reine Fahrzeugnamen enthalten.
+
+Der Import-Snapshot wird nicht um manuell eingesetzte Fahrzeuge ergänzt.
+Diese liegen getrennt in `report_additional_vehicles`.
 
 ### `divera_imports`
 
@@ -369,6 +373,21 @@ höchstens ein Maschinist und ein Einheitsführer zulässig; die Besatzung ist
 unbegrenzt. Ohne Fahrzeug ist nur die Rolle `besatzung` erlaubt. Diese Regeln
 und die Zugehörigkeit des Mitglieds zur Einheit werden von der Anwendung
 validiert.
+
+### `report_additional_vehicles`
+
+Speichert Fahrzeuge der eigenen Einheit, die nicht im ursprünglichen
+DIVERA-Snapshot enthalten waren, als Namens-Snapshot am Einheitsbericht.
+
+| Spalte | Typ | Bedeutung |
+|---|---|---|
+| `report_id` | BIGINT UNSIGNED, FK, PK | Einheitsbericht |
+| `vehicle` | VARCHAR(200), PK | Fahrzeugname zum Zeitpunkt der Auswahl |
+
+Neu hinzugefügt werden können ausschließlich Fahrzeuge aus dem aktuellen
+Stamm der Berichtseinheit. Bereits gespeicherte Fahrzeuge bleiben erhalten,
+wenn sie später nicht mehr von DIVERA geliefert werden, sind dann aber nicht
+für neue Besatzungszuordnungen verfügbar.
 
 Bearbeitung und Statusübergang eines Berichts werden über eine Zeilensperre koordiniert. Status und Historieneintrag entstehen in derselben Transaktion; doppelte oder veraltete Übergänge werden mit HTTP 409 abgelehnt.
 

@@ -207,6 +207,13 @@ CREATE TABLE report_crew (
   CONSTRAINT report_crew_member_fk FOREIGN KEY (member_id) REFERENCES members(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE report_additional_vehicles (
+  report_id BIGINT UNSIGNED NOT NULL,
+  vehicle VARCHAR(200) NOT NULL,
+  PRIMARY KEY (report_id, vehicle),
+  CONSTRAINT report_additional_vehicles_report_fk FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE schema_migrations (
   name VARCHAR(255) PRIMARY KEY,
   applied_at DATETIME NOT NULL
@@ -214,4 +221,5 @@ CREATE TABLE schema_migrations (
 
 INSERT INTO schema_migrations(name,applied_at) VALUES
   ('001-report-workflow-and-vehicles.sql',UTC_TIMESTAMP()),
-  ('002-inactive-unit-members.sql',UTC_TIMESTAMP());
+  ('002-inactive-unit-members.sql',UTC_TIMESTAMP()),
+  ('003-report-additional-vehicles.sql',UTC_TIMESTAMP());

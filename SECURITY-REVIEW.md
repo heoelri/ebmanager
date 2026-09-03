@@ -20,6 +20,14 @@ Die API erzwingt die Einheitenanzahl je Rolle: keine Zuordnung für Wehrführung
 
 Berichtsübergänge sperren den Datensatz, prüfen Rolle, Einheit und erwarteten Ausgangsstatus erneut und schreiben Status sowie Historie in derselben Transaktion. Rückgaben verlangen einen längenbegrenzten Kommentar; eine Rückgabe an einen nicht mehr zuständigen Autor wird abgelehnt. Die Wehrführung kann fremde Einheitsberichte nicht bearbeiten, und eine Rückgabe macht eine bestehende Konsolidierung sichtbar ungültig, ohne den Arbeitsstand zu löschen.
 
+Zusätzliche Berichtsfahrzeuge werden serverseitig gegen den aktuellen
+Fahrzeugstamm und die Organisation der Berichtseinheit geprüft. Fahrzeuge
+anderer Einheiten oder Mandanten sind auch mit manipulierten Requests nicht
+zulässig. Historische Einträge dürfen nur unverändert erhalten oder entfernt
+werden; neue Besatzungszuordnungen zu nicht mehr vorhandenen Fahrzeugen werden
+abgelehnt. DIVERA-Neuimporte ändern ausschließlich den getrennten
+Einsatz-Snapshot und überschreiben diese Berichtsdaten nicht.
+
 DIVERA bleibt ausschließlich lesend angebunden. Einzel- und Gesamtimport verwenden nur `GET`; der Browser liefert beim Einzelimport lediglich die Alarm-ID, die serverseitig erneut verifiziert wird. Die optionale Basisadresse ist eine serverseitige Test- und lokale Demokonfiguration und wird nie aus Requests übernommen. Der Fake-DIVERA-Dienst protokolliert die Methoden und weist schreibende externe Aufrufe zurück. Externe Fehler nennen nur sichere Kategorien oder HTTP-Statuscodes; URL und Access-Key werden weder ausgegeben noch protokolliert.
 
 ## Workflow-Benachrichtigungen vom 23. August 2026
