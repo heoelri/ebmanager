@@ -39,6 +39,8 @@ assert.match(screenshotsWorkflow, /--network "\$network"/);
 assert.match(screenshotsWorkflow, /SCREENSHOT_BASE_URL=https:\/\/web/);
 assert.doesNotMatch(screenshotsWorkflow, /host\.docker\.internal/);
 assert.match(screenshotsWorkflow, /contains\(\\"\$marker\\"\)/);
+assert.match(screenshotsWorkflow, /actions\/runs\/\$GITHUB_RUN_ID/);
+assert.doesNotMatch(screenshotsWorkflow, /uploads\.github\.com|user-attachments/);
 assert.equal((screenshotsScript.match(/page\.screenshot\(/g) ?? []).length, 3);
 assert.match(screenshotsScript, /viewport: \{width: 1440, height: 1000\}/);
 assert.match(screenshotsScript, /locale: 'de-DE'/);
