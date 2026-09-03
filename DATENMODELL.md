@@ -211,6 +211,26 @@ Kompatibilitätsgründen reine Fahrzeugnamen enthalten.
 Der Import-Snapshot wird nicht um manuell eingesetzte Fahrzeuge ergänzt.
 Diese liegen getrennt in `report_additional_vehicles`.
 
+### Abgeleitete Einheitsstatistiken
+
+`GET /api/statistics` speichert keine zusätzlichen Daten. Die erste
+Ausbaustufe steht ausschließlich der Einheitsführung zur Verfügung und
+aggregiert nur Einsätze ihrer aktuell zugeordneten Einheit im gewählten
+lokalen Datumsbereich.
+
+Alarmierte Fahrzeuge stammen aus `incident_units.vehicles`; zusätzliche
+tatsächlich eingesetzte Fahrzeuge aus `report_additional_vehicles`.
+Mitgliedsbeteiligungen werden über `report_crew` je Bericht gezählt. Der
+Besatzungsdurchschnitt teilt alle Besatzungszuordnungen durch die Anzahl
+vorhandener Einheitsberichte; Einsätze ohne Bericht erhöhen diesen Nenner
+nicht. Vorhandene Berichte zählen unabhängig von ihrem aktuellen
+Workflowstatus. Inaktive Mitglieder bleiben über ihren Datensatz in `members`
+historisch auswertbar.
+
+Jahr, Monat, Wochentag, Tag/Nacht und Werktag/Wochenende werden aus
+`incidents.started_at` in `Europe/Berlin` berechnet. Die Grenzwerte liegen in
+`STATISTICS_PERIODS` in `constants.php`.
+
 ### `divera_imports`
 
 Protokolliert jeden erfolgreichen DIVERA-Import einschließlich erneuter

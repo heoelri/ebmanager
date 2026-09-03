@@ -1,5 +1,22 @@
 # Security Review
 
+## Einheitsstatistik vom 3. September 2026
+
+`GET /api/statistics` ist ausschließlich für `einheitsleitung` freigegeben
+und leitet die auszuwertende Einheit aus der serverseitigen aktuellen
+`user_units`-Zuordnung ab. Der Client kann keine Einheits-ID vorgeben. Alle
+Einsatzabfragen begrenzen zusätzlich auf `incidents.organization_id`; die
+weiteren Aggregationen verwenden nur daraus ermittelte Berichts-IDs und
+prüfen Mitglieder nochmals gegen denselben Mandanten.
+
+Die Antwort enthält ausschließlich Namen und aggregierte Häufigkeiten aus
+Fahrzeug-Snapshots, zusätzlichen Berichtsfahrzeugen und strukturierter
+Besatzung. Berichtstexte, Patient, meldende Person, Geschädigte und Schädiger
+werden weder abgefragt noch ausgegeben oder protokolliert. Inaktive
+Mitglieder bleiben für historische Häufigkeiten sichtbar, ohne weitere
+personenbezogene Angaben offenzulegen. Manipulierte Zeiträume werden strikt
+als lokale ISO-Daten validiert.
+
 ## Inaktive DIVERA-Mitglieder vom 3. September 2026
 
 Der Aktivstatus wird auf der mandantengebundenen Zuordnung `member_units`
