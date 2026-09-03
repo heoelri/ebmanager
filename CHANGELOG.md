@@ -4,6 +4,8 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ## Unreleased
 
+## 2026-09-03
+
 ### Added
 
 - Die Wehrleitung kann im Dialog „Benutzer bearbeiten“ einen fremden Zugang zurücksetzen und eine neue sieben Tage gültige Einladung senden.
@@ -58,8 +60,16 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Breaking Changes
 
-1. Bestehende Installationen müssen vor dem neuen Anwendungscode `migrations/001-report-workflow-and-vehicles.sql` importieren. Die Migration ersetzt `draft`/`released` durch die drei Workflowstatus, legt die Übergangshistorie sowie den Fahrzeugstamm an und erzeugt für jeden Bestandsbericht einen initialen Historieneintrag.
-2. Danach muss `migrations/002-inactive-unit-members.sql` importiert werden. Die Migration ergänzt den Aktivstatus bestehender Einheitszuordnungen und setzt alle vorhandenen Mitglieder zunächst aktiv.
+Bestehende Installationen von `2026-08-23` werden in dieser Reihenfolge aktualisiert:
+
+1. Datenbank und bisherige Anwendungsdateien sichern.
+2. `migrations/001-report-workflow-and-vehicles.sql` genau einmal importieren. Die Migration ersetzt `draft`/`released` durch die drei Workflowstatus, legt die Übergangshistorie sowie den Fahrzeugstamm an und erzeugt für jeden Bestandsbericht einen initialen Historieneintrag.
+3. Danach `migrations/002-inactive-unit-members.sql` genau einmal importieren. Die Migration ergänzt den Aktivstatus bestehender Einheitszuordnungen und setzt alle vorhandenen Mitglieder zunächst aktiv.
+4. Prüfen, dass beide Dateinamen in `schema_migrations` vorhanden sind.
+5. Erst danach die Anwendungsdateien des Releases `2026-09-03` bereitstellen.
+6. `/api/bootstrap`, Anmeldung, Benutzerverwaltung, einen vorhandenen Bericht und die DIVERA-Ressourcenansicht prüfen.
+
+Neue Installationen importieren ausschließlich das aktuelle `schema.sql` und führen die beiden Migrationen nicht zusätzlich aus. Die vollständige Aktualisierungs- und Rollback-Anleitung steht in [`docs/WEBSPACE-DEPLOYMENT.md`](docs/WEBSPACE-DEPLOYMENT.md).
 
 ## 2026-08-23
 
