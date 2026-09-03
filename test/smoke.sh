@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'echo "Smoke-Test fehlgeschlagen in Zeile $LINENO" >&2' ERR
 
 export DB_DSN="${DB_DSN:-mysql:host=127.0.0.1;port=3306;dbname=einsatzberichte;charset=utf8mb4}"
 export DB_USER="${DB_USER:-root}"
