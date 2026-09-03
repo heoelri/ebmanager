@@ -739,9 +739,16 @@ curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_u
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$incident_id/reports" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(in_array("Bernd Beispiel",array_column(json_decode($data[0]["crew"],true,512,JSON_THROW_ON_ERROR),"name"),true));'
 
-# Ein inaktives Mitglied kann nicht manipuliert einem weiteren Bericht hinzugefügt werden.
 inactive_member_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT m.id FROM members m JOIN member_units mu ON mu.member_id=m.id WHERE mu.unit_id=1 AND mu.active=0 AND m.divera_id='m2'")
+
+# Ein bereits zugeordnetes inaktives Mitglied kann auch im selben Bericht nicht manipuliert umgeordnet werden.
+inactive_reassignment="${report_without_travel_times/\"crew\":[]/\"crew\":[{\"memberId\":$inactive_member_id,\"vehicle\":\"HLF 20\",\"role\":\"besatzung\"}]}"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request PUT \
+  --data "$inactive_reassignment" "$base_url/api/reports/$report_id")" = 400
+
+# Ein inaktives Mitglied kann nicht manipuliert einem weiteren Bericht hinzugefügt werden.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' \
   --data "{\"unitId\":1,\"runningNumber\":\"99/2026\",\"damagedParty\":{},\"damagingParty\":{},\"incidentCommand\":{},\"narrative\":\"Test\",\"departedAt\":null,\"arrivedAt\":null,\"endedAt\":\"2026-08-22T20:00:00.000Z\",\"incidentType\":\"Technische Hilfe\",\"classification\":{\"site\":[],\"cause\":[],\"technical\":[]},\"crew\":[{\"memberId\":$inactive_member_id,\"vehicle\":\"\",\"role\":\"besatzung\"}]}" \

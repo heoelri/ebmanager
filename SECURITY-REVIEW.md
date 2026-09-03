@@ -7,7 +7,7 @@ geführt, damit dieselbe Person je Einheit getrennt behandelt wird. Nur aktive
 Mitglieder werden für neue Besatzungszuordnungen ausgegeben und serverseitig
 akzeptiert. Bereits in einem Bericht gespeicherte inaktive Mitglieder und
 historische Fahrzeugzuordnungen dürfen ausschließlich unverändert in diesem
-Bericht erhalten bleiben; dadurch kann ein
+Bericht erhalten oder durch Weglassen entfernt werden; dadurch kann ein
 manipulierter Request keine beliebige inaktive Person neu hinzufügen.
 Ressourcenlisten bleiben auf berechtigte Einheiten und den aktuellen Mandanten
 begrenzt und kennzeichnen inaktive Mitglieder ohne zusätzliche Personendaten.

@@ -573,11 +573,11 @@ function replaceCrew(int $reportId, int $incidentId, int $unitId, mixed $crew, i
         array_values(array_filter($snapshots, fn($vehicle) => is_string($vehicle) || ($vehicle['own'] ?? true) !== false)));
     $members = [];
     foreach (query(
-        'SELECT m.id,m.name FROM members m JOIN member_units mu ON mu.member_id=m.id
+        'SELECT m.id,m.name,mu.active FROM members m JOIN member_units mu ON mu.member_id=m.id
          WHERE m.organization_id=? AND mu.unit_id=?
          AND (mu.active=1 OR EXISTS(SELECT 1 FROM report_crew rc WHERE rc.report_id=? AND rc.member_id=m.id))',
         [$organizationId, $unitId, $reportId]
-    )->fetchAll() as $member) $members[(int)$member['id']] = $member['name'];
+    )->fetchAll() as $member) $members[(int)$member['id']] = $member;
     $existingCrew = [];
     foreach (query('SELECT member_id,vehicle,role FROM report_crew WHERE report_id=?', [$reportId])->fetchAll() as $item) {
         $existingCrew[(int)$item['member_id']] = $item;
@@ -593,14 +593,15 @@ function replaceCrew(int $reportId, int $incidentId, int $unitId, mixed $crew, i
             && $existingCrew[$memberId]['role'] === $role;
         // Driver and unit leader are unique per vehicle; crew members are not.
         $slot = $vehicle && $role !== 'besatzung' ? "$vehicle:$role" : '';
-        if (!$memberId || isset($seen[$memberId]) || !isset($members[$memberId]) || ($vehicle && !in_array($vehicle, $vehicles, true) && !$unchanged)
+        if (!$memberId || isset($seen[$memberId]) || !isset($members[$memberId]) || (!(int)$members[$memberId]['active'] && !$unchanged)
+            || ($vehicle && !in_array($vehicle, $vehicles, true) && !$unchanged)
             || !in_array($role, ['maschinist', 'einheitsfuehrer', 'besatzung'], true)
             || (!$vehicle && $role !== 'besatzung') || ($slot && isset($occupied[$slot]))) {
             throw new ApiError(400, 'Besatzung ist ungültig');
         }
         $seen[$memberId] = true;
         if ($slot) $occupied[$slot] = true;
-        $rows[] = compact('memberId', 'vehicle', 'role') + ['name' => $members[$memberId]];
+        $rows[] = compact('memberId', 'vehicle', 'role') + ['name' => $members[$memberId]['name']];
     }
     query('DELETE FROM report_crew WHERE report_id=?', [$reportId]);
     foreach ($rows as $row) query(
