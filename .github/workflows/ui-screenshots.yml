@@ -1,0 +1,84 @@
+name: UI-Screenshots
+
+on:
+  pull_request:
+    paths:
+      - public/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ui-screenshots-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Demo-System starten
+        env:
+          DIVERA_API_BASE_URL: http://divera:8090
+        run: |
+          docker compose --profile demo up --build --detach --wait divera web
+          docker compose --profile demo run --rm demo-seed
+      - name: Screenshots erstellen
+        run: |
+          network="$(docker inspect "$(docker compose ps -q web)" \
+            --format '{{range $name, $network := .NetworkSettings.Networks}}{{$name}}{{end}}')"
+          test -n "$network"
+          docker run --rm \
+            --network "$network" \
+            --volume "$PWD:/work" \
+            --workdir /work \
+            --env SCREENSHOT_BASE_URL=https://web \
+            mcr.microsoft.com/playwright:v1.55.0-noble \
+            bash -lc 'npm install --prefix /tmp/ui --no-save --package-lock=false playwright@1.55.0 && cp test/ui-screenshots.mjs /tmp/ui/ && node /tmp/ui/ui-screenshots.mjs'
+      - name: Screenshots als Artefakt speichern
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots
+          path: screenshots/*.png
+          if-no-files-found: error
+      - name: Screenshots im Pull Request anzeigen
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker='<!-- ui-screenshots -->'
+          repo_id="$(gh api "repos/$GITHUB_REPOSITORY" --jq .id)"
+          [[ "$repo_id" =~ ^[0-9]+$ ]]
+          body="$marker"$'\n\n'"## UI-Screenshots"$'\n'
+          for file in screenshots/*.png; do
+            name="$(basename -- "$file")"
+            url="$(curl --fail-with-body --silent --show-error --request POST \
+              'https://uploads.github.com/user-attachments/assets' \
+              --url-query "name=$name" \
+              --url-query 'content_type=image/png' \
+              --url-query "repository_id=$repo_id" \
+              --header 'Content-Type: application/octet-stream' \
+              --header 'X-GitHub-Api-Version: 2022-11-28' \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --data-binary "@$file" | jq --raw-output .url)"
+            [[ "$url" == https://* ]]
+            body+=$'\n'"![$name]($url)"$'\n'
+          done
+          comment_ids="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+            --paginate --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$marker\"))) | .id")"
+          comment_id="${comment_ids%%$'\n'*}"
+          if [[ -n "$comment_id" ]]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" -f body="$body"
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body"
+          fi
+      - name: Container und Volumes entfernen
+        if: always()
+        run: docker compose --profile demo down --volumes

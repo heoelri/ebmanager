@@ -155,6 +155,8 @@ Alle Demo-Konten verwenden ausschließlich lokal das Kennwort `Demo-Feuerwehr-20
 
 Demodaten, Demo-Zugangsdaten und die reservierten `demo-local-*`-Keys dürfen nicht außerhalb der lokalen Docker-Compose-Umgebung verwendet werden. Der normale Aufruf `docker compose up` importiert keine Demodaten; Produktionsschema, Migrationen, CI und Deploymentpfade enthalten den Seed nicht.
 
+Pull Requests mit Änderungen unter `public/**` starten zusätzlich den Workflow **UI-Screenshots**. Er rendert Anmeldung, Einsatzübersicht und „Mitglieder & Fahrzeuge“ mit dem lokalen Demo-System und stellt die PNG-Dateien als Workflow-Artefakt bereit. Bei Branches dieses Repositorys aktualisiert der Workflow außerdem einen PR-Kommentar mit eingebetteten Bildern; Fork-PRs erhalten wegen der eingeschränkten Schreibrechte ausschließlich das Artefakt.
+
 Die Docker-Tests verwenden dieselben MySQL- und HTTP-Prüfungen wie CI:
 
 ```powershell
