@@ -67,13 +67,13 @@ php -r '
   }
 '
 
-# Das Frontend enthält die erwarteten Accessibility- und DIVERA-Elemente, lässt inaktive Besatzung entfernen und dupliziert keine Fachoptionen.
+# Das Frontend enthält die erwarteten Accessibility-, Verwaltungs- und DIVERA-Elemente, lässt inaktive Besatzung entfernen und dupliziert keine Fachoptionen.
 php -r '
   $html=file_get_contents("public/index.html");
   $javascript=file_get_contents("public/app.js");
   $frontend=$html.$javascript;
   $css=file_get_contents("public/styles.css");
-  foreach (["viewport-fit=cover","public/styles.css","public/app.js","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:","rankOptions","pendingWarning","initialView","DIVERA-Einsatznummer","class=\"command-row\"","class=\"form-section\"","class=\"report-times\"","restoreDialogFocus","zone.key===current","zone.historical","zone.dataset.historical","<select name=\"commandRank\">","<select name=\"additionalCommandRank\">"] as $required) {
+  foreach (["viewport-fit=cover","public/styles.css","public/app.js","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:","rankOptions","pendingWarning","initialView","DIVERA-Einsatznummer","class=\"command-row\"","class=\"form-section\"","class=\"report-times\"","restoreDialogFocus","Zugang zurücksetzen und neu einladen","resetUser","zone.key===current","zone.historical","zone.dataset.historical","<select name=\"commandRank\">","<select name=\"additionalCommandRank\">"] as $required) {
     if (!str_contains($frontend,$required)) { fwrite(STDERR,"Frontend-Marker fehlt: $required\n"); exit(1); }
   }
   foreach (["--control-height: 44px",":focus-visible","safe-area-inset-bottom","forced-colors: active"] as $required) {
@@ -307,6 +307,14 @@ case "$invite_status" in
     ;;
   *) cat invite.json >&2; exit 1 ;;
 esac
+
+# Die Wehrleitung kann den eigenen Zugang nicht über die Benutzerverwaltung zurücksetzen.
+admin_user_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT id FROM users WHERE email='admin@example.test'")
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
+  "$base_url/api/users/$admin_user_id/invitation")" = 409
+
 if [[ -z "${TEST_BASE_URL:-}" ]]; then
   test "$invite_status" = 201
   wait "$smtp_pid"
@@ -317,8 +325,42 @@ if [[ -z "${TEST_BASE_URL:-}" ]]; then
   ! grep --quiet '?invite=' smtp-messages.log
   expected_invite_expiry=$(INVITE_EXPIRY="$invite_expiry" php -r '$date=(new DateTimeImmutable(getenv("INVITE_EXPIRY"),new DateTimeZone("UTC")))->setTimezone(new DateTimeZone("Europe/Berlin")); echo $date->format("d.m.Y")." um ".$date->format("H:i")." Uhr";')
   grep --fixed-strings --quiet "Der Link ist bis zum $expected_invite_expiry (Europe/Berlin) gültig." smtp-messages.log
+
+  # Ein erfolgreicher administrativer Reset ersetzt Zugang und Token erst bei erfolgreicher Mailannahme; ein Mailfehler lässt beides unverändert.
+  reinvite_session_token='eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+  reinvite_session_hash=$(php -r "echo hash('sha256', '$reinvite_session_token');")
+  reinvite_user_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
+    --execute="INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) SELECT organization_id,1,'Neu einzuladen','reinvite@example.test',password_hash,'fuehrungskraft' FROM users WHERE email='admin@example.test'; SET @user_id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@user_id,1); INSERT INTO sessions(token,user_id,expires_at) VALUES('$reinvite_session_hash',@user_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR); SELECT @user_id")
+  old_reinvite_hash=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
+    --execute="SELECT password_hash FROM users WHERE id=$reinvite_user_id")
+  rm -f reinvite-messages.log
+  php test/fake-smtp.php smtp-cert.pem smtp-key.pem 1 reinvite-messages.log >>smtp-server.log 2>&1 &
+  smtp_pid=$!
+  test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+    --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
+    "$base_url/api/users/$reinvite_user_id/invitation")" = 200
+  wait "$smtp_pid"
+  smtp_pid=''
+  new_reinvite_hash=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
+    --execute="SELECT password_hash FROM users WHERE id=$reinvite_user_id")
+  test "$new_reinvite_hash" != "$old_reinvite_hash"
+  test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
+    --execute="SELECT CONCAT((SELECT COUNT(*) FROM sessions WHERE user_id=$reinvite_user_id),'|',(SELECT COUNT(*) FROM password_resets WHERE user_id=$reinvite_user_id),'|',(SELECT ABS(TIMESTAMPDIFF(SECOND,expires_at,UTC_TIMESTAMP()+INTERVAL 7 DAY))<=2 FROM password_resets WHERE user_id=$reinvite_user_id))")" = '0|1|1'
+  grep --quiet 'Recipient: reinvite@example.test' reinvite-messages.log
+  grep --quiet 'Subject: Konto aktivieren' reinvite-messages.log
+  reinvite_token_hash=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
+    --execute="SELECT token_hash FROM password_resets WHERE user_id=$reinvite_user_id")
+  MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+    --execute="INSERT INTO sessions(token,user_id,expires_at) VALUES('$reinvite_session_hash',$reinvite_user_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR)"
+  test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+    --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
+    "$base_url/api/users/$reinvite_user_id/invitation")" = 503
+  test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
+    --execute="SELECT password_hash='$new_reinvite_hash' AND EXISTS(SELECT 1 FROM sessions WHERE user_id=$reinvite_user_id) AND (SELECT token_hash FROM password_resets WHERE user_id=$reinvite_user_id)='$reinvite_token_hash' FROM users WHERE id=$reinvite_user_id")" = 1
+  MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+    --execute="DELETE FROM users WHERE id=$reinvite_user_id"
 fi
-rm -f invite.json
+rm -f invite.json reinvite-messages.log
 
 # Einsätze akzeptieren ausschließlich gültige ISO-Zeitpunkte.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
