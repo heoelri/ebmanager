@@ -106,7 +106,7 @@ services:
       - divera-test-data:/tmp/divera
     command: [php, -S, 0.0.0.0:8090, test/fake-divera.php]
     healthcheck:
-      test: [CMD, php, -r, "exit(@file_get_contents('http://localhost:8090/api/v2/alarms?accesskey=test')===false);"]
+      test: [CMD, php, -r, "exit(@file_get_contents('http://localhost:8090/health')===false);"]
       interval: 2s
       timeout: 2s
       retries: 10

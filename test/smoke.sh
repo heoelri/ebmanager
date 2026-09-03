@@ -458,6 +458,7 @@ curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_
     assert($data["alarmedVehicles"][0]===["name"=>"LF 20 Statistik","own"=>true,"count"=>2]);
     assert($data["additionalVehicles"]===[["name"=>"ELW Statistik","count"=>1]]);
     assert(array_column($data["members"],"name")===["Aktives Statistikmitglied","Historisches Statistikmitglied"]);
+    assert(!isset($data["members"][0]["id"]));
     assert(!str_contains(json_encode($data,JSON_THROW_ON_ERROR),"Mandantenfahrzeug"));
     assert(!str_contains(json_encode($data,JSON_THROW_ON_ERROR),"Fremdes Statistikmitglied"));
   '

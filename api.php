@@ -319,7 +319,7 @@ function unitStatistics(array $user, string $fromValue, string $toValue): array
             array_merge($reportIds, [$user['organization_id']])
         )->fetchAll() as $member) {
             $id = (int)$member['id'];
-            $members[$id] = ['id' => $id, 'name' => $member['name'], 'count' => ($members[$id]['count'] ?? 0) + 1];
+            $members[$id] = ['name' => $member['name'], 'count' => ($members[$id]['count'] ?? 0) + 1];
             $crewCount++;
         }
         foreach (query(

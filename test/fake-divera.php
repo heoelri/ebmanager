@@ -116,6 +116,10 @@ $malformed = $accessKey === 'malformed';
 $demoUnit = $demoUnits[$accessKey] ?? null;
 $method = $_SERVER['REQUEST_METHOD'] ?? '';
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+if ($method === 'GET' && $path === '/health') {
+    echo 'ok';
+    return;
+}
 file_put_contents(getenv('DIVERA_REQUEST_LOG') ?: sys_get_temp_dir() . '/divera-requests.log', "$method $path\n", FILE_APPEND);
 header('Content-Type: application/json');
 
