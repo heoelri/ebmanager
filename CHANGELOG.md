@@ -24,6 +24,8 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Fixed
 
+- Der Bootstrap-Endpunkt erkennt eine fehlende `member_units.active`-Spalte als unvollständiges Schema und antwortet mit HTTP 503.
+- Inaktive Mitglieder und ihre historischen Fahrzeugzuordnungen bleiben beim Bearbeiten erhalten, können entfernt, aber nicht neu zugeordnet werden.
 - Datums- und Uhrzeitwerte folgen dem Browserformat des Nutzers; Ausrücke- und Eintreffzeit können bei abgebrochenen Einsätzen geleert werden.
 - Der Docker-Compose-Smoke-Test nutzt die bereits gesund gestarteten Dienste, statt Abhängigkeiten beim Testlauf erneut zu starten.
 - Ungültige JSON-Antworten behalten im Frontend ihren HTTP-Status; kompakte Einheitenauswahlen setzen Validierungsfehler auf alle Kontrollfelder.
@@ -35,6 +37,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Changed
 
+- Nicht mehr von DIVERA gelieferte Mitglieder bleiben einheitsspezifisch als inaktiv sichtbar und in vorhandenen Berichten erhalten, können aber nicht neu als Besatzung ausgewählt werden.
 - Die Benutzerverwaltung weist beim Anlegen auf die siebentägige Gültigkeit des Einladungslinks hin und zeigt je Benutzer nur die letzte erfolgreiche Anmeldung.
 - Einladungslinks sind sieben Tage gültig und nennen ihren Ablaufzeitpunkt in `Europe/Berlin`; Links für vergessene Passwörter bleiben 30 Minuten gültig.
 - Das Frontend lädt JavaScript als separat cachebare Datei ohne Inline-Eventhandler, erzwingt eine restriktivere Content Security Policy und zeigt Benutzerrollen einheitlich auf Deutsch.
@@ -54,7 +57,8 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Breaking Changes
 
-- Bestehende Installationen müssen vor dem neuen Anwendungscode `migrations/001-report-workflow-and-vehicles.sql` importieren. Die Migration ersetzt `draft`/`released` durch die drei Workflowstatus, legt die Übergangshistorie sowie den Fahrzeugstamm an und erzeugt für jeden Bestandsbericht einen initialen Historieneintrag.
+1. Bestehende Installationen müssen vor dem neuen Anwendungscode `migrations/001-report-workflow-and-vehicles.sql` importieren. Die Migration ersetzt `draft`/`released` durch die drei Workflowstatus, legt die Übergangshistorie sowie den Fahrzeugstamm an und erzeugt für jeden Bestandsbericht einen initialen Historieneintrag.
+2. Danach muss `migrations/002-inactive-unit-members.sql` importiert werden. Die Migration ergänzt den Aktivstatus bestehender Einheitszuordnungen und setzt alle vorhandenen Mitglieder zunächst aktiv.
 
 ## 2026-08-23
 

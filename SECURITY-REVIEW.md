@@ -1,5 +1,19 @@
 # Security Review
 
+## Inaktive DIVERA-Mitglieder vom 3. September 2026
+
+Der Aktivstatus wird auf der mandantengebundenen Zuordnung `member_units`
+geführt, damit dieselbe Person je Einheit getrennt behandelt wird. Nur aktive
+Mitglieder werden für neue Besatzungszuordnungen ausgegeben und serverseitig
+akzeptiert. Bereits in einem Bericht gespeicherte inaktive Mitglieder und
+historische Fahrzeugzuordnungen dürfen ausschließlich unverändert in diesem
+Bericht erhalten oder durch Weglassen entfernt werden; dadurch kann ein
+manipulierter Request keine beliebige inaktive Person neu hinzufügen.
+Ressourcenlisten bleiben auf berechtigte Einheiten und den aktuellen Mandanten
+begrenzt und kennzeichnen inaktive Mitglieder ohne zusätzliche Personendaten.
+Migration 002 stellt historische Zuordnungen nur wieder her, wenn Mitglied,
+Einheit und Einsatz demselben Mandanten angehören.
+
 ## Rollen-, Berichts- und DIVERA-Grenzen
 
 Die API erzwingt die Einheitenanzahl je Rolle: keine Zuordnung für Wehrführungen, exakt eine für Einheitsführungen und mindestens eine für Führungskräfte. Führungskräfte dürfen DIVERA-Einsätze ihrer Einheiten lesen und einzeln importieren, erhalten aber keinen Zugriff auf Access-Key-Konfiguration oder Stammdatensynchronisation. Einheitenlisten, Einsatzzuordnungen, Fahrzeug-Snapshots und PDF-Einsatzakten enthalten für Führungskräfte und Einheitsführungen nur aktuell zugeordnete Einheiten; die Wehrführung behält die Organisationssicht. Alle Wege prüfen weiterhin Mandant und aktuelle Einheitszuordnung serverseitig.

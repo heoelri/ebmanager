@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+trap 'echo "Smoke-Test fehlgeschlagen in Zeile $LINENO" >&2' ERR
 
 export DB_DSN="${DB_DSN:-mysql:host=127.0.0.1;port=3306;dbname=einsatzberichte;charset=utf8mb4}"
 export DB_USER="${DB_USER:-root}"
@@ -66,23 +67,25 @@ php -r '
   }
 '
 
-# Das Frontend enthält die erwarteten Accessibility- und DIVERA-Elemente, aber keine duplizierten Fachoptionen.
+# Das Frontend enthält die erwarteten Accessibility- und DIVERA-Elemente, lässt inaktive Besatzung entfernen und dupliziert keine Fachoptionen.
 php -r '
   $html=file_get_contents("public/index.html");
   $javascript=file_get_contents("public/app.js");
   $frontend=$html.$javascript;
   $css=file_get_contents("public/styles.css");
-  foreach (["viewport-fit=cover","public/styles.css","public/app.js","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:","rankOptions","pendingWarning","initialView","DIVERA-Einsatznummer","class=\"command-row\"","class=\"form-section\"","class=\"report-times\"","restoreDialogFocus","<select name=\"commandRank\">","<select name=\"additionalCommandRank\">"] as $required) {
-    if (!str_contains($frontend,$required)) exit(1);
+  foreach (["viewport-fit=cover","public/styles.css","public/app.js","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:","rankOptions","pendingWarning","initialView","DIVERA-Einsatznummer","class=\"command-row\"","class=\"form-section\"","class=\"report-times\"","restoreDialogFocus","zone.key===current","zone.historical","zone.dataset.historical","<select name=\"commandRank\">","<select name=\"additionalCommandRank\">"] as $required) {
+    if (!str_contains($frontend,$required)) { fwrite(STDERR,"Frontend-Marker fehlt: $required\n"); exit(1); }
   }
   foreach (["--control-height: 44px",":focus-visible","safe-area-inset-bottom","forced-colors: active"] as $required) {
-    if (!str_contains($css,$required)) exit(1);
+    if (!str_contains($css,$required)) { fwrite(STDERR,"CSS-Marker fehlt: $required\n"); exit(1); }
   }
-  if (str_contains($html,"<style") || preg_match("/<script(?![^>]*\\s+src\\s*=)[^>]*>/i",$html) || preg_match("/\\son[a-z]+=/i",$frontend) || preg_match("/\\sstyle=\"/i",$frontend)) exit(1);
+  if (str_contains($html,"<style") || preg_match("/<script(?![^>]*\\s+src\\s*=)[^>]*>/i",$html) || preg_match("/\\son[a-z]+=/i",$frontend) || preg_match("/\\sstyle=\"/i",$frontend)) {
+    fwrite(STDERR,"Verbotenes Inline-Markup gefunden\n"); exit(1);
+  }
   foreach (["Kleinbrand","Wohngebäude","Menschen in Notlage","Feuerwehrmann-Anwärter"] as $duplicatedOption) {
-    if (str_contains($frontend,$duplicatedOption)) exit(1);
+    if (str_contains($frontend,$duplicatedOption)) { fwrite(STDERR,"Fachoption im Frontend dupliziert: $duplicatedOption\n"); exit(1); }
   }
-  if (preg_match("/<select[^>]+multiple/i",$frontend)) exit(1);
+  if (preg_match("/<select[^>]+multiple/i",$frontend)) { fwrite(STDERR,"Mehrfach-Select im Frontend gefunden\n"); exit(1); }
 '
 
 # Fachoptionen sind vorhanden und ihre Klassifikationsschlüssel stimmen mit den Gruppenbezeichnungen überein.
@@ -221,6 +224,13 @@ curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(str_contains($data["database"]["status"],"unvollständig"));'
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="RENAME TABLE divera_imports_missing TO divera_imports"
+
+# Eine fehlende Spalte aus Migration 002 liefert am Bootstrap-Endpunkt HTTP 503.
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="ALTER TABLE member_units DROP COLUMN active"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' "$base_url/api/bootstrap")" = 503
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="ALTER TABLE member_units ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE AFTER unit_id"
 
 # Führungskräfte ohne Wehrleitungsrolle dürfen weder Systemübersicht noch Nutzerverwaltung aufrufen.
 regular_token='dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
@@ -703,7 +713,7 @@ test "$(grep --count '^GET /api/v2/pull/all$' "$divera_log")" = 1
 test "$(grep --count '^GET /api/v2/alarms$' "$divera_log")" = 1
 ! grep --extended-regexp --quiet '^(POST|PUT|PATCH|DELETE) ' "$divera_log"
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units/1/resources" |
-  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($data["members"])===2); assert(count($data["vehicles"])===2); assert(array_column($data["members"],"qualifications")===["AGT","MA"]);'
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $members=array_column($data["members"],null,"divera_id"); assert(count($members)===4); assert(count($data["vehicles"])===2); assert($members["m1"]["active"]===1 && $members["m1"]["qualifications"]==="AGT"); assert($members["m2"]["active"]===1 && $members["m2"]["qualifications"]==="MA"); assert($members["test-101"]["active"]===0 && $members["test-102"]["active"]===0);'
 
 # Ein wiederholter Gesamtabgleich aktualisiert vorhandene Einsätze ohne Duplikate.
 : > "$divera_log"
@@ -721,9 +731,9 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
   "$base_url/api/units/1/divera/sync")" = 502
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
-  einsatzberichte --execute="SELECT CONCAT((SELECT COUNT(*) FROM vehicles WHERE unit_id=1),'|',(SELECT COUNT(*) FROM member_units WHERE unit_id=1))")" = '2|2'
+  einsatzberichte --execute="SELECT CONCAT((SELECT COUNT(*) FROM vehicles WHERE unit_id=1),'|',(SELECT COUNT(*) FROM member_units WHERE unit_id=1))")" = '2|4'
 
-# Nicht mehr gelieferte Stammdatenzuordnungen verschwinden, historische Besatzungsmitglieder bleiben erhalten.
+# Nicht mehr gelieferte Mitglieder werden inaktiv, bleiben in historischen Berichten und sind nicht neu auswählbar.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="INSERT IGNORE INTO report_crew(report_id,member_id) SELECT $report_id_int,id FROM members WHERE organization_id=1 AND divera_id='m2';
     UPDATE units SET divera_access_key='reduced' WHERE id=1"
@@ -731,7 +741,32 @@ curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
   "$base_url/api/units/1/divera/sync" >/dev/null
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
-  einsatzberichte --execute="SELECT CONCAT((SELECT COUNT(*) FROM vehicles WHERE unit_id=1),'|',(SELECT COUNT(*) FROM qualifications WHERE unit_id=1),'|',(SELECT COUNT(*) FROM member_units WHERE unit_id=1),'|',(SELECT COUNT(*) FROM members WHERE organization_id=1 AND divera_id='m2'))")" = '1|1|1|1'
+  einsatzberichte --execute="SELECT CONCAT((SELECT COUNT(*) FROM vehicles WHERE unit_id=1),'|',(SELECT COUNT(*) FROM qualifications WHERE unit_id=1),'|',(SELECT COUNT(*) FROM member_units WHERE unit_id=1),'|',(SELECT SUM(active) FROM member_units WHERE unit_id=1),'|',(SELECT COUNT(*) FROM members WHERE organization_id=1 AND divera_id='m2'))")" = '1|1|4|1|1'
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units/1/resources" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $members=array_column($data["members"],null,"divera_id"); assert(count($members)===4); assert($members["m1"]["active"]===1); assert($members["m2"]["active"]===0);'
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units/1/members" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($data)===1); assert($data[0]["active"]===1);'
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$incident_id/reports" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(in_array("Bernd Beispiel",array_column(json_decode($data[0]["crew"],true,512,JSON_THROW_ON_ERROR),"name"),true));'
+
+inactive_member_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT m.id FROM members m JOIN member_units mu ON mu.member_id=m.id WHERE mu.unit_id=1 AND mu.active=0 AND m.divera_id='m2'")
+
+# Ein bereits zugeordnetes inaktives Mitglied kann auch im selben Bericht nicht manipuliert umgeordnet werden.
+inactive_reassignment="${report_without_travel_times/\"crew\":[]/\"crew\":[{\"memberId\":$inactive_member_id,\"vehicle\":\"HLF 20\",\"role\":\"besatzung\"}]}"
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="UPDATE reports SET status='unit_review' WHERE id=$report_id_int"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request PUT \
+  --data "$inactive_reassignment" "$base_url/api/reports/$report_id")" = 400
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="UPDATE reports SET status='wehr_review' WHERE id=$report_id_int"
+
+# Ein inaktives Mitglied kann nicht manipuliert einem weiteren Bericht hinzugefügt werden.
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' \
+  --data "{\"unitId\":1,\"runningNumber\":\"99/2026\",\"damagedParty\":{},\"damagingParty\":{},\"incidentCommand\":{},\"narrative\":\"Test\",\"departedAt\":null,\"arrivedAt\":null,\"endedAt\":\"2026-08-22T20:00:00.000Z\",\"incidentType\":\"Technische Hilfe\",\"classification\":{\"site\":[],\"cause\":[],\"technical\":[]},\"crew\":[{\"memberId\":$inactive_member_id,\"vehicle\":\"\",\"role\":\"besatzung\"}]}" \
+  "$base_url/api/incidents/$duplicate_incident_id/reports")" = 400
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request POST \
   "$base_url/api/units/1/divera/sync")" = 403

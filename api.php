@@ -19,6 +19,11 @@ function databaseConfigurationError(): ?string
              AND column_name IN ('report_year','running_number','damaged_party','damaging_party','incident_command')"
         )->fetchColumn();
         if ((int)$reportColumns !== 5) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
+        $memberUnitColumns = db()->query(
+            "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='member_units'
+             AND column_name='active'"
+        )->fetchColumn();
+        if ((int)$memberUnitColumns !== 1) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
     } catch (PDOException $error) {
         error_log((string)$error);
         return 'Datenbankverbindung fehlgeschlagen. Prüfen Sie DSN, Benutzername, Passwort und Erreichbarkeit.';
@@ -208,18 +213,19 @@ function replaceMemberships(int $userId, array $unitIds): void
     foreach ($unitIds as $unitId) query('INSERT INTO user_units(user_id,unit_id) VALUES(?,?)', [$userId, $unitId]);
 }
 
-function unitMembers(int $unitId, int $organizationId): array
+function unitMembers(int $unitId, int $organizationId, bool $activeOnly = true): array
 {
+    $active = $activeOnly ? ' AND mu.active=1' : '';
     $rows = query(
-        "SELECT m.id,m.name,m.divera_id,
+        "SELECT m.id,m.name,m.divera_id,mu.active,
          COALESCE(GROUP_CONCAT(DISTINCT COALESCE(NULLIF(q.shortname,''),q.name) ORDER BY q.name SEPARATOR ', '),'') qualifications
          FROM members m JOIN member_units mu ON mu.member_id=m.id
          LEFT JOIN member_qualifications mq ON mq.member_id=m.id
          LEFT JOIN qualifications q ON q.id=mq.qualification_id AND q.unit_id=mu.unit_id
-         WHERE mu.unit_id=? AND m.organization_id=? GROUP BY m.id,m.name,m.divera_id ORDER BY m.name",
+         WHERE mu.unit_id=? AND m.organization_id=?$active GROUP BY m.id,m.name,m.divera_id,mu.active ORDER BY m.name",
         [$unitId, $organizationId]
     )->fetchAll();
-    foreach ($rows as &$row) $row['id'] = (int)$row['id'];
+    foreach ($rows as &$row) { $row['id'] = (int)$row['id']; $row['active'] = (int)$row['active']; }
     return $rows;
 }
 
@@ -572,26 +578,35 @@ function replaceCrew(int $reportId, int $incidentId, int $unitId, mixed $crew, i
         array_values(array_filter($snapshots, fn($vehicle) => is_string($vehicle) || ($vehicle['own'] ?? true) !== false)));
     $members = [];
     foreach (query(
-        'SELECT m.id,m.name FROM members m JOIN member_units mu ON mu.member_id=m.id
-         WHERE m.organization_id=? AND mu.unit_id=?',
-        [$organizationId, $unitId]
-    )->fetchAll() as $member) $members[(int)$member['id']] = $member['name'];
+        'SELECT m.id,m.name,mu.active FROM members m JOIN member_units mu ON mu.member_id=m.id
+         WHERE m.organization_id=? AND mu.unit_id=?
+         AND (mu.active=1 OR EXISTS(SELECT 1 FROM report_crew rc WHERE rc.report_id=? AND rc.member_id=m.id))',
+        [$organizationId, $unitId, $reportId]
+    )->fetchAll() as $member) $members[(int)$member['id']] = $member;
+    $existingCrew = [];
+    foreach (query('SELECT member_id,vehicle,role FROM report_crew WHERE report_id=?', [$reportId])->fetchAll() as $item) {
+        $existingCrew[(int)$item['member_id']] = $item;
+    }
     $seen = $occupied = $rows = [];
     foreach ($crew as $item) {
         if (!is_array($item)) throw new ApiError(400, 'Besatzung ist ungültig');
         $memberId = (int)($item['memberId'] ?? 0);
         $vehicle = trim((string)($item['vehicle'] ?? ''));
         $role = (string)($item['role'] ?? 'besatzung');
+        $unchanged = isset($existingCrew[$memberId])
+            && $existingCrew[$memberId]['vehicle'] === $vehicle
+            && $existingCrew[$memberId]['role'] === $role;
         // Driver and unit leader are unique per vehicle; crew members are not.
         $slot = $vehicle && $role !== 'besatzung' ? "$vehicle:$role" : '';
-        if (!$memberId || isset($seen[$memberId]) || !isset($members[$memberId]) || ($vehicle && !in_array($vehicle, $vehicles, true))
+        if (!$memberId || isset($seen[$memberId]) || !isset($members[$memberId]) || (!(int)$members[$memberId]['active'] && !$unchanged)
+            || ($vehicle && !in_array($vehicle, $vehicles, true) && !$unchanged)
             || !in_array($role, ['maschinist', 'einheitsfuehrer', 'besatzung'], true)
             || (!$vehicle && $role !== 'besatzung') || ($slot && isset($occupied[$slot]))) {
             throw new ApiError(400, 'Besatzung ist ungültig');
         }
         $seen[$memberId] = true;
         if ($slot) $occupied[$slot] = true;
-        $rows[] = compact('memberId', 'vehicle', 'role') + ['name' => $members[$memberId]];
+        $rows[] = compact('memberId', 'vehicle', 'role') + ['name' => $members[$memberId]['name']];
     }
     query('DELETE FROM report_crew WHERE report_id=?', [$reportId]);
     foreach ($rows as $row) query(
@@ -759,7 +774,7 @@ function syncDiveraMembers(array $cluster, int $unitId, int $organizationId): ar
         'DELETE mq FROM member_qualifications mq JOIN qualifications q ON q.id=mq.qualification_id WHERE q.unit_id=?',
         [$unitId]
     );
-    query('DELETE FROM member_units WHERE unit_id=?', [$unitId]);
+    query('UPDATE member_units SET active=0 WHERE unit_id=?', [$unitId]);
     $qualifications = [];
     foreach ($qualificationRows as $diveraId => [$name, $shortname]) {
         query(
@@ -778,7 +793,11 @@ function syncDiveraMembers(array $cluster, int $unitId, int $organizationId): ar
             [$organizationId, $diveraId, $name]
         );
         $memberId = (int)db()->lastInsertId();
-        query('INSERT INTO member_units(member_id,unit_id) VALUES(?,?)', [$memberId, $unitId]);
+        query(
+            'INSERT INTO member_units(member_id,unit_id,active) VALUES(?,?,1)
+             ON DUPLICATE KEY UPDATE active=1',
+            [$memberId, $unitId]
+        );
         foreach ($qualificationIds as $qualificationId) {
             query(
                 'INSERT IGNORE INTO member_qualifications(member_id,qualification_id) VALUES(?,?)',
@@ -1082,7 +1101,7 @@ try {
             [$unitId]
         )->fetchAll();
         foreach ($vehicles as &$vehicle) $vehicle['id'] = (int)$vehicle['id'];
-        respond(200, ['members' => unitMembers($unitId, (int)$user['organization_id']), 'vehicles' => $vehicles]);
+        respond(200, ['members' => unitMembers($unitId, (int)$user['organization_id'], false), 'vehicles' => $vehicles]);
     }
 
     if ($method === 'GET' && $path === '/api/users') {

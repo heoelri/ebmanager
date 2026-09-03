@@ -117,6 +117,7 @@ CREATE TABLE members (
 CREATE TABLE member_units (
   member_id BIGINT UNSIGNED NOT NULL,
   unit_id BIGINT UNSIGNED NOT NULL,
+  active BOOLEAN NOT NULL DEFAULT TRUE,
   PRIMARY KEY (member_id, unit_id),
   CONSTRAINT member_units_member_fk FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE,
   CONSTRAINT member_units_unit_fk FOREIGN KEY (unit_id) REFERENCES units(id) ON DELETE CASCADE
@@ -211,4 +212,6 @@ CREATE TABLE schema_migrations (
   applied_at DATETIME NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO schema_migrations(name,applied_at) VALUES('001-report-workflow-and-vehicles.sql',UTC_TIMESTAMP());
+INSERT INTO schema_migrations(name,applied_at) VALUES
+  ('001-report-workflow-and-vehicles.sql',UTC_TIMESTAMP()),
+  ('002-inactive-unit-members.sql',UTC_TIMESTAMP());
