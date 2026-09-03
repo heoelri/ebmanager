@@ -275,8 +275,7 @@ case "$invite_status" in
   201)
     invite_expiry=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
       einsatzberichte --execute="SELECT expires_at FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE u.email='invite@example.test'")
-    test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
-      einsatzberichte --execute="SELECT TIMESTAMPDIFF(HOUR,UTC_TIMESTAMP(),expires_at) BETWEEN 167 AND 168 FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE u.email='invite@example.test'")" = 1
+    INVITE_EXPIRY="$invite_expiry" php -r '$seconds=(new DateTimeImmutable(getenv("INVITE_EXPIRY"),new DateTimeZone("UTC")))->getTimestamp()-time(); assert($seconds>=604790 && $seconds<=604800);'
     invited_user_id=$(php -r '$data=json_decode(file_get_contents("invite.json"),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
     test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
       einsatzberichte --execute="SELECT COUNT(*) FROM user_units WHERE user_id=$invited_user_id")" = 2
