@@ -83,6 +83,10 @@ Die im vollständigen API-Review priorisierten Befunde zu Transport, Sitzungen u
 
 Query-Parameter wählen ausschließlich bereits vorhandene Browseransichten aus und erweitern keine API-Berechtigung. Nicht erlaubte Rollenansichten und nicht sichtbare Einsatz-IDs fallen auf die Einsatzübersicht zurück; alle fachlichen Daten bleiben zusätzlich serverseitig rollen-, einheits- und mandantengebunden. Einladungs- und Wiederherstellungstoken verbleiben in den bestehenden Hash-Fragmenten und werden nicht in die neue Navigation übernommen.
 
+## UI-Screenshot-Workflow vom 3. September 2026
+
+Der Screenshot-Workflow läuft auf `pull_request` und führt den Code des Pull Requests niemals über `pull_request_target` aus. Er verwendet ausschließlich die versionierten Demo-Daten und offensichtlich unechte lokale Zugangsdaten. Screenshots werden für alle PRs als Artefakt gespeichert; der schreibende Upload zu GitHub User Attachments und der PR-Kommentar laufen nur, wenn der Quell-Branch zum selben Repository gehört. Fork-PRs erhalten dadurch keinen schreibenden Token oder Zugriff auf Deployment-Secrets.
+
 ## SMTP-Versand vom 23. August 2026
 
 Der optionale SMTP-Versand verwendet Port 587 mit verpflichtendem STARTTLS, aktiviert Zertifikats- und Hostnamenprüfung und authentifiziert sich erst nach dem TLS-Handshake. SMTP-Passwörter werden ausschließlich aus der nicht versionierten Konfiguration oder aus Umgebungsvariablen gelesen und weder geloggt noch an den Browser übertragen. Unvollständige SMTP-Konfigurationen werden abgelehnt; ohne `smtp_host` bleibt PHP `mail()` der Fallback.

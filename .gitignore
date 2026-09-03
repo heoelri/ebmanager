@@ -1,1 +1,3 @@
 config.local.php
+node_modules/
+screenshots/
