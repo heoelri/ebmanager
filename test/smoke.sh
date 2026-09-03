@@ -74,16 +74,18 @@ php -r '
   $frontend=$html.$javascript;
   $css=file_get_contents("public/styles.css");
   foreach (["viewport-fit=cover","public/styles.css","public/app.js","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:","rankOptions","pendingWarning","initialView","DIVERA-Einsatznummer","class=\"command-row\"","class=\"form-section\"","class=\"report-times\"","restoreDialogFocus","zone.key==='available'||zone.key===current","!zone.historical||zone.key===current","zone.dataset.historical==='true'","<select name=\"commandRank\">","<select name=\"additionalCommandRank\">"] as $required) {
-    if (!str_contains($frontend,$required)) exit(1);
+    if (!str_contains($frontend,$required)) { fwrite(STDERR,"Frontend-Marker fehlt: $required\n"); exit(1); }
   }
   foreach (["--control-height: 44px",":focus-visible","safe-area-inset-bottom","forced-colors: active"] as $required) {
-    if (!str_contains($css,$required)) exit(1);
+    if (!str_contains($css,$required)) { fwrite(STDERR,"CSS-Marker fehlt: $required\n"); exit(1); }
   }
-  if (str_contains($html,"<style") || preg_match("/<script(?![^>]*\\s+src\\s*=)[^>]*>/i",$html) || preg_match("/\\son[a-z]+=/i",$frontend) || preg_match("/\\sstyle=\"/i",$frontend)) exit(1);
+  if (str_contains($html,"<style") || preg_match("/<script(?![^>]*\\s+src\\s*=)[^>]*>/i",$html) || preg_match("/\\son[a-z]+=/i",$frontend) || preg_match("/\\sstyle=\"/i",$frontend)) {
+    fwrite(STDERR,"Verbotenes Inline-Markup gefunden\n"); exit(1);
+  }
   foreach (["Kleinbrand","Wohngebäude","Menschen in Notlage","Feuerwehrmann-Anwärter"] as $duplicatedOption) {
-    if (str_contains($frontend,$duplicatedOption)) exit(1);
+    if (str_contains($frontend,$duplicatedOption)) { fwrite(STDERR,"Fachoption im Frontend dupliziert: $duplicatedOption\n"); exit(1); }
   }
-  if (preg_match("/<select[^>]+multiple/i",$frontend)) exit(1);
+  if (preg_match("/<select[^>]+multiple/i",$frontend)) { fwrite(STDERR,"Mehrfach-Select im Frontend gefunden\n"); exit(1); }
 '
 
 # Fachoptionen sind vorhanden und ihre Klassifikationsschlüssel stimmen mit den Gruppenbezeichnungen überein.
