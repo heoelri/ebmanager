@@ -142,7 +142,7 @@ Die zugehörigen Links werden standardmäßig über PHP `mail()` oder bei vorhan
 | `requested_at` | DATETIME, NOT NULL | Zeitpunkt der Anforderung und Grundlage der Fünf-Minuten-Sperre |
 | `expires_at` | DATETIME, NOT NULL | Ablaufzeitpunkt: Einladungen nach sieben Tagen, Passwort-Wiederherstellungen nach 30 Minuten |
 
-Der Klartexttoken wird nur per E-Mail versendet und nie gespeichert. Nach erfolgreichem Zurücksetzen werden der Token und alle Sitzungen des Benutzers gelöscht. Beim Löschen des Benutzers wird auch sein Token mitgelöscht.
+Der Klartexttoken wird nur per E-Mail versendet und nie gespeichert. Nach erfolgreichem Zurücksetzen werden der Token und alle Sitzungen des Benutzers gelöscht. Die Wehrleitung kann für fremde Benutzer eine neue Einladung erzeugen; nach erfolgreicher Mailannahme ersetzt sie vorhandene Token, setzt den Passwort-Hash auf einen unbekannten Zufallswert und widerruft alle Sitzungen. Beim Löschen des Benutzers wird auch sein Token mitgelöscht.
 
 Workflow-Benachrichtigungen werden nach dem erfolgreichen Speichern eines
 Einsatzes, Berichts oder einer Freigabe unmittelbar versendet. Sie benötigen

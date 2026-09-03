@@ -1163,6 +1163,37 @@ try {
         respond(201, ['id' => $id]);
     }
 
+    if ($method === 'POST' && preg_match('#^/api/users/(\d+)/invitation$#', $path, $match)) {
+        assertRole($user, 'wehrleitung');
+        $id = (int)$match[1];
+        if ($id === (int)$user['id']) throw new ApiError(409, 'Der eigene Zugang kann hier nicht zurückgesetzt werden');
+        mailSettings();
+        $token = bin2hex(random_bytes(32));
+        transaction(function () use ($id, $token, $user) {
+            $target = one(
+                'SELECT id,name,email FROM users WHERE id=? AND organization_id=? FOR UPDATE',
+                [$id, $user['organization_id']]
+            );
+            if (!$target) throw new ApiError(404, 'Benutzer nicht gefunden');
+            query('DELETE FROM password_resets WHERE user_id=?', [$id]);
+            query(
+                'INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 7 DAY)',
+                [$id, hash('sha256', $token)]
+            );
+            $expiresAt = new DateTimeImmutable((string)one(
+                'SELECT expires_at FROM password_resets WHERE user_id=?',
+                [$id]
+            )['expires_at'], new DateTimeZone('UTC'));
+            query('UPDATE users SET password_hash=? WHERE id=?', [password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT), $id]);
+            query('DELETE FROM sessions WHERE user_id=?', [$id]);
+            if (!sendPasswordEmail($target, $token, true, $expiresAt)) {
+                error_log('Einladungs-E-Mail konnte nicht versendet werden');
+                throw new ApiError(503, 'Einladungs-E-Mail konnte nicht versendet werden');
+            }
+        });
+        respond(200, ['ok' => true]);
+    }
+
     if ($method === 'PUT' && preg_match('#^/api/users/(\d+)$#', $path, $match)) {
         assertRole($user, 'wehrleitung');
         $existing = one('SELECT * FROM users WHERE id=? AND organization_id=?', [(int)$match[1], $user['organization_id']]);

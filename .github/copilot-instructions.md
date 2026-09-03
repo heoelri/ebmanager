@@ -40,6 +40,7 @@
 - `user_units` enthält die rollenabhängigen Einheitszuordnungen. `users.unit_id` bleibt als kompatible Primärzuordnung für Einheitsführung und Führungskräfte bestehen.
 - Eine Organisation muss immer mindestens eine `wehrleitung` behalten.
 - Neue Benutzer erhalten kein Startpasswort, sondern einen sieben Tage gültigen Einmallink zur Aktivierung; die Einladung nennt den Ablaufzeitpunkt in `Europe/Berlin`. Vergessene Passwörter bleiben 30 Minuten gültig, verwenden denselben gehashten Tokenmechanismus und sind pro Benutzer fünf Minuten gesperrt.
+- Die Wehrleitung kann fremde Benutzerzugänge zurücksetzen und eine neue siebentägige Einladung senden. Erst nach erfolgreicher Mailannahme werden Passwort, Sitzungen und frühere Einmallinks ungültig; der eigene Zugang ist ausgeschlossen.
 - Eine Passwortänderung widerruft alle Sitzungen des Benutzers.
 - Erfolgreiche Anmeldungen werden mit Benutzer und UTC-Zeitpunkt in `login_history` gespeichert. Nur die Wehrleitung sieht den neuesten Eintrag je Benutzer. Speichere keine IP-Adressen, Browserdaten oder fehlgeschlagenen Anmeldungen.
 
