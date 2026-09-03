@@ -26,14 +26,15 @@ function databaseConfigurationError(): ?string
     return null;
 }
 
-function sendPasswordEmail(array $user, string $token, bool $invitation = false): bool
+function sendPasswordEmail(array $user, string $token, bool $invitation = false, ?DateTimeImmutable $expiresAt = null): bool
 {
     $settings = mailSettings();
     ['url' => $url] = $settings;
     $link = "$url/#" . ($invitation ? 'invite' : 'reset') . "=$token";
     $subject = $invitation ? 'Konto aktivieren' : 'Passwort zuruecksetzen';
+    $expiry = $expiresAt?->setTimezone(new DateTimeZone('Europe/Berlin'))->format('d.m.Y \u\m H:i \U\h\r');
     $message = $invitation
-        ? "Hallo {$user['name']},\n\nüber diesen Link können Sie innerhalb von 30 Minuten Ihr Konto aktivieren und ein Passwort vergeben:\n$link\n\nNach Ablauf können Sie über „Passwort vergessen“ einen neuen Link anfordern."
+        ? "Hallo {$user['name']},\n\nüber diesen Link können Sie Ihr Konto aktivieren und ein Passwort vergeben:\n$link\n\nDer Link ist bis zum $expiry (Europe/Berlin) gültig. Nach Ablauf können Sie über „Passwort vergessen“ einen neuen Link anfordern."
         : "Hallo {$user['name']},\n\nüber diesen Link können Sie innerhalb von 30 Minuten ein neues Passwort vergeben:\n$link\n\nFalls Sie dies nicht angefordert haben, ignorieren Sie diese Nachricht.";
     return sendEmail($settings, $user['email'], $subject, $message);
 }
@@ -1100,10 +1101,9 @@ try {
             [$user['organization_id']]
         )->fetchAll();
         $history = query(
-            "SELECT user_id,DATE_FORMAT(logged_in_at,'%Y-%m-%dT%H:%i:%sZ') logged_in_at FROM
-             (SELECT h.*,ROW_NUMBER() OVER(PARTITION BY h.user_id ORDER BY h.logged_in_at DESC,h.id DESC) history_position
-              FROM login_history h JOIN users u ON u.id=h.user_id WHERE u.organization_id=?) recent
-             WHERE history_position<=5 ORDER BY user_id,history_position",
+            "SELECT h.user_id,DATE_FORMAT(MAX(h.logged_in_at),'%Y-%m-%dT%H:%i:%sZ') logged_in_at
+             FROM login_history h JOIN users u ON u.id=h.user_id
+             WHERE u.organization_id=? GROUP BY h.user_id ORDER BY h.user_id",
             [$user['organization_id']]
         )->fetchAll();
         $historyByUser = [];
@@ -1124,7 +1124,7 @@ try {
         $email = emailAddress($data['email'] ?? null);
         mailSettings();
         $token = bin2hex(random_bytes(32));
-        $id = transaction(function () use ($data, $name, $email, $token, $unitIds, $user) {
+        [$id, $expiresAt] = transaction(function () use ($data, $name, $email, $token, $unitIds, $user) {
             // An unknown random password keeps the account unusable until activation.
             query(
                 'INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) VALUES(?,?,?,?,?,?)',
@@ -1133,10 +1133,16 @@ try {
             );
             $id = (int)db()->lastInsertId();
             replaceMemberships($id, $unitIds);
-            query('INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 30 MINUTE)', [$id, hash('sha256', $token)]);
-            return $id;
+            query(
+                'INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 7 DAY)',
+                [$id, hash('sha256', $token)]
+            );
+            return [$id, new DateTimeImmutable((string)one(
+                'SELECT expires_at FROM password_resets WHERE user_id=?',
+                [$id]
+            )['expires_at'], new DateTimeZone('UTC'))];
         });
-        if (!sendPasswordEmail(['name' => $name, 'email' => $email], $token, true)) {
+        if (!sendPasswordEmail(['name' => $name, 'email' => $email], $token, true, $expiresAt)) {
             query('DELETE FROM users WHERE id=?', [$id]);
             error_log('Einladungs-E-Mail konnte nicht versendet werden');
             throw new ApiError(503, 'Einladungs-E-Mail konnte nicht versendet werden');

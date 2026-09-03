@@ -127,7 +127,7 @@ Speichert ausschließlich erfolgreiche Anmeldungen. IP-Adresse, Browserdaten und
 | `user_id` | BIGINT UNSIGNED, FK | Angemeldeter Benutzer |
 | `logged_in_at` | DATETIME, NOT NULL | Anmeldezeitpunkt in UTC |
 
-Die Verwaltung zeigt der Wehrleitung die fünf neuesten Einträge pro Benutzer. Beim Löschen eines Benutzers wird seine Login-Historie mitgelöscht.
+Die Verwaltung zeigt der Wehrleitung den neuesten Eintrag pro Benutzer. Beim Löschen eines Benutzers wird seine Login-Historie mitgelöscht.
 
 ### `password_resets`
 
@@ -140,7 +140,7 @@ Die zugehörigen Links werden standardmäßig über PHP `mail()` oder bei vorhan
 | `user_id` | BIGINT UNSIGNED, FK, UNIQUE | Benutzer mit höchstens einem aktiven Token |
 | `token_hash` | CHAR(64), UNIQUE | SHA-256-Hash des zufälligen 256-Bit-Tokens |
 | `requested_at` | DATETIME, NOT NULL | Zeitpunkt der Anforderung und Grundlage der Fünf-Minuten-Sperre |
-| `expires_at` | DATETIME, NOT NULL | Ablaufzeitpunkt nach 30 Minuten |
+| `expires_at` | DATETIME, NOT NULL | Ablaufzeitpunkt: Einladungen nach sieben Tagen, Passwort-Wiederherstellungen nach 30 Minuten |
 
 Der Klartexttoken wird nur per E-Mail versendet und nie gespeichert. Nach erfolgreichem Zurücksetzen werden der Token und alle Sitzungen des Benutzers gelöscht. Beim Löschen des Benutzers wird auch sein Token mitgelöscht.
 
