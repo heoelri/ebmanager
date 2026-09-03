@@ -408,6 +408,70 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE incident_units SET vehicles=JSON_ARRAY(JSON_OBJECT('id','foreign-secret','name','Fremdfahrzeug','own',TRUE)) WHERE incident_id=$incident_id AND unit_id=$second_unit_id"
 
+# Die Einheitsstatistik wahrt Rollen und Mandanten und ordnet lokale Zeitgrenzen sowie tatsächliche Beteiligung korrekt zu.
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="SET @leader_id=(SELECT id FROM users WHERE email='leitung1@example.test');
+    INSERT INTO incidents(organization_id,title,started_at,message,remark,patient,caller,consolidated_text) VALUES
+      (1,'Statistik außerhalb Sommerzeitraum','2026-09-03T21:59:59.000Z','','','','',''),
+      (1,'Statistik Sommer Mitternacht','2026-09-03T22:00:00.000Z','','','','',''),
+      (1,'Statistik Freitag Tag','2026-09-04T14:59:00.000Z','','','','',''),
+      (1,'Statistik Freitag Nacht','2026-09-04T15:00:00.000Z','','','','',''),
+      (1,'Statistik Montag Nacht','2026-09-07T04:59:00.000Z','','','','',''),
+      (1,'Statistik Montag Tag','2026-09-07T05:00:00.000Z','','','','',''),
+      (1,'Statistik außerhalb Winterzeitraum','2025-12-31T22:59:59.000Z','','','','',''),
+      (1,'Statistik Winter Mitternacht','2025-12-31T23:00:00.000Z','','','','','');
+    SET @outside=LAST_INSERT_ID(); SET @midnight=@outside+1; SET @i1=@outside+2; SET @i2=@outside+3; SET @i3=@outside+4; SET @i4=@outside+5; SET @winter_outside=@outside+6; SET @winter_midnight=@outside+7;
+    INSERT INTO incident_units(incident_id,unit_id,vehicles) VALUES
+      (@outside,1,JSON_ARRAY()),(@midnight,1,JSON_ARRAY()),
+      (@i1,1,JSON_ARRAY(JSON_OBJECT('id','lf20','name','LF 20 Statistik','own',TRUE))),
+      (@i2,1,JSON_ARRAY(JSON_OBJECT('id','lf20','name','LF 20 Statistik','own',TRUE),JSON_OBJECT('id','mtf','name','MTF Statistik','own',FALSE))),
+      (@i3,1,JSON_ARRAY('TLF Statistik')),(@i4,1,JSON_ARRAY()),
+      (@winter_outside,1,JSON_ARRAY()),(@winter_midnight,1,JSON_ARRAY()),
+      (@i1,$second_unit_id,JSON_ARRAY(JSON_OBJECT('name','Gemeinsames Fremdfahrzeug','own',TRUE)));
+    INSERT INTO reports(incident_id,unit_id,author_id,narrative,vehicles,personnel,classification) VALUES
+      (@i1,1,@leader_id,'Statistik','','',JSON_OBJECT()),(@i2,1,@leader_id,'Statistik','','',JSON_OBJECT()),
+      (@i1,$second_unit_id,1,'Fremder Einheitsbericht','','',JSON_OBJECT());
+    SET @r1=LAST_INSERT_ID(); SET @r2=@r1+1;
+    SET @foreign_report=@r1+2;
+    INSERT INTO members(organization_id,divera_id,name) VALUES(1,'statistics-active','Aktives Statistikmitglied'),(1,'statistics-inactive','Historisches Statistikmitglied'),(1,'statistics-foreign-unit','Fremdes Statistikmitglied');
+    SET @m1=LAST_INSERT_ID(); SET @m2=@m1+1; SET @foreign_member=@m1+2;
+    INSERT INTO member_units(member_id,unit_id,active) VALUES(@m1,1,TRUE),(@m2,1,FALSE),(@foreign_member,$second_unit_id,TRUE);
+    INSERT INTO report_crew(report_id,member_id,vehicle,role) VALUES(@r1,@m1,'LF 20 Statistik','maschinist'),(@r1,@m2,'','besatzung'),(@foreign_report,@foreign_member,'','besatzung');
+    INSERT INTO report_additional_vehicles(report_id,vehicle) VALUES(@r1,'ELW Statistik');
+    INSERT INTO organizations(name) VALUES('Fremde Statistikwehr'); SET @foreign_org=LAST_INSERT_ID();
+    INSERT INTO units(organization_id,name) VALUES(@foreign_org,'Fremde Einheit'); SET @foreign_unit=LAST_INSERT_ID();
+    INSERT INTO incidents(organization_id,title,started_at,message,remark,patient,caller,consolidated_text) VALUES(@foreign_org,'Fremder Statistikeinsatz','2026-09-04T15:00:00.000Z','','','','',''); SET @foreign_incident=LAST_INSERT_ID();
+    INSERT INTO incident_units(incident_id,unit_id,vehicles) VALUES(@foreign_incident,@foreign_unit,JSON_ARRAY(JSON_OBJECT('name','Mandantenfahrzeug','own',TRUE)))"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/statistics?from=2026-09-04&to=2026-09-07")" = 403
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" "$base_url/api/statistics?from=2026-09-04&to=2026-09-07")" = 403
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$leader_token" "$base_url/api/statistics?from=2026-09-08&to=2026-09-07")" = 400
+curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_url/api/statistics?from=2026-09-04&to=2026-09-07" |
+  php -r '
+    $data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+    assert($data["unit"]["name"]==="Löschzug");
+    assert($data["totals"]===["incidents"=>5,"reports"=>2,"crewAssignments"=>2,"averageCrew"=>1]);
+    assert($data["workPeriods"]===["workday"=>3,"weekend"=>2]);
+    assert($data["dayPeriods"]===["day"=>2,"night"=>3]);
+    assert($data["years"]===[["key"=>"2026","count"=>5]]);
+    assert($data["months"]===[["key"=>"2026-09","count"=>5]]);
+    assert($data["weekdays"]===[["key"=>"1","count"=>2],["key"=>"5","count"=>3]]);
+    assert($data["alarmedVehicles"][0]===["name"=>"LF 20 Statistik","own"=>true,"count"=>2]);
+    assert($data["additionalVehicles"]===[["name"=>"ELW Statistik","count"=>1]]);
+    assert(array_column($data["members"],"name")===["Aktives Statistikmitglied","Historisches Statistikmitglied"]);
+    assert(!str_contains(json_encode($data,JSON_THROW_ON_ERROR),"Mandantenfahrzeug"));
+    assert(!str_contains(json_encode($data,JSON_THROW_ON_ERROR),"Fremdes Statistikmitglied"));
+  '
+curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_url/api/statistics?from=2026-01-01&to=2026-01-01" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($data["totals"]["incidents"]===1);'
+curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_url/api/statistics?from=2024-01-01&to=2024-12-31" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($data["totals"]["incidents"]===0); assert($data["totals"]["averageCrew"]===null); assert($data["alarmedVehicles"]===[]); assert($data["members"]===[]);'
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DELETE FROM incidents WHERE organization_id=1 AND title LIKE 'Statistik %';
+    DELETE FROM members WHERE organization_id=1 AND divera_id IN ('statistics-active','statistics-inactive','statistics-foreign-unit');
+    DELETE FROM incidents WHERE organization_id=(SELECT id FROM organizations WHERE name='Fremde Statistikwehr');
+    DELETE FROM units WHERE organization_id=(SELECT id FROM organizations WHERE name='Fremde Statistikwehr');
+    DELETE FROM organizations WHERE name='Fremde Statistikwehr'"
+
 # Nicht-Wehrführungen sehen nur aktuell zugeordnete Einheiten, Fahrzeuge und rollenbezogene Berichtsstatus.
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units" |
   php -r '$units=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(array_column($units,"id")===[1]);'

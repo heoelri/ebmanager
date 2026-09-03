@@ -4,6 +4,17 @@ declare(strict_types=1);
 // Zulässige Benutzerrollen für Verwaltung und API-Prüfungen; Änderungen erfordern auch eine Anpassung des Rollen-ENUMs in schema.sql.
 const ROLES = ['wehrleitung', 'einheitsleitung', 'fuehrungskraft'];
 
+// Lokale Zeitfenster für Einsatzstatistiken; Wochentage entsprechen DateTime::format('N').
+const STATISTICS_PERIODS = [
+    'timezone' => 'Europe/Berlin',
+    'dayStart' => '07:00',
+    'nightStart' => '17:00',
+    'weekendStartDay' => 5,
+    'weekendStart' => '17:00',
+    'weekendEndDay' => 1,
+    'weekendEnd' => '07:00'
+];
+
 // Dienstgradabkürzungen und Anzeigenamen für die Drop-downs der Einsatzleitung; im Bericht wird jeweils die Abkürzung gespeichert.
 const RANKS = [
     'FMA' => 'Feuerwehrmann-Anwärter',

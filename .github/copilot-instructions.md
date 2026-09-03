@@ -71,6 +71,7 @@
 - Eine Rückgabe durch die Wehrführung oder die nachträgliche Zuordnung einer weiteren Einheit leert `incidents.consolidated_at`, erhält den bisherigen Text aber als Arbeitsstand. Wiederholte oder veraltete Statusübergänge liefern HTTP 409.
 - Die Wehrführung darf erst konsolidieren, wenn jede alarmierte Einheit einen Bericht in `wehr_review` hat. Führungskräfte sehen nach dem Absenden dessen Zeitpunkt, den aktuellen Status und einen ausdrücklichen Nur-Lese-Hinweis.
 - `patient`, `caller`, Geschädigte, Schädiger und Berichtstexte sind sensible, mandantengebundene Einsatzdaten. Protokolliere sie nicht.
+- Die erste Statistikansicht ist ausschließlich für Einheitsführungen verfügbar und aggregiert nur deren aktuell zugeordnete Einheit. Alarmierte Fahrzeuge stammen aus `incident_units.vehicles`, tatsächliche Beteiligung aus `report_crew` und zusätzliche Fahrzeuge aus `report_additional_vehicles`; Zeitkategorien werden mit den Grenzen aus `constants.php` in `Europe/Berlin` berechnet.
 
 ## Mitglieder, Fahrzeuge und Besatzung
 
@@ -101,7 +102,7 @@
 
 ## Oberfläche und Barrierefreiheit
 
-- Hauptnavigation: Einsätze, Mitglieder & Fahrzeuge, rollenabhängig Verwaltung, System und DIVERA sowie Abmelden.
+- Hauptnavigation: Einsätze, Mitglieder & Fahrzeuge, rollenabhängig Statistik, Verwaltung, System und DIVERA sowie Abmelden.
 - „System“ ist nur für die Wehrleitung sichtbar und zeigt ausschließlich kuratierte, nicht geheime Zustandsdaten. Gib niemals DSN, Kennwörter, Einrichtungstoken oder DIVERA-Schlüssel aus.
 - Die Oberfläche bleibt ohne Framework responsiv und mit Tastatur, Screenreader und Touch bedienbar.
 - Interaktive Ziele sind mindestens 44 Pixel groß, Tastaturfokus ist sichtbar und dynamische Fehler sowie Statusänderungen werden angekündigt.

@@ -106,7 +106,8 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 summary:focus-visible,
-a:focus-visible {
+a:focus-visible,
+.table-scroll:focus-visible {
   outline: 3px solid var(--color-focus);
   outline-offset: 3px;
 }
@@ -171,6 +172,36 @@ main {
   background: var(--color-surface);
   border-radius: var(--radius-large);
   box-shadow: var(--shadow-card);
+}
+
+.statistics-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: var(--space);
+}
+
+.statistics-summary .card {
+  margin: 0;
+}
+
+.statistics-summary strong {
+  font-size: 2rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: .6rem;
+  text-align: left;
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 .grid {

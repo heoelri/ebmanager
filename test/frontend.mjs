@@ -331,6 +331,35 @@ assert.match(html, /Alles synchronisieren/);
 assert.match(html, /Fahrzeuge synchronisieren/);
 assert.match(html, /\/resources/);
 assert.match(html, /Qualifikationen:/);
+assert.match(html, /me\.role==='einheitsleitung'\?'<button type="button" data-action="statistics">Statistik<\/button>'/);
+assert.match(html, /<input name="from" type="date"/);
+assert.match(html, /<input name="to" type="date"/);
+assert.match(html, /<th scope="col">/);
+assert.match(html, /class="table-scroll" tabindex="0" role="region" aria-label=/);
+assert.match(html, /<caption class="sr-only">/);
+assert.match(css, /\.table-scroll:focus-visible/);
+
+const statisticsSource = html.match(/function statisticsDateValue[\s\S]*?(?=\nfunction membershipFields)/)?.[0];
+assert(statisticsSource, 'Statistikansicht fehlt');
+const {statisticsMarkup} = new Function('esc', `${statisticsSource}; return {statisticsMarkup};`)(value => String(value ?? ''));
+const statisticsHtml = statisticsMarkup({
+  range: {timezone: 'Europe/Berlin'},
+  totals: {incidents: 4, reports: 2, crewAssignments: 2, averageCrew: 1},
+  alarmedVehicles: [{name: 'LF 20', own: true, count: 2}],
+  additionalVehicles: [{name: 'ELW 1', count: 1}],
+  members: [{name: 'Historisches Mitglied', count: 1}],
+  years: [{key: '2026', count: 4}],
+  months: [{key: '2026-09', count: 4}],
+  weekdays: [{key: '1', count: 2}, {key: '5', count: 2}],
+  workPeriods: {workday: 2, weekend: 2},
+  dayPeriods: {day: 2, night: 2},
+  periods: {dayStart: '07:00', nightStart: '17:00', weekendStartDay: 5, weekendStart: '17:00', weekendEndDay: 1, weekendEnd: '07:00'}
+});
+for (const expected of ['Alarmierte Fahrzeuge', 'Zusätzliche tatsächlich eingesetzte Fahrzeuge', 'Einsatzbeteiligung der Mitglieder', 'LF 20', 'ELW 1', 'Historisches Mitglied', 'Werktag', 'Wochenende', 'Tag', 'Nacht']) {
+  assert.match(statisticsHtml, new RegExp(expected));
+}
+assert.match(statisticsHtml, /2 Besatzungszuordnungen in 2 vorhandenen Berichten/);
+assert.match(statisticsMarkup({totals: {incidents: 0}}), /Für den gewählten Zeitraum liegen keine Einsätze/);
 
 const loadCrewSource = html.match(/async function loadReportCrew[^\n]+/)?.[0];
 assert(loadCrewSource, 'loadReportCrew fehlt');

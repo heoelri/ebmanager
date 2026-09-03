@@ -230,6 +230,141 @@ function unitMembers(int $unitId, int $organizationId, bool $activeOnly = true):
     return $rows;
 }
 
+function statisticsDate(mixed $value, string $name, DateTimeZone $timezone): DateTimeImmutable
+{
+    $text = required($value, $name, 10);
+    $date = DateTimeImmutable::createFromFormat('!Y-m-d', $text, $timezone);
+    $errors = DateTimeImmutable::getLastErrors();
+    if (!$date || $date->format('Y-m-d') !== $text || ($errors && ($errors['warning_count'] || $errors['error_count']))) {
+        throw new ApiError(400, "$name ist ungültig");
+    }
+    return $date;
+}
+
+function statisticsPeriods(DateTimeImmutable $date): array
+{
+    $weekday = (int)$date->format('N');
+    $time = $date->format('H:i');
+    $weekend = ($weekday === STATISTICS_PERIODS['weekendStartDay'] && $time >= STATISTICS_PERIODS['weekendStart'])
+        || $weekday > STATISTICS_PERIODS['weekendStartDay']
+        || ($weekday === STATISTICS_PERIODS['weekendEndDay'] && $time < STATISTICS_PERIODS['weekendEnd']);
+    $day = $time >= STATISTICS_PERIODS['dayStart'] && $time < STATISTICS_PERIODS['nightStart'];
+    return [$weekend ? 'weekend' : 'workday', $day ? 'day' : 'night'];
+}
+
+function unitStatistics(array $user, string $fromValue, string $toValue): array
+{
+    assertRole($user, 'einheitsleitung');
+    if (count($user['unitIds']) !== 1) throw new ApiError(403, 'Keine eindeutige Einheit zugeordnet');
+    $unitId = (int)$user['unitIds'][0];
+    $foundUnit = unit($unitId, (int)$user['organization_id']);
+    if (!$foundUnit) throw new ApiError(404, 'Einheit nicht gefunden');
+
+    $timezone = new DateTimeZone(STATISTICS_PERIODS['timezone']);
+    $from = statisticsDate($fromValue, 'Von', $timezone);
+    $to = statisticsDate($toValue, 'Bis', $timezone);
+    if ($from > $to) throw new ApiError(400, 'Von darf nicht nach Bis liegen');
+    $fromUtc = $from->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.v\Z');
+    $untilUtc = $to->modify('+1 day')->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.v\Z');
+    $params = [$unitId, $user['organization_id'], $fromUtc, $untilUtc];
+
+    $incidents = query(
+        'SELECT i.id,i.started_at,iu.vehicles,r.id report_id
+         FROM incident_units iu
+         JOIN incidents i ON i.id=iu.incident_id
+         LEFT JOIN reports r ON r.incident_id=i.id AND r.unit_id=iu.unit_id
+         WHERE iu.unit_id=? AND i.organization_id=? AND i.started_at>=? AND i.started_at<?
+         ORDER BY i.started_at,i.id',
+        $params
+    )->fetchAll();
+    $counts = ['years' => [], 'months' => [], 'weekdays' => [], 'workPeriods' => ['workday' => 0, 'weekend' => 0], 'dayPeriods' => ['day' => 0, 'night' => 0]];
+    $alarmedVehicles = [];
+    $reportIds = [];
+    foreach ($incidents as $incidentRow) {
+        $local = (new DateTimeImmutable($incidentRow['started_at']))->setTimezone($timezone);
+        $year = $local->format('Y');
+        $month = $local->format('Y-m');
+        $weekday = $local->format('N');
+        $counts['years'][$year] = ($counts['years'][$year] ?? 0) + 1;
+        $counts['months'][$month] = ($counts['months'][$month] ?? 0) + 1;
+        $counts['weekdays'][$weekday] = ($counts['weekdays'][$weekday] ?? 0) + 1;
+        [$workPeriod, $dayPeriod] = statisticsPeriods($local);
+        $counts['workPeriods'][$workPeriod]++;
+        $counts['dayPeriods'][$dayPeriod]++;
+        if ($incidentRow['report_id'] !== null) $reportIds[] = (int)$incidentRow['report_id'];
+
+        $seen = [];
+        foreach (exportJson($incidentRow['vehicles']) as $vehicle) {
+            $name = trim((string)(is_array($vehicle) ? ($vehicle['name'] ?? '') : $vehicle));
+            if ($name === '') continue;
+            $own = !is_array($vehicle) || ($vehicle['own'] ?? true) !== false;
+            $vehicleId = trim((string)(is_array($vehicle) ? ($vehicle['id'] ?? '') : ''));
+            $key = ($own ? '1:' : '0:') . ($vehicleId !== '' ? $vehicleId : $name);
+            if (isset($seen[$key])) continue;
+            $seen[$key] = true;
+            $alarmedVehicles[$key] = ['name' => $name, 'own' => $own, 'count' => ($alarmedVehicles[$key]['count'] ?? 0) + 1];
+        }
+    }
+
+    $members = [];
+    $additionalVehicles = [];
+    $crewCount = 0;
+    if ($reportIds) {
+        $placeholders = implode(',', array_fill(0, count($reportIds), '?'));
+        foreach (query(
+            "SELECT rc.report_id,m.id,m.name FROM report_crew rc
+             JOIN members m ON m.id=rc.member_id
+             WHERE rc.report_id IN ($placeholders) AND m.organization_id=?
+             ORDER BY m.name,m.id,rc.report_id",
+            array_merge($reportIds, [$user['organization_id']])
+        )->fetchAll() as $member) {
+            $id = (int)$member['id'];
+            $members[$id] = ['id' => $id, 'name' => $member['name'], 'count' => ($members[$id]['count'] ?? 0) + 1];
+            $crewCount++;
+        }
+        foreach (query(
+            "SELECT vehicle FROM report_additional_vehicles WHERE report_id IN ($placeholders) ORDER BY vehicle",
+            $reportIds
+        )->fetchAll(PDO::FETCH_COLUMN) as $vehicle) {
+            $additionalVehicles[$vehicle] = ($additionalVehicles[$vehicle] ?? 0) + 1;
+        }
+    }
+
+    $rows = static function (array $values): array {
+        $result = [];
+        foreach ($values as $key => $count) $result[] = ['key' => (string)$key, 'count' => $count];
+        usort($result, fn($a, $b) => strnatcasecmp($a['key'], $b['key']));
+        return $result;
+    };
+    $ranked = static function (array $values): array {
+        $result = array_values($values);
+        usort($result, fn($a, $b) => $b['count'] <=> $a['count'] ?: strnatcasecmp($a['name'], $b['name']));
+        return $result;
+    };
+    foreach ($additionalVehicles as $name => $count) $additionalVehicles[$name] = ['name' => $name, 'count' => $count];
+
+    $reportCount = count($reportIds);
+    return [
+        'range' => ['from' => $from->format('Y-m-d'), 'to' => $to->format('Y-m-d'), 'timezone' => STATISTICS_PERIODS['timezone']],
+        'unit' => ['id' => $unitId, 'name' => $foundUnit['name']],
+        'totals' => [
+            'incidents' => count($incidents),
+            'reports' => $reportCount,
+            'crewAssignments' => $crewCount,
+            'averageCrew' => $reportCount ? round($crewCount / $reportCount, 2) : null
+        ],
+        'alarmedVehicles' => $ranked($alarmedVehicles),
+        'additionalVehicles' => $ranked($additionalVehicles),
+        'members' => $ranked($members),
+        'years' => $rows($counts['years']),
+        'months' => $rows($counts['months']),
+        'weekdays' => $rows($counts['weekdays']),
+        'workPeriods' => $counts['workPeriods'],
+        'dayPeriods' => $counts['dayPeriods'],
+        'periods' => STATISTICS_PERIODS
+    ];
+}
+
 function reportStatusForRole(string $role): string
 {
     return match ($role) {
@@ -1175,6 +1310,16 @@ try {
         )->fetchAll();
         foreach ($vehicles as &$vehicle) $vehicle['id'] = (int)$vehicle['id'];
         respond(200, ['members' => unitMembers($unitId, (int)$user['organization_id'], false), 'vehicles' => $vehicles]);
+    }
+
+    if ($method === 'GET' && $path === '/api/statistics') {
+        $timezone = new DateTimeZone(STATISTICS_PERIODS['timezone']);
+        $today = new DateTimeImmutable('today', $timezone);
+        respond(200, unitStatistics(
+            $user,
+            (string)($_GET['from'] ?? $today->format('Y-01-01')),
+            (string)($_GET['to'] ?? $today->format('Y-m-d'))
+        ));
     }
 
     if ($method === 'GET' && $path === '/api/users') {
