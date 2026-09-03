@@ -24,6 +24,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Fixed
 
+- Inaktive Mitglieder können aus einer bestehenden Besatzung entfernt, aber nicht neu zugeordnet werden.
 - Datums- und Uhrzeitwerte folgen dem Browserformat des Nutzers; Ausrücke- und Eintreffzeit können bei abgebrochenen Einsätzen geleert werden.
 - Der Docker-Compose-Smoke-Test nutzt die bereits gesund gestarteten Dienste, statt Abhängigkeiten beim Testlauf erneut zu starten.
 - Ungültige JSON-Antworten behalten im Frontend ihren HTTP-Status; kompakte Einheitenauswahlen setzen Validierungsfehler auf alle Kontrollfelder.
