@@ -11,6 +11,8 @@ Bericht erhalten oder durch Weglassen entfernt werden; dadurch kann ein
 manipulierter Request keine beliebige inaktive Person neu hinzufügen.
 Ressourcenlisten bleiben auf berechtigte Einheiten und den aktuellen Mandanten
 begrenzt und kennzeichnen inaktive Mitglieder ohne zusätzliche Personendaten.
+Migration 002 stellt historische Zuordnungen nur wieder her, wenn Mitglied,
+Einheit und Einsatz demselben Mandanten angehören.
 
 ## Rollen-, Berichts- und DIVERA-Grenzen
 
