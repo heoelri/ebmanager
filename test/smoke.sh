@@ -741,7 +741,7 @@ curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_u
 
 # Ein inaktives Mitglied kann nicht manipuliert einem weiteren Bericht hinzugefügt werden.
 inactive_member_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
-  einsatzberichte --execute="SELECT m.id FROM members m JOIN member_units mu ON mu.member_id=m.id WHERE mu.unit_id=1 AND mu.active=0")
+  einsatzberichte --execute="SELECT m.id FROM members m JOIN member_units mu ON mu.member_id=m.id WHERE mu.unit_id=1 AND mu.active=0 AND m.divera_id='m2'")
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' \
   --data "{\"unitId\":1,\"runningNumber\":\"99/2026\",\"damagedParty\":{},\"damagingParty\":{},\"incidentCommand\":{},\"narrative\":\"Test\",\"departedAt\":null,\"arrivedAt\":null,\"endedAt\":\"2026-08-22T20:00:00.000Z\",\"incidentType\":\"Technische Hilfe\",\"classification\":{\"site\":[],\"cause\":[],\"technical\":[]},\"crew\":[{\"memberId\":$inactive_member_id,\"vehicle\":\"\",\"role\":\"besatzung\"}]}" \
