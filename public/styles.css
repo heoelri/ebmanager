@@ -215,6 +215,10 @@ main {
   background: var(--color-summary);
 }
 
+.resource-section > summary:focus-visible {
+  outline-offset: -3px;
+}
+
 .resource-section-content {
   padding: 0 var(--space-large) var(--space-large);
 }

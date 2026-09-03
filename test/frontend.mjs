@@ -385,6 +385,7 @@ assert.match(renderResourcesSource, /<section class="card"><h2>Fahrzeuge anderer
 assert.match(renderResourcesSource, /filterResourceMembers\(root,showInactive\)/);
 assert.match(css, /\.resource-filter\s*\{[\s\S]*?border-inline-start:\s*4px solid/);
 assert.match(css, /\.resource-section > summary\s*\{[\s\S]*?min-height:\s*var\(--control-height\)/);
+assert.match(css, /\.resource-section > summary:focus-visible\s*\{[\s\S]*?outline-offset:\s*-3px/);
 
 const inactivePreferenceSource = html.match(/function inactiveMembersPreference[^\n]+/)?.[0];
 assert(inactivePreferenceSource, 'Speicherung des Mitgliederfilters fehlt');
