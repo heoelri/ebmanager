@@ -38,6 +38,8 @@ assert.doesNotMatch(screenshotsWorkflow, /host\.docker\.internal/);
 assert.match(screenshotsWorkflow, /contains\(\\"\$marker\\"\)/);
 assert.equal((screenshotsScript.match(/page\.screenshot\(/g) ?? []).length, 3);
 assert.match(screenshotsScript, /viewport: \{width: 1440, height: 1000\}/);
+assert.match(screenshotsScript, /locale: 'de-DE'/);
+assert.match(screenshotsScript, /timezoneId: 'Europe\/Berlin'/);
 assert.match(screenshotsScript, /\?view=resources/);
 assert.match(htaccess, /Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'"/);
 assert.match(javascript, /document\.addEventListener\('click'/);

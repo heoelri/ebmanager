@@ -9,7 +9,9 @@ const browser = await chromium.launch();
 const context = await browser.newContext({
   ignoreHTTPSErrors: true,
   viewport: {width: 1440, height: 1000},
-  colorScheme: 'light'
+  colorScheme: 'light',
+  locale: 'de-DE',
+  timezoneId: 'Europe/Berlin'
 });
 const page = await context.newPage();
 
