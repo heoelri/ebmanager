@@ -180,7 +180,7 @@ Die Ersteinrichtung ist nach dem ersten Benutzer dauerhaft geschlossen.
 ## 8. Funktionen nach der Installation prüfen
 
 1. Anmelden und wieder abmelden.
-2. Auf der Seite „System“ Datenbank- und E-Mail-Status prüfen; dort dürfen keine Kennwörter oder Schlüssel erscheinen.
+2. Auf der Seite „System“ Build-ID, Datenbank- und E-Mail-Status prüfen; dort dürfen keine Kennwörter oder Schlüssel erscheinen.
 3. In der Verwaltung einen Testbenutzer anlegen und prüfen, dass die Einladung ankommt, der Link die Anwendung öffnet und der Benutzer sein Passwort selbst setzen kann.
 4. Einen manuellen Einsatz und einen Bericht anlegen.
 5. Über „Passwort vergessen“ sowie einen neuen Einsatz und Bericht prüfen,
@@ -211,7 +211,7 @@ Der GitHub-Workflow unterstützt SFTP wahlweise mit privatem Schlüssel oder Pas
 4. Prüfen, dass der Server SFTP über SSH anbietet und der ermittelte Host-Key mit der Angabe des Hosters übereinstimmt.
 5. Einen Push auf `main` durchführen und zuerst den Workflow `Tests`, danach den Workflow `Deployment` beobachten.
 
-Der Workflow lädt ausschließlich `.htaccess`, `api.php`, `constants.php`, `support.php`, `public/index.html`, `public/app.js` und `public/styles.css` hoch. `config.local.php`, Datenbankzugangsdaten, `schema.sql` und Migrationen werden absichtlich nicht automatisiert übertragen.
+Der Workflow schreibt den exakt getesteten Commit-SHA in die nicht öffentlich abrufbare Datei `.build-id` und lädt sie zusammen mit `.htaccess`, `api.php`, `constants.php`, `support.php`, `public/index.html`, `public/app.js` und `public/styles.css` hoch. `config.local.php`, Datenbankzugangsdaten, `schema.sql` und Migrationen werden absichtlich nicht automatisiert übertragen.
 
 Weitere Ziele wie `devpreview` benötigen ein eigenes GitHub-Environment, eigene Secrets, eigene Schutzregeln und eine eigene Concurrency-Gruppe. Zugangsdaten aus `hiba` dürfen nicht wiederverwendet werden.
 

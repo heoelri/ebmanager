@@ -36,6 +36,7 @@ jobs:
           SFTP_PRIVATE_KEY: ${{ secrets.SFTP_PRIVATE_KEY }}
           SFTP_KNOWN_HOSTS: ${{ secrets.SFTP_KNOWN_HOSTS }}
           SFTP_PATH: ${{ secrets.SFTP_PATH }}
+          BUILD_ID: ${{ github.event.workflow_run.head_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -65,6 +66,7 @@ jobs:
           workdir="$(mktemp -d)"
           trap 'rm -rf "$workdir"' EXIT
           chmod 700 "$workdir"
+          printf '%s\n' "$BUILD_ID" >.build-id
 
           printf '%s\n' "$SFTP_KNOWN_HOSTS" >"$workdir/known_hosts"
           chmod 600 "$workdir/known_hosts"
@@ -104,6 +106,7 @@ jobs:
             fi
             printf -- '-mkdir "public"\n'
             printf 'put ".htaccess" ".htaccess"\n'
+            printf 'put ".build-id" ".build-id"\n'
             printf 'put "api.php" "api.php"\n'
             printf 'put "constants.php" "constants.php"\n'
             printf 'put "support.php" "support.php"\n'

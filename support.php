@@ -110,6 +110,15 @@ function config(): array
     return $config;
 }
 
+function buildId(): string
+{
+    $value = getenv('BUILD_ID');
+    $path = __DIR__ . DIRECTORY_SEPARATOR . '.build-id';
+    if (($value === false || $value === '') && is_readable($path)) $value = file_get_contents($path);
+    $value = trim((string)$value);
+    return preg_match('/^[A-Za-z0-9._-]{1,100}$/D', $value) ? $value : 'Entwicklung';
+}
+
 function diveraBaseUrl(): string
 {
     $base = rtrim((string)(config()['divera_api_base_url'] ?? 'https://app.divera247.com'), '/');

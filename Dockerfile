@@ -1,5 +1,7 @@
 FROM php:8.5-apache
 
+ARG BUILD_ID=Entwicklung
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl default-mysql-client openssl \
     && docker-php-ext-install pdo_mysql \
@@ -14,3 +16,4 @@ RUN apt-get update \
 
 WORKDIR /var/www/html
 COPY . .
+RUN printf '%s\n' "$BUILD_ID" > .build-id

@@ -32,7 +32,10 @@ services:
     restart: "no"
 
   web:
-    build: .
+    build:
+      context: .
+      args:
+        BUILD_ID: ${BUILD_ID:-Entwicklung}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -61,7 +64,10 @@ services:
 
   test:
     profiles: [test]
-    build: .
+    build:
+      context: .
+      args:
+        BUILD_ID: ${BUILD_ID:-Entwicklung}
     depends_on:
       web:
         condition: service_healthy
@@ -70,6 +76,7 @@ services:
       DB_PASSWORD: test-password
       SETUP_TOKEN: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
       TEST_BASE_URL: https://web
+      EXPECTED_BUILD_ID: ${BUILD_ID:-Entwicklung}
       TEST_DB_HOST: db
       DIVERA_API_BASE_URL: ${DIVERA_API_BASE_URL:-https://app.divera247.com}
     volumes:

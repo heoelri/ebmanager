@@ -298,6 +298,7 @@ function unitStatistics(array $user, string $fromValue, string $toValue): array
             $name = trim((string)(is_array($vehicle) ? ($vehicle['name'] ?? '') : $vehicle));
             if ($name === '') continue;
             $own = !is_array($vehicle) || ($vehicle['own'] ?? true) !== false;
+            if (!$own) continue;
             $vehicleId = trim((string)(is_array($vehicle) ? ($vehicle['id'] ?? '') : ''));
             $key = ($own ? '1:' : '0:') . ($vehicleId !== '' ? $vehicleId : $name);
             if (isset($seen[$key])) continue;
@@ -1260,6 +1261,7 @@ try {
         respond(200, [
             'application' => [
                 'url' => (string)($settings['app_url'] ?? ''),
+                'buildId' => buildId(),
                 'phpVersion' => PHP_VERSION,
                 'setupConfigured' => strlen((string)($settings['setup_token'] ?? '')) >= 32
             ],

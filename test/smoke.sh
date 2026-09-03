@@ -203,11 +203,11 @@ users_json=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_
 printf '%s' "$users_json" | php -r '$users=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); exit(count($users[0]["loginHistory"])===1 ? 0 : 1);'
 rm -f second-login-cookies.txt
 
-# Die Systemübersicht enthält erwartete Statusdaten, aber keine Zugangsdaten oder Tokens.
+# Die Systemübersicht enthält Status- und Build-Daten, aber keine Zugangsdaten oder Tokens.
 system_json=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/system")
-printf '%s' "$system_json" | php -r '
+printf '%s' "$system_json" | EXPECTED_BUILD_ID="${EXPECTED_BUILD_ID:-Entwicklung}" php -r '
   $data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
-  if (($data["database"]["status"]??"")!=="Bereit" || count($data["units"]??[])!==1 || count($data["users"]??[])!==1) exit(1);
+  if (($data["database"]["status"]??"")!=="Bereit" || ($data["application"]["buildId"]??"")!==getenv("EXPECTED_BUILD_ID") || count($data["units"]??[])!==1 || count($data["users"]??[])!==1) exit(1);
   $check=function(array $value) use (&$check) {
     foreach ($value as $key=>$item) {
       if (preg_match("/password|dsn|token|access.?key/i",(string)$key)) exit(1);
@@ -445,6 +445,7 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/statistics?from=2026-09-04&to=2026-09-07")" = 403
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" "$base_url/api/statistics?from=2026-09-04&to=2026-09-07")" = 403
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$leader_token" "$base_url/api/statistics?from=2026-09-08&to=2026-09-07")" = 400
+# Alarmierte Fahrzeuge anderer Einheiten erscheinen nicht in der Statistik.
 curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_url/api/statistics?from=2026-09-04&to=2026-09-07" |
   php -r '
     $data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
@@ -455,7 +456,10 @@ curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_
     assert($data["years"]===[["key"=>"2026","count"=>5]]);
     assert($data["months"]===[["key"=>"2026-09","count"=>5]]);
     assert($data["weekdays"]===[["key"=>"1","count"=>2],["key"=>"5","count"=>3]]);
-    assert($data["alarmedVehicles"][0]===["name"=>"LF 20 Statistik","own"=>true,"count"=>2]);
+    assert($data["alarmedVehicles"]===[
+      ["name"=>"LF 20 Statistik","own"=>true,"count"=>2],
+      ["name"=>"TLF Statistik","own"=>true,"count"=>1]
+    ]);
     assert($data["additionalVehicles"]===[["name"=>"ELW Statistik","count"=>1]]);
     assert(array_column($data["members"],"name")===["Aktives Statistikmitglied","Historisches Statistikmitglied"]);
     assert(!isset($data["members"][0]["id"]));
