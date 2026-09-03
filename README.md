@@ -31,7 +31,7 @@ allgemein freigegeben.
 
 - mehrere Wehren als strikt getrennte Mandanten
 - mehrere Einheiten, genau eine Einheit je Einheitsführung und Mehrfachzuordnung von Führungskräften
-- Login-Historie mit den fünf neuesten erfolgreichen Anmeldungen in der Benutzerverwaltung
+- Letzte erfolgreiche Anmeldung jedes Benutzers in der Benutzerverwaltung
 - ein Einheitsbericht pro Einsatz und Einheit
 - manuelle laufende Nummern je Einheit und Jahr sowie strukturierte Angaben zu Geschädigten, Schädigern und Einsatzleitung
 - übersichtliche Berichtsformulare mit unveränderlicher DIVERA-Einsatznummer, einklappbaren Bereichen und klar getrennten Einsatzleitungen

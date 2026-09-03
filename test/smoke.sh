@@ -180,7 +180,7 @@ if [[ "$base_url" == https://* ]]; then
   test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' "$base_url/constants.php")" = 403
 fi
 
-# Wiederholte Anmeldungen erscheinen vollständig und absteigend sortiert in der Login-Historie.
+# Die Benutzerverwaltung zeigt auch nach wiederholten Anmeldungen nur die letzte Anmeldung.
 weak_password_hash=$(php -r 'echo password_hash("geheimes-passwort", PASSWORD_BCRYPT, ["cost"=>4]);')
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE users SET password_hash='$weak_password_hash' WHERE email='admin@example.test'"
@@ -197,7 +197,7 @@ WEAK_HASH="$weak_password_hash" CURRENT_HASH="$current_password_hash" php -r '
   assert(!password_needs_rehash(getenv("CURRENT_HASH"),PASSWORD_DEFAULT));
 '
 users_json=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/users")
-printf '%s' "$users_json" | php -r '$users=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($users[0]["loginHistory"])===2); assert($users[0]["loginHistory"][0]>=$users[0]["loginHistory"][1]);'
+printf '%s' "$users_json" | php -r '$users=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); exit(count($users[0]["loginHistory"])===1 ? 0 : 1);'
 rm -f second-login-cookies.txt
 
 # Die Systemübersicht enthält erwartete Statusdaten, aber keine Zugangsdaten oder Tokens.
@@ -265,7 +265,7 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT COUNT(*) FROM units WHERE organization_id=1 AND name='Löschgruppe'")" = 1
 
-# Einladungen erzeugen einen Reset-Eintrag; Nutzer können mehreren Einheiten zugeordnet und neu zugeordnet werden.
+# Einladungen gelten sieben Tage, nennen ihr Ablaufdatum und Nutzer können mehreren Einheiten zugeordnet werden.
 invite_status=$(curl --insecure --silent --output invite.json --write-out '%{http_code}' \
   --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
@@ -273,8 +273,10 @@ invite_status=$(curl --insecure --silent --output invite.json --write-out '%{htt
   "$base_url/api/users")
 case "$invite_status" in
   201)
+    invite_expiry=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+      einsatzberichte --execute="SELECT expires_at FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE u.email='invite@example.test'")
     test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
-      einsatzberichte --execute="SELECT COUNT(*) FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE u.email='invite@example.test'")" = 1
+      einsatzberichte --execute="SELECT ABS(TIMESTAMPDIFF(SECOND,expires_at,UTC_TIMESTAMP()+INTERVAL 7 DAY))<=2 FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE u.email='invite@example.test'")" = 1
     invited_user_id=$(php -r '$data=json_decode(file_get_contents("invite.json"),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
     test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
       einsatzberichte --execute="SELECT COUNT(*) FROM user_units WHERE user_id=$invited_user_id")" = 2
@@ -303,6 +305,8 @@ if [[ -z "${TEST_BASE_URL:-}" ]]; then
   grep --quiet 'Subject: Konto aktivieren' smtp-messages.log
   grep --quiet '#invite=' smtp-messages.log
   ! grep --quiet '?invite=' smtp-messages.log
+  expected_invite_expiry=$(INVITE_EXPIRY="$invite_expiry" php -r '$date=(new DateTimeImmutable(getenv("INVITE_EXPIRY"),new DateTimeZone("UTC")))->setTimezone(new DateTimeZone("Europe/Berlin")); echo $date->format("d.m.Y")." um ".$date->format("H:i")." Uhr";')
+  grep --fixed-strings --quiet "Der Link ist bis zum $expected_invite_expiry (Europe/Berlin) gültig." smtp-messages.log
 fi
 rm -f invite.json
 

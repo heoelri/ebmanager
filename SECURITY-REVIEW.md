@@ -26,7 +26,7 @@ Wiederholung.
 
 ## Login-Historie vom 23. August 2026
 
-Die Historie erfasst ausschließlich die Benutzer-ID und den UTC-Zeitpunkt erfolgreicher Anmeldungen. IP-Adressen, User-Agents, Kennwörter und fehlgeschlagene Versuche werden nicht gespeichert. Die Ausgabe erfolgt nur über die bereits auf `wehrleitung` und den aktuellen Mandanten begrenzte Benutzerverwaltung; pro Benutzer werden höchstens fünf Zeitpunkte ausgegeben. Beim Löschen eines Benutzers werden die Einträge kaskadierend entfernt. Nach erfolgreicher Passwortprüfung aktualisiert der Login veraltete Hash-Algorithmen oder Parameter mit `PASSWORD_DEFAULT`; `SELECT ... FOR UPDATE` serialisiert dies mit gleichzeitigen Passwortänderungen und deren Sitzungswiderruf.
+Die Historie erfasst ausschließlich die Benutzer-ID und den UTC-Zeitpunkt erfolgreicher Anmeldungen. IP-Adressen, User-Agents, Kennwörter und fehlgeschlagene Versuche werden nicht gespeichert. Die Ausgabe erfolgt nur über die bereits auf `wehrleitung` und den aktuellen Mandanten begrenzte Benutzerverwaltung; pro Benutzer wird nur der neueste Zeitpunkt ausgegeben. Beim Löschen eines Benutzers werden die Einträge kaskadierend entfernt. Nach erfolgreicher Passwortprüfung aktualisiert der Login veraltete Hash-Algorithmen oder Parameter mit `PASSWORD_DEFAULT`; `SELECT ... FOR UPDATE` serialisiert dies mit gleichzeitigen Passwortänderungen und deren Sitzungswiderruf.
 
 ## Personenangaben in Einheitsberichten vom 23. August 2026
 
@@ -44,9 +44,9 @@ Die im vollständigen API-Review priorisierten Befunde zu Transport, Sitzungen u
 
 Der optionale SMTP-Versand verwendet Port 587 mit verpflichtendem STARTTLS, aktiviert Zertifikats- und Hostnamenprüfung und authentifiziert sich erst nach dem TLS-Handshake. SMTP-Passwörter werden ausschließlich aus der nicht versionierten Konfiguration oder aus Umgebungsvariablen gelesen und weder geloggt noch an den Browser übertragen. Unvollständige SMTP-Konfigurationen werden abgelehnt; ohne `smtp_host` bleibt PHP `mail()` der Fallback.
 
-## Benutzereinladungen vom 23. August 2026
+## Benutzereinladungen vom 3. September 2026
 
-Die Benutzeranlage verwendet denselben 256-Bit-Einmaltoken und denselben bestätigten HTTPS-Link wie die Passwort-Wiederherstellung. Bis zur Aktivierung besitzt das Konto nur einen unbekannten zufälligen Passwort-Hash. Schlägt die Übergabe der Einladungs-E-Mail an den konfigurierten Mailtransport fehl, werden Benutzer, Einheitszuordnungen und Token wieder gelöscht. Einladungen laufen nach 30 Minuten ab; danach kann der Benutzer über „Passwort vergessen“ einen neuen Link anfordern.
+Die Benutzeranlage verwendet denselben 256-Bit-Einmaltoken und denselben bestätigten HTTPS-Link wie die Passwort-Wiederherstellung. Bis zur Aktivierung besitzt das Konto nur einen unbekannten zufälligen Passwort-Hash. Schlägt die Übergabe der Einladungs-E-Mail an den konfigurierten Mailtransport fehl, werden Benutzer, Einheitszuordnungen und Token wieder gelöscht. Einladungen laufen nach sieben Tagen ab; Datenbankprüfung und gespeicherter Ablauf verwenden dieselbe UTC-Datenbankzeit, der gespeicherte Zeitpunkt wird in der E-Mail in `Europe/Berlin` genannt. Danach kann der Benutzer über „Passwort vergessen“ einen 30 Minuten gültigen neuen Link anfordern. Das längere Einladungsfenster erhöht die Zeit für einen möglichen Zugriff auf eine weitergeleitete E-Mail, wird aber weiterhin durch einen zufälligen 256-Bit-Token, ausschließliche Hash-Speicherung, HTTPS, Einmalverwendung und das bis zur Aktivierung unbrauchbare Konto begrenzt.
 
 ## Passwort-Wiederherstellung vom 22. August 2026
 
