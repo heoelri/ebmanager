@@ -113,6 +113,7 @@
 - Stelle Alarmierung, Ausrücken, Eintreffen, Einsatzende und Dauer in der Einzelbericht-Übersicht als getrennte semantische Zeilen dar.
 - Drag-and-drop ist nur eine optionale Mausbedienung. Auswahlfelder bleiben die gleichwertige Tastatur- und Touchbedienung.
 - Externe Kartenlinks verwenden OpenStreetMap, kündigen das neue Fenster an und setzen `rel="noopener"`.
+- Hauptbereiche verwenden Query-basierte Deep Links über `view` beziehungsweise `incident`. Refresh und Browser-Historie stellen nur für die aktuelle Rolle erlaubte Ansichten wieder her; Hash-Fragmente bleiben Einladungs- und Wiederherstellungslinks vorbehalten.
 
 ## Datenschutz und Geheimnisse
 
