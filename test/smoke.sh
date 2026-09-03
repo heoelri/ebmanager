@@ -699,7 +699,7 @@ test "$(grep --count '^GET /api/v2/pull/all$' "$divera_log")" = 1
 test "$(grep --count '^GET /api/v2/alarms$' "$divera_log")" = 1
 ! grep --extended-regexp --quiet '^(POST|PUT|PATCH|DELETE) ' "$divera_log"
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units/1/resources" |
-  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($data["members"])===2); assert(count($data["vehicles"])===2); assert(array_column($data["members"],"qualifications")===["AGT","MA"]);'
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $members=array_column($data["members"],null,"divera_id"); assert(count($members)===4); assert(count($data["vehicles"])===2); assert($members["m1"]["active"]===1 && $members["m1"]["qualifications"]==="AGT"); assert($members["m2"]["active"]===1 && $members["m2"]["qualifications"]==="MA"); assert($members["test-101"]["active"]===0 && $members["test-102"]["active"]===0);'
 
 # Ein wiederholter Gesamtabgleich aktualisiert vorhandene Einsätze ohne Duplikate.
 : > "$divera_log"
@@ -717,7 +717,7 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
   "$base_url/api/units/1/divera/sync")" = 502
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
-  einsatzberichte --execute="SELECT CONCAT((SELECT COUNT(*) FROM vehicles WHERE unit_id=1),'|',(SELECT COUNT(*) FROM member_units WHERE unit_id=1))")" = '2|2'
+  einsatzberichte --execute="SELECT CONCAT((SELECT COUNT(*) FROM vehicles WHERE unit_id=1),'|',(SELECT COUNT(*) FROM member_units WHERE unit_id=1))")" = '2|4'
 
 # Nicht mehr gelieferte Mitglieder werden inaktiv, bleiben in historischen Berichten und sind nicht neu auswählbar.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
@@ -727,9 +727,9 @@ curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
   "$base_url/api/units/1/divera/sync" >/dev/null
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
-  einsatzberichte --execute="SELECT CONCAT((SELECT COUNT(*) FROM vehicles WHERE unit_id=1),'|',(SELECT COUNT(*) FROM qualifications WHERE unit_id=1),'|',(SELECT COUNT(*) FROM member_units WHERE unit_id=1),'|',(SELECT SUM(active) FROM member_units WHERE unit_id=1),'|',(SELECT COUNT(*) FROM members WHERE organization_id=1 AND divera_id='m2'))")" = '1|1|2|1|1'
+  einsatzberichte --execute="SELECT CONCAT((SELECT COUNT(*) FROM vehicles WHERE unit_id=1),'|',(SELECT COUNT(*) FROM qualifications WHERE unit_id=1),'|',(SELECT COUNT(*) FROM member_units WHERE unit_id=1),'|',(SELECT SUM(active) FROM member_units WHERE unit_id=1),'|',(SELECT COUNT(*) FROM members WHERE organization_id=1 AND divera_id='m2'))")" = '1|1|4|1|1'
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units/1/resources" |
-  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($data["members"])===2); assert(array_column($data["members"],"active")===[1,0]);'
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $members=array_column($data["members"],null,"divera_id"); assert(count($members)===4); assert($members["m1"]["active"]===1); assert($members["m2"]["active"]===0);'
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units/1/members" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($data)===1); assert($data[0]["active"]===1);'
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$incident_id/reports" |
