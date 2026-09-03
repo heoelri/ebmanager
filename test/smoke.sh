@@ -73,7 +73,7 @@ php -r '
   $javascript=file_get_contents("public/app.js");
   $frontend=$html.$javascript;
   $css=file_get_contents("public/styles.css");
-  foreach (["viewport-fit=cover","public/styles.css","public/app.js","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:","rankOptions","pendingWarning","initialView","DIVERA-Einsatznummer","class=\"command-row\"","class=\"form-section\"","class=\"report-times\"","restoreDialogFocus","zone.key==='available'||zone.key===current","!zone.historical||zone.key===current","zone.dataset.historical==='true'","<select name=\"commandRank\">","<select name=\"additionalCommandRank\">"] as $required) {
+  foreach (["viewport-fit=cover","public/styles.css","public/app.js","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:","rankOptions","pendingWarning","initialView","DIVERA-Einsatznummer","class=\"command-row\"","class=\"form-section\"","class=\"report-times\"","restoreDialogFocus","zone.key===current","zone.historical","zone.dataset.historical","<select name=\"commandRank\">","<select name=\"additionalCommandRank\">"] as $required) {
     if (!str_contains($frontend,$required)) { fwrite(STDERR,"Frontend-Marker fehlt: $required\n"); exit(1); }
   }
   foreach (["--control-height: 44px",":focus-visible","safe-area-inset-bottom","forced-colors: active"] as $required) {
