@@ -300,7 +300,7 @@ function unitStatistics(array $user, string $fromValue, string $toValue): array
             $own = !is_array($vehicle) || ($vehicle['own'] ?? true) !== false;
             if (!$own) continue;
             $vehicleId = trim((string)(is_array($vehicle) ? ($vehicle['id'] ?? '') : ''));
-            $key = ($own ? '1:' : '0:') . ($vehicleId !== '' ? $vehicleId : $name);
+            $key = $vehicleId !== '' ? $vehicleId : $name;
             if (isset($seen[$key])) continue;
             $seen[$key] = true;
             $alarmedVehicles[$key] = ['name' => $name, 'own' => $own, 'count' => ($alarmedVehicles[$key]['count'] ?? 0) + 1];
