@@ -345,6 +345,47 @@ assert(renderResourcesSource, 'Ressourcenansicht fehlt');
 assert.match(renderResourcesSource, /root\.dataset\.request=request/);
 assert.match(renderResourcesSource, /if\(!root\.isConnected\|\|root\.dataset\.request!==request\)return/);
 assert.match(renderResourcesSource, /catch\(error\)\{if\(!root\.isConnected\|\|root\.dataset\.request!==request\)return;throw error\}/);
+assert.match(renderResourcesSource, /Inaktive Mitglieder anzeigen/);
+assert.match(renderResourcesSource, /filterResourceMembers\(root,showInactive\)/);
+
+const inactivePreferenceSource = html.match(/function inactiveMembersPreference[^\n]+/)?.[0];
+assert(inactivePreferenceSource, 'Speicherung des Mitgliederfilters fehlt');
+const storedInactivePreference = new Map();
+const inactiveMembersPreference = new Function('localStorage', 'me', `${inactivePreferenceSource}; return inactiveMembersPreference;`)(
+  {getItem: key => storedInactivePreference.get(key), setItem: (key, value) => storedInactivePreference.set(key, value)},
+  {id: 42, role: 'wehrleitung'}
+);
+assert.equal(inactiveMembersPreference(), false);
+assert.equal(inactiveMembersPreference(true), true);
+assert.equal(storedInactivePreference.get('inactiveMembers:42:wehrleitung'), '1');
+assert.equal(inactiveMembersPreference(), true);
+assert.equal(inactiveMembersPreference(false), false);
+assert.equal(storedInactivePreference.get('inactiveMembers:42:wehrleitung'), '0');
+const blockedInactivePreference = new Function('localStorage', 'me', `${inactivePreferenceSource}; return inactiveMembersPreference;`)(
+  {getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); }},
+  {id: 42, role: 'wehrleitung'}
+);
+assert.equal(blockedInactivePreference(), false);
+assert.equal(blockedInactivePreference(true), true);
+
+const resourceFilterSource = html.match(/function filterResourceMembers[^\n]+/)?.[0];
+assert(resourceFilterSource, 'Mitgliederfilter fehlt');
+const memberRows = [
+  {dataset: {memberActive: '1'}, hidden: false},
+  {dataset: {memberActive: '0'}, hidden: false}
+];
+const memberCount = {textContent: ''};
+const filterResourceMembers = new Function('inactiveMembersPreference', `${resourceFilterSource}; return filterResourceMembers;`)(inactiveMembersPreference);
+const resourceRoot = {
+  querySelectorAll: () => memberRows,
+  querySelector: () => memberCount
+};
+filterResourceMembers(resourceRoot, false);
+assert.deepEqual(memberRows.map(member => member.hidden), [false, true]);
+assert.equal(memberCount.textContent, 1);
+filterResourceMembers(resourceRoot, true);
+assert.deepEqual(memberRows.map(member => member.hidden), [false, false]);
+assert.equal(memberCount.textContent, 2);
 
 const renderCrewSource = html.match(/async function renderCrew[\s\S]*?(?=\nfunction bindCrewBoard)/)?.[0];
 assert(renderCrewSource, 'renderCrew fehlt');
