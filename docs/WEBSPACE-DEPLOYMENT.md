@@ -227,11 +227,18 @@ Weitere Ziele wie `devpreview` benötigen ein eigenes GitHub-Environment, eigene
 
 Wenn das automatische Deployment verwendet wird, müssen erforderliche Migrationen vor dem Merge beziehungsweise Push nach `main` eingespielt werden. Der SFTP-Workflow kann SQL-Migrationen nicht sicher automatisieren, weil er absichtlich keine Datenbankzugangsdaten besitzt und Shared-Hosting-Anbieter unterschiedliche Verwaltungswege bereitstellen.
 
-Für das aktuelle Release sind `migrations/001-report-workflow-and-vehicles.sql`
-und danach `migrations/002-inactive-unit-members.sql` verpflichtend. Die erste
-Datei migriert Berichtsstatus, Übergangshistorie und Fahrzeugstamm; die zweite
-ergänzt den einheitsspezifischen Aktivstatus der Mitglieder. Beide dürfen genau
-einmal und müssen vor dem Anwendungscode ausgeführt werden.
+### Von `2026-08-23` auf `2026-09-03` aktualisieren
+
+1. Datenbank und bisherige Anwendungsdateien sichern.
+2. `migrations/001-report-workflow-and-vehicles.sql` über die Datenbankverwaltung genau einmal importieren.
+3. Danach `migrations/002-inactive-unit-members.sql` genau einmal importieren.
+4. Prüfen, dass beide Dateinamen in `schema_migrations` vorhanden sind.
+5. Erst dann die Anwendungsdateien des Releases `2026-09-03` hochladen oder das automatische Deployment auslösen.
+6. `/api/bootstrap` aufrufen; der Endpunkt darf kein unvollständiges Schema melden.
+7. Anmeldung, Benutzerverwaltung, einen vorhandenen Bericht und die DIVERA-Ressourcenansicht prüfen.
+
+Für andere Ausgangs- oder Zielversionen gelten die jeweils datierten
+Upgrade-Hinweise im [Changelog](../CHANGELOG.md).
 
 ## 11. Rollback
 
