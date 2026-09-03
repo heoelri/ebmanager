@@ -84,7 +84,7 @@
 - Zulässige Funktionen sind `maschinist`, `einheitsfuehrer` und `besatzung`. Pro Fahrzeug gibt es höchstens einen Maschinisten und einen Einheitsführer; die Besatzung ist unbegrenzt.
 - Nur eigene Fahrzeuge der berichtenden Einheit oder „Ohne Fahrzeug“ sind Besatzungsziele. Der Server erzwingt diese Regel.
 - Bearbeitbare Berichte dürfen weitere Fahrzeuge aus dem aktuellen Stamm der eigenen Einheit aufnehmen. Später nicht mehr gelieferte Fahrzeuge bleiben historisch erhalten, sind aber nicht neu als Besatzungsziel auswählbar.
-- Die Ressourcenansicht zeigt standardmäßig nur aktive Mitglieder. „Inaktive Mitglieder anzeigen“ wird wie der Einsatzstatusfilter benutzer- und rollenbezogen im Browser gespeichert.
+- Die Ressourcenansicht zeigt standardmäßig nur aktive Mitglieder. „Inaktive Mitglieder anzeigen“ steht hervorgehoben bei der Einheitsauswahl und wird wie der Einsatzstatusfilter benutzer- und rollenbezogen im Browser gespeichert; Mitglieder und eigene Fahrzeuge sind als standardmäßig geöffnete native `<details>` einklappbar.
 
 ## DIVERA 24/7
 
