@@ -61,7 +61,7 @@
 - Die Wehrleitung konsolidiert Einzelberichte in `incidents.consolidated_text`.
 - Eine manuelle laufende Nummer ist je Einheit und lokalem Kalenderjahr eindeutig.
 - Einheitsberichte enthalten Geschädigte und Schädiger mit optionalem Namen, Telefon und Adresse, die optionale Gesamteinsatzleitung sowie die Einsatzleitung der eigenen Einheit mit Dienstgrad und Name.
-- Alarmierungszeit, Ausrückezeit, Eintreffzeit und Einsatzende müssen vollständig und chronologisch sein. Die Alarmierungszeit stammt aus dem Einsatz und ist im Bericht unveränderlich; die Dauer wird berechnet.
+- Alarmierungszeit und Einsatzende sind erforderlich; Ausrücke- und Eintreffzeit dürfen bei abgebrochenen Einsätzen fehlen. Alle vorhandenen Zeitpunkte müssen chronologisch sein. Die Alarmierungszeit stammt aus dem Einsatz und ist im Bericht unveränderlich; die Dauer wird berechnet.
 - Rollen, Dienstgrade, Einsatzarten, Gruppenbezeichnungen und Aufgliederungen liegen zentral in `constants.php`. Die Oberfläche lädt die fachlichen Optionen über `GET /api/options`; dupliziere sie nicht im Frontend.
 - Die Aufgliederung entspricht dem Feuerwehrformular und besteht aus den Mehrfachauswahlgruppen `site`, `cause` und `technical`.
 - Strukturierte meldende Person, detaillierte Einsatzortfelder, Kostenpflicht, Schadenssumme, Geräte, Löschmittel, Brandwache, Personal am Gerätehaus und Verwaltungsvermerke werden derzeit bewusst nicht erfasst.

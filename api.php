@@ -140,9 +140,9 @@ function requestDate(mixed $value, string $name): DateTimeImmutable
     return $date;
 }
 
-function utcString(DateTimeImmutable $date): string
+function utcString(?DateTimeImmutable $date): ?string
 {
-    return $date->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.v\Z');
+    return $date?->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.v\Z');
 }
 
 function unit(int $id, int $organizationId): ?array
@@ -524,12 +524,13 @@ function reportDetails(array $data, array $incident): array
     if (!in_array($data['incidentType'] ?? null, INCIDENT_TYPES, true)) throw new ApiError(400, 'Einsatzart ist ungültig');
     $times = [
         'alarmedAt' => requestDate($incident['started_at'], 'Alarmiert um'),
-        'departedAt' => requestDate($data['departedAt'] ?? null, 'Ausgerückt um'),
-        'arrivedAt' => requestDate($data['arrivedAt'] ?? null, 'Eingetroffen um'),
+        'departedAt' => in_array($data['departedAt'] ?? null, [null, ''], true) ? null : requestDate($data['departedAt'], 'Ausgerückt um'),
+        'arrivedAt' => in_array($data['arrivedAt'] ?? null, [null, ''], true) ? null : requestDate($data['arrivedAt'], 'Eingetroffen um'),
         'endedAt' => requestDate($data['endedAt'] ?? null, 'Einsatz beendet um')
     ];
-    if ($times['departedAt'] < $times['alarmedAt'] || $times['arrivedAt'] < $times['departedAt'] || $times['endedAt'] < $times['arrivedAt']) {
-        throw new ApiError(400, 'Einsatzzeiten müssen vollständig und chronologisch sein');
+    $chronological = array_values(array_filter($times));
+    for ($index = 1; $index < count($chronological); $index++) {
+        if ($chronological[$index] < $chronological[$index - 1]) throw new ApiError(400, 'Vorhandene Einsatzzeiten müssen chronologisch sein');
     }
     $classification = [];
     $selected = is_array($data['classification'] ?? null) ? $data['classification'] : [];

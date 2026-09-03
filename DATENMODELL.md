@@ -310,8 +310,10 @@ Eindeutig ist `(unit_id, divera_id)`. Ein Stammdatenabgleich ersetzt den aktuell
 Eindeutig ist `(incident_id, unit_id)`: Jede Einheit schreibt pro Einsatz
 genau einen Bericht. Zusätzlich ist `(unit_id, report_year, running_number)`
 eindeutig, damit eine Einheit dieselbe laufende Nummer innerhalb eines
-Kalenderjahres nur einmal vergeben kann. Die vier Einsatzzeiten müssen chronologisch sein.
-`alarmed_at` wird nicht vom Client übernommen. Die Dauer wird bei der Abfrage
+Kalenderjahres nur einmal vergeben kann. `alarmed_at` und `ended_at` sind
+erforderlich; `departed_at` und `arrived_at` dürfen bei abgebrochenen Einsätzen
+fehlen. Alle vorhandenen Einsatzzeiten müssen chronologisch sein. `alarmed_at`
+wird nicht vom Client übernommen. Die Dauer wird bei der Abfrage
 als `duration_minutes` aus `alarmed_at` und `ended_at` berechnet und nicht
 gespeichert.
 
