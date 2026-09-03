@@ -1118,8 +1118,7 @@ try {
         $email = emailAddress($data['email'] ?? null);
         mailSettings();
         $token = bin2hex(random_bytes(32));
-        $expiresAt = new DateTimeImmutable('+7 days', new DateTimeZone('UTC'));
-        $id = transaction(function () use ($data, $name, $email, $token, $expiresAt, $unitIds, $user) {
+        [$id, $expiresAt] = transaction(function () use ($data, $name, $email, $token, $unitIds, $user) {
             // An unknown random password keeps the account unusable until activation.
             query(
                 'INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) VALUES(?,?,?,?,?,?)',
@@ -1129,10 +1128,13 @@ try {
             $id = (int)db()->lastInsertId();
             replaceMemberships($id, $unitIds);
             query(
-                'INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,?)',
-                [$id, hash('sha256', $token), $expiresAt->format('Y-m-d H:i:s')]
+                'INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 7 DAY)',
+                [$id, hash('sha256', $token)]
             );
-            return $id;
+            return [$id, new DateTimeImmutable((string)one(
+                'SELECT expires_at FROM password_resets WHERE user_id=?',
+                [$id]
+            )['expires_at'], new DateTimeZone('UTC'))];
         });
         if (!sendPasswordEmail(['name' => $name, 'email' => $email], $token, true, $expiresAt)) {
             query('DELETE FROM users WHERE id=?', [$id]);
