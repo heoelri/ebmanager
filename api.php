@@ -578,15 +578,22 @@ function replaceCrew(int $reportId, int $incidentId, int $unitId, mixed $crew, i
          AND (mu.active=1 OR EXISTS(SELECT 1 FROM report_crew rc WHERE rc.report_id=? AND rc.member_id=m.id))',
         [$organizationId, $unitId, $reportId]
     )->fetchAll() as $member) $members[(int)$member['id']] = $member['name'];
+    $existingCrew = [];
+    foreach (query('SELECT member_id,vehicle,role FROM report_crew WHERE report_id=?', [$reportId])->fetchAll() as $item) {
+        $existingCrew[(int)$item['member_id']] = $item;
+    }
     $seen = $occupied = $rows = [];
     foreach ($crew as $item) {
         if (!is_array($item)) throw new ApiError(400, 'Besatzung ist ungültig');
         $memberId = (int)($item['memberId'] ?? 0);
         $vehicle = trim((string)($item['vehicle'] ?? ''));
         $role = (string)($item['role'] ?? 'besatzung');
+        $unchanged = isset($existingCrew[$memberId])
+            && $existingCrew[$memberId]['vehicle'] === $vehicle
+            && $existingCrew[$memberId]['role'] === $role;
         // Driver and unit leader are unique per vehicle; crew members are not.
         $slot = $vehicle && $role !== 'besatzung' ? "$vehicle:$role" : '';
-        if (!$memberId || isset($seen[$memberId]) || !isset($members[$memberId]) || ($vehicle && !in_array($vehicle, $vehicles, true))
+        if (!$memberId || isset($seen[$memberId]) || !isset($members[$memberId]) || ($vehicle && !in_array($vehicle, $vehicles, true) && !$unchanged)
             || !in_array($role, ['maschinist', 'einheitsfuehrer', 'besatzung'], true)
             || (!$vehicle && $role !== 'besatzung') || ($slot && isset($occupied[$slot]))) {
             throw new ApiError(400, 'Besatzung ist ungültig');

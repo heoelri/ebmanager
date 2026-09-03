@@ -5,8 +5,9 @@
 Der Aktivstatus wird auf der mandantengebundenen Zuordnung `member_units`
 geführt, damit dieselbe Person je Einheit getrennt behandelt wird. Nur aktive
 Mitglieder werden für neue Besatzungszuordnungen ausgegeben und serverseitig
-akzeptiert. Bereits in einem Bericht gespeicherte inaktive Mitglieder dürfen
-ausschließlich in diesem Bericht erhalten bleiben; dadurch kann ein
+akzeptiert. Bereits in einem Bericht gespeicherte inaktive Mitglieder und
+historische Fahrzeugzuordnungen dürfen ausschließlich unverändert in diesem
+Bericht erhalten bleiben; dadurch kann ein
 manipulierter Request keine beliebige inaktive Person neu hinzufügen.
 Ressourcenlisten bleiben auf berechtigte Einheiten und den aktuellen Mandanten
 begrenzt und kennzeichnen inaktive Mitglieder ohne zusätzliche Personendaten.
