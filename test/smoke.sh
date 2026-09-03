@@ -265,7 +265,7 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT COUNT(*) FROM units WHERE organization_id=1 AND name='Löschgruppe'")" = 1
 
-# Einladungen erzeugen einen Reset-Eintrag; Nutzer können mehreren Einheiten zugeordnet und neu zugeordnet werden.
+# Einladungen gelten sieben Tage, nennen ihr Ablaufdatum und Nutzer können mehreren Einheiten zugeordnet werden.
 invite_status=$(curl --insecure --silent --output invite.json --write-out '%{http_code}' \
   --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
@@ -273,8 +273,10 @@ invite_status=$(curl --insecure --silent --output invite.json --write-out '%{htt
   "$base_url/api/users")
 case "$invite_status" in
   201)
+    invite_expiry=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+      einsatzberichte --execute="SELECT expires_at FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE u.email='invite@example.test'")
     test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
-      einsatzberichte --execute="SELECT COUNT(*) FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE u.email='invite@example.test'")" = 1
+      einsatzberichte --execute="SELECT TIMESTAMPDIFF(HOUR,UTC_TIMESTAMP(),expires_at) BETWEEN 167 AND 168 FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE u.email='invite@example.test'")" = 1
     invited_user_id=$(php -r '$data=json_decode(file_get_contents("invite.json"),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
     test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
       einsatzberichte --execute="SELECT COUNT(*) FROM user_units WHERE user_id=$invited_user_id")" = 2
@@ -303,6 +305,8 @@ if [[ -z "${TEST_BASE_URL:-}" ]]; then
   grep --quiet 'Subject: Konto aktivieren' smtp-messages.log
   grep --quiet '#invite=' smtp-messages.log
   ! grep --quiet '?invite=' smtp-messages.log
+  expected_invite_expiry=$(INVITE_EXPIRY="$invite_expiry" php -r '$date=new DateTimeImmutable(getenv("INVITE_EXPIRY"),new DateTimeZone("UTC")); echo $date->setTimezone(new DateTimeZone("Europe/Berlin"))->format("d.m.Y \u\m H:i \U\h\r");')
+  grep --fixed-strings --quiet "Der Link ist bis zum $expected_invite_expiry (Europe/Berlin) gültig." smtp-messages.log
 fi
 rm -f invite.json
 

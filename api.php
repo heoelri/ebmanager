@@ -26,14 +26,15 @@ function databaseConfigurationError(): ?string
     return null;
 }
 
-function sendPasswordEmail(array $user, string $token, bool $invitation = false): bool
+function sendPasswordEmail(array $user, string $token, bool $invitation = false, ?DateTimeImmutable $expiresAt = null): bool
 {
     $settings = mailSettings();
     ['url' => $url] = $settings;
     $link = "$url/#" . ($invitation ? 'invite' : 'reset') . "=$token";
     $subject = $invitation ? 'Konto aktivieren' : 'Passwort zuruecksetzen';
+    $expiry = $expiresAt?->setTimezone(new DateTimeZone('Europe/Berlin'))->format('d.m.Y \u\m H:i \U\h\r');
     $message = $invitation
-        ? "Hallo {$user['name']},\n\nüber diesen Link können Sie innerhalb von 30 Minuten Ihr Konto aktivieren und ein Passwort vergeben:\n$link\n\nNach Ablauf können Sie über „Passwort vergessen“ einen neuen Link anfordern."
+        ? "Hallo {$user['name']},\n\nüber diesen Link können Sie Ihr Konto aktivieren und ein Passwort vergeben:\n$link\n\nDer Link ist bis zum $expiry (Europe/Berlin) gültig. Nach Ablauf können Sie über „Passwort vergessen“ einen neuen Link anfordern."
         : "Hallo {$user['name']},\n\nüber diesen Link können Sie innerhalb von 30 Minuten ein neues Passwort vergeben:\n$link\n\nFalls Sie dies nicht angefordert haben, ignorieren Sie diese Nachricht.";
     return sendEmail($settings, $user['email'], $subject, $message);
 }
@@ -1118,7 +1119,8 @@ try {
         $email = emailAddress($data['email'] ?? null);
         mailSettings();
         $token = bin2hex(random_bytes(32));
-        $id = transaction(function () use ($data, $name, $email, $token, $unitIds, $user) {
+        $expiresAt = new DateTimeImmutable('+7 days', new DateTimeZone('UTC'));
+        $id = transaction(function () use ($data, $name, $email, $token, $expiresAt, $unitIds, $user) {
             // An unknown random password keeps the account unusable until activation.
             query(
                 'INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) VALUES(?,?,?,?,?,?)',
@@ -1127,10 +1129,13 @@ try {
             );
             $id = (int)db()->lastInsertId();
             replaceMemberships($id, $unitIds);
-            query('INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 30 MINUTE)', [$id, hash('sha256', $token)]);
+            query(
+                'INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,?)',
+                [$id, hash('sha256', $token), $expiresAt->format('Y-m-d H:i:s')]
+            );
             return $id;
         });
-        if (!sendPasswordEmail(['name' => $name, 'email' => $email], $token, true)) {
+        if (!sendPasswordEmail(['name' => $name, 'email' => $email], $token, true, $expiresAt)) {
             query('DELETE FROM users WHERE id=?', [$id]);
             error_log('Einladungs-E-Mail konnte nicht versendet werden');
             throw new ApiError(503, 'Einladungs-E-Mail konnte nicht versendet werden');
