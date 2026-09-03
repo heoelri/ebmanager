@@ -207,18 +207,19 @@ function replaceMemberships(int $userId, array $unitIds): void
     foreach ($unitIds as $unitId) query('INSERT INTO user_units(user_id,unit_id) VALUES(?,?)', [$userId, $unitId]);
 }
 
-function unitMembers(int $unitId, int $organizationId): array
+function unitMembers(int $unitId, int $organizationId, bool $activeOnly = true): array
 {
+    $active = $activeOnly ? ' AND mu.active=1' : '';
     $rows = query(
-        "SELECT m.id,m.name,m.divera_id,
+        "SELECT m.id,m.name,m.divera_id,mu.active,
          COALESCE(GROUP_CONCAT(DISTINCT COALESCE(NULLIF(q.shortname,''),q.name) ORDER BY q.name SEPARATOR ', '),'') qualifications
          FROM members m JOIN member_units mu ON mu.member_id=m.id
          LEFT JOIN member_qualifications mq ON mq.member_id=m.id
          LEFT JOIN qualifications q ON q.id=mq.qualification_id AND q.unit_id=mu.unit_id
-         WHERE mu.unit_id=? AND m.organization_id=? GROUP BY m.id,m.name,m.divera_id ORDER BY m.name",
+         WHERE mu.unit_id=? AND m.organization_id=?$active GROUP BY m.id,m.name,m.divera_id,mu.active ORDER BY m.name",
         [$unitId, $organizationId]
     )->fetchAll();
-    foreach ($rows as &$row) $row['id'] = (int)$row['id'];
+    foreach ($rows as &$row) { $row['id'] = (int)$row['id']; $row['active'] = (int)$row['active']; }
     return $rows;
 }
 
@@ -572,8 +573,9 @@ function replaceCrew(int $reportId, int $incidentId, int $unitId, mixed $crew, i
     $members = [];
     foreach (query(
         'SELECT m.id,m.name FROM members m JOIN member_units mu ON mu.member_id=m.id
-         WHERE m.organization_id=? AND mu.unit_id=?',
-        [$organizationId, $unitId]
+         WHERE m.organization_id=? AND mu.unit_id=?
+         AND (mu.active=1 OR EXISTS(SELECT 1 FROM report_crew rc WHERE rc.report_id=? AND rc.member_id=m.id))',
+        [$organizationId, $unitId, $reportId]
     )->fetchAll() as $member) $members[(int)$member['id']] = $member['name'];
     $seen = $occupied = $rows = [];
     foreach ($crew as $item) {
@@ -758,7 +760,7 @@ function syncDiveraMembers(array $cluster, int $unitId, int $organizationId): ar
         'DELETE mq FROM member_qualifications mq JOIN qualifications q ON q.id=mq.qualification_id WHERE q.unit_id=?',
         [$unitId]
     );
-    query('DELETE FROM member_units WHERE unit_id=?', [$unitId]);
+    query('UPDATE member_units SET active=0 WHERE unit_id=?', [$unitId]);
     $qualifications = [];
     foreach ($qualificationRows as $diveraId => [$name, $shortname]) {
         query(
@@ -777,7 +779,11 @@ function syncDiveraMembers(array $cluster, int $unitId, int $organizationId): ar
             [$organizationId, $diveraId, $name]
         );
         $memberId = (int)db()->lastInsertId();
-        query('INSERT INTO member_units(member_id,unit_id) VALUES(?,?)', [$memberId, $unitId]);
+        query(
+            'INSERT INTO member_units(member_id,unit_id,active) VALUES(?,?,1)
+             ON DUPLICATE KEY UPDATE active=1',
+            [$memberId, $unitId]
+        );
         foreach ($qualificationIds as $qualificationId) {
             query(
                 'INSERT IGNORE INTO member_qualifications(member_id,qualification_id) VALUES(?,?)',
@@ -1081,7 +1087,7 @@ try {
             [$unitId]
         )->fetchAll();
         foreach ($vehicles as &$vehicle) $vehicle['id'] = (int)$vehicle['id'];
-        respond(200, ['members' => unitMembers($unitId, (int)$user['organization_id']), 'vehicles' => $vehicles]);
+        respond(200, ['members' => unitMembers($unitId, (int)$user['organization_id'], false), 'vehicles' => $vehicles]);
     }
 
     if ($method === 'GET' && $path === '/api/users') {

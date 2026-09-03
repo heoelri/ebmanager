@@ -35,6 +35,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Changed
 
+- Nicht mehr von DIVERA gelieferte Mitglieder bleiben einheitsspezifisch als inaktiv sichtbar und in vorhandenen Berichten erhalten, können aber nicht neu als Besatzung ausgewählt werden.
 - Das Frontend lädt JavaScript als separat cachebare Datei ohne Inline-Eventhandler, erzwingt eine restriktivere Content Security Policy und zeigt Benutzerrollen einheitlich auf Deutsch.
 - Einzeilige Controls verwenden eine barrierefreundliche Mindesthöhe; gemeinsame Summary-Regeln und semantische Benutzerlisten vereinfachen Styles und Struktur.
 - Einsatzanlage und Benutzerverwaltung zeigen Mehrfach-Einheitenauswahlen als kompakte Dropdowns; einzeilige Eingaben, Dropdowns und Buttons verwenden einheitlich 44 Pixel Höhe.
@@ -52,7 +53,8 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Breaking Changes
 
-- Bestehende Installationen müssen vor dem neuen Anwendungscode `migrations/001-report-workflow-and-vehicles.sql` importieren. Die Migration ersetzt `draft`/`released` durch die drei Workflowstatus, legt die Übergangshistorie sowie den Fahrzeugstamm an und erzeugt für jeden Bestandsbericht einen initialen Historieneintrag.
+1. Bestehende Installationen müssen vor dem neuen Anwendungscode `migrations/001-report-workflow-and-vehicles.sql` importieren. Die Migration ersetzt `draft`/`released` durch die drei Workflowstatus, legt die Übergangshistorie sowie den Fahrzeugstamm an und erzeugt für jeden Bestandsbericht einen initialen Historieneintrag.
+2. Danach muss `migrations/002-inactive-unit-members.sql` importiert werden. Die Migration ergänzt den Aktivstatus bestehender Einheitszuordnungen und setzt alle vorhandenen Mitglieder zunächst aktiv.
 
 ## 2026-08-23
 

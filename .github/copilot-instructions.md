@@ -77,7 +77,7 @@
 - Eine Person wird anhand ihrer DIVERA-ID organisationsweit einmal in `members` gespeichert und über `member_units` mehreren Einheiten zugeordnet.
 - Qualifikationen sind einheitsspezifisch und werden aus `cluster.qualification` sowie `cluster.consumer[*].qualifications` synchronisiert.
 - `vehicles` enthält den aktuellen einheitsspezifischen Fahrzeugstamm aus `cluster.vehicle`; `incident_units.vehicles` bleibt der unveränderliche Einsatz-Snapshot.
-- Ein vollständiger Stammdatenabgleich ersetzt die aktuellen Mitglieds-, Qualifikations- und Fahrzeugzuordnungen der Einheit. Historisch in `report_crew` verwendete Mitglieder bleiben erhalten, auch wenn DIVERA sie nicht mehr liefert.
+- Ein vollständiger Stammdatenabgleich setzt nicht mehr gelieferte Mitgliedszuordnungen inaktiv und ersetzt Qualifikations- sowie Fahrzeugzuordnungen der Einheit. Inaktive Mitglieder sind nicht neu als Besatzung auswählbar; historisch in `report_crew` verwendete Mitglieder bleiben unverändert erhalten.
 - `report_crew` ist die maßgebliche strukturierte Besatzung. Ein Mitglied kommt pro Bericht höchstens einmal vor.
 - Zulässige Funktionen sind `maschinist`, `einheitsfuehrer` und `besatzung`. Pro Fahrzeug gibt es höchstens einen Maschinisten und einen Einheitsführer; die Besatzung ist unbegrenzt.
 - Nur eigene Fahrzeuge der berichtenden Einheit oder „Ohne Fahrzeug“ sind Besatzungsziele. Der Server erzwingt diese Regel.

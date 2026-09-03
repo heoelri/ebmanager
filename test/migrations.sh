@@ -16,8 +16,10 @@ for _ in {1..60}; do
 done
 "${compose[@]}" exec -T db mysql --host=127.0.0.1 --user=root -ptest-password einsatzberichte --execute="SELECT 1" >/dev/null
 
-# Simulate an installation from before the report workflow and vehicle catalog.
+# Simulate an installation before the report workflow, vehicle catalog, and inactive member state.
 "${compose[@]}" exec -T db mysql --user=root -ptest-password einsatzberichte --execute="
+  ALTER TABLE member_units DROP COLUMN active;
+  DELETE FROM schema_migrations WHERE name='002-inactive-unit-members.sql';
   DROP TABLE report_transitions;
   DROP TABLE vehicles;
   DELETE FROM schema_migrations WHERE name='001-report-workflow-and-vehicles.sql';
@@ -35,7 +37,9 @@ done
     (10,10,10,10,'','','',JSON_OBJECT(),'draft',NULL),
     (11,11,10,11,'','','',JSON_OBJECT(),'draft',NULL),
     (12,12,10,12,'','','',JSON_OBJECT(),'draft',NULL),
-    (13,13,10,10,'','','',JSON_OBJECT(),'released','2026-01-02');"
+    (13,13,10,10,'','','',JSON_OBJECT(),'released','2026-01-02');
+  INSERT INTO members(id,organization_id,divera_id,name) VALUES(10,10,'historisch','Historisches Mitglied');
+  INSERT INTO report_crew(report_id,member_id) VALUES(10,10);"
 "${compose[@]}" run --rm migrate
 "${compose[@]}" exec -T db mysql --user=root -ptest-password einsatzberichte \
   --execute="DELETE FROM schema_migrations WHERE name='001-report-workflow-and-vehicles.sql'"
@@ -48,6 +52,9 @@ result="$("${compose[@]}" exec -T db mysql --user=root -ptest-password --batch -
     (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='migration_test'),'|',
     (SELECT GROUP_CONCAT(status ORDER BY id) FROM reports WHERE id BETWEEN 10 AND 13),'|',
     (SELECT COUNT(*) FROM report_transitions WHERE report_id BETWEEN 10 AND 13),'|',
-    (SELECT COUNT(*) FROM schema_migrations WHERE name='001-report-workflow-and-vehicles.sql')
+    (SELECT COUNT(*) FROM schema_migrations WHERE name='001-report-workflow-and-vehicles.sql'),'|',
+    (SELECT COUNT(*) FROM schema_migrations WHERE name='002-inactive-unit-members.sql'),'|',
+    (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='member_units' AND column_name='active'),'|',
+    (SELECT CONCAT(COUNT(*),':',COALESCE(MAX(active),9)) FROM member_units WHERE member_id=10 AND unit_id=10)
   )")"
-test "$result" = '1|1|author_draft,unit_review,wehr_review,wehr_review|4|1'
+test "$result" = '1|1|author_draft,unit_review,wehr_review,wehr_review|4|1|1|1|1:0'

@@ -243,6 +243,12 @@ Viele-zu-viele-Zuordnung von Mitgliedern zu Einheiten.
 |---|---|---|
 | `member_id` | BIGINT UNSIGNED, FK, PK | Mitglied |
 | `unit_id` | BIGINT UNSIGNED, FK, PK | Einheit |
+| `active` | BOOLEAN, NOT NULL | Mitglied wird aktuell von DIVERA für die Einheit geliefert |
+
+Ein vollständiger DIVERA-Abgleich setzt zunächst alle Zuordnungen der Einheit
+inaktiv und aktiviert anschließend die gelieferten Mitglieder. Inaktive
+Zuordnungen bleiben für historische Berichtsbesatzungen erhalten, werden aber
+nicht für neue Besatzungszuordnungen angeboten.
 
 ### `qualifications`
 
