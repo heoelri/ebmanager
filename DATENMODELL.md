@@ -308,7 +308,7 @@ Die Tabelle enthält den aktuellen, einheitsspezifischen Fahrzeugstamm aus DIVER
 | `shortname` | VARCHAR(100), NOT NULL | Kurzbezeichnung |
 | `fullname` | VARCHAR(200), NOT NULL | Vollständige Typbezeichnung |
 
-Eindeutig ist `(unit_id, divera_id)`. Ein Stammdatenabgleich ersetzt den aktuellen Bestand der Einheit vollständig; bereits importierte Einsatz-Snapshots bleiben unverändert.
+Eindeutig ist `(unit_id, divera_id)`. Ein Stammdatenabgleich ersetzt den aktuellen Bestand der Einheit vollständig. Beim Import eines Einsatzes werden fremde Fahrzeug-IDs aus einem eindeutigen Fahrzeugstamm einer anderen Einheit derselben Organisation ergänzt; fehlende oder innerhalb der Organisation mehrdeutige IDs bleiben als ID sichtbar. Ein erneuter Einsatzimport aktualisiert den Snapshot, bestehende Snapshots ändern sich nicht allein durch einen Stammdatenabgleich.
 
 ### `reports`
 

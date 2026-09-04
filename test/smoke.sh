@@ -832,8 +832,14 @@ fi
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request PUT \
   --data '{"accessKey":"test"}' "$base_url/api/units/1/divera" >/dev/null
+
+# Fremde Alarmfahrzeuge werden nur aus einem eindeutigen Fahrzeugstamm derselben Wehr ergänzt.
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="INSERT INTO vehicles(unit_id,divera_id,name,shortname,fullname) VALUES
+    ($second_unit_id,'external-1','LF Nachbareinheit','LF','Löschgruppenfahrzeug'),
+    (900,'external-1','Fahrzeug fremder Wehr','FW','Fremdes Fahrzeug')"
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units/1/divera" |
-  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($data["alarms"])===2); assert(count($data["vehicles"])===2);'
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($data["alarms"])===2); assert(count($data["vehicles"])===2); $vehicles=array_column($data["alarms"][0]["vehicles"],null,"id"); assert($vehicles["external-1"]===["id"=>"external-1","name"=>"LF Nachbareinheit","shortname"=>"LF","fullname"=>"Löschgruppenfahrzeug","own"=>false]);'
 
 # HTTP-Fehler der DIVERA-Quelle nennen den konkreten Statuscode, ohne den Access-Key offenzulegen.
 curl --insecure --silent --fail \
@@ -865,6 +871,22 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' \
   --data '{"id":"alarm-1"}' "$base_url/api/units/1/divera/import" >/dev/null
+
+# Ein erneuter Import aktualisiert ergänzte Fahrzeugnamen; mehrdeutige IDs fallen auf die DIVERA-ID zurück.
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="UPDATE vehicles SET name='LF Nachbareinheit neu' WHERE unit_id=$second_unit_id AND divera_id='external-1'"
+curl --insecure --silent --fail \
+  --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' \
+  --data '{"id":"alarm-1"}' "$base_url/api/units/1/divera/import" >/dev/null
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT JSON_UNQUOTE(JSON_EXTRACT(vehicles,'\$[1].name')) FROM incident_units iu JOIN incidents i ON i.id=iu.incident_id WHERE i.divera_id='alarm-1' AND iu.unit_id=1")" = "LF Nachbareinheit neu"
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="INSERT INTO units(organization_id,name) VALUES(1,'Dritte Einheit'); SET @third_unit=LAST_INSERT_ID();
+    INSERT INTO vehicles(unit_id,divera_id,name,shortname,fullname) VALUES(@third_unit,'external-1','Mehrdeutiges Fahrzeug','MF','Mehrdeutiges Fahrzeug')"
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units/1/divera" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $vehicles=array_column($data["alarms"][0]["vehicles"],null,"id"); assert($vehicles["external-1"]===["id"=>"external-1","name"=>"external-1","shortname"=>"","fullname"=>"","own"=>false]);'
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DELETE FROM units WHERE organization_id=1 AND name='Dritte Einheit'"
 
 # Eine nachträglich importierte Einheitenzuordnung invalidiert einen bestehenden Gesamtbericht.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \

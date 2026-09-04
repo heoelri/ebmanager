@@ -881,10 +881,20 @@ function diveraData(array $unit, bool $includeVehicles = true, ?array $cluster =
 {
     $alarmsRaw = diveraGet(diveraUrl('/api/v2/alarms', $unit['divera_access_key']), 'DIVERA-Abfrage fehlgeschlagen');
     $ownVehicles = [];
+    $organizationVehicles = [];
     if ($includeVehicles) {
         $cluster ??= diveraCluster($unit);
         foreach (($cluster['vehicle'] ?? []) as $id => $vehicle) {
             $ownVehicles[(string)($vehicle['id'] ?? $id)] = $vehicle;
+        }
+        foreach (query(
+            'SELECT v.divera_id,MIN(v.name) name,MIN(v.shortname) shortname,MIN(v.fullname) fullname
+             FROM vehicles v JOIN units u ON u.id=v.unit_id
+             WHERE u.organization_id=? AND v.unit_id<>?
+             GROUP BY v.divera_id HAVING COUNT(*)=1 ORDER BY v.divera_id',
+            [$unit['organization_id'], $unit['id']]
+        )->fetchAll() as $vehicle) {
+            $organizationVehicles[$vehicle['divera_id']] = $vehicle;
         }
     }
     $vehicles = [];
@@ -901,11 +911,12 @@ function diveraData(array $unit, bool $includeVehicles = true, ?array $cluster =
         foreach ($ids as $id) {
             $id = trim((string)$id);
             if (!$id) continue;
-            $vehicle = $ownVehicles[$id] ?? null;
+            $own = isset($ownVehicles[$id]);
+            $vehicle = $ownVehicles[$id] ?? $organizationVehicles[$id] ?? null;
             $alarmVehicles[] = [
                 'id' => $id, 'name' => $vehicle['name'] ?? $vehicle['shortname'] ?? $id,
                 'shortname' => (string)($vehicle['shortname'] ?? ''), 'fullname' => (string)($vehicle['fullname'] ?? ''),
-                'own' => (bool)$vehicle
+                'own' => $own
             ];
         }
         $alarms[] = [
