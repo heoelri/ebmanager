@@ -85,7 +85,9 @@ Query-Parameter wählen ausschließlich bereits vorhandene Browseransichten aus 
 
 ## UI-Screenshot-Workflow vom 3. September 2026
 
-Der Screenshot-Workflow läuft auf `pull_request` und führt den Code des Pull Requests niemals über `pull_request_target` aus. Er verwendet ausschließlich die versionierten Demo-Daten und offensichtlich unechte lokale Zugangsdaten. Screenshots werden für alle PRs als Artefakt gespeichert; nur für Quell-Branches desselben Repositorys aktualisiert der Workflow zusätzlich einen PR-Kommentar mit dem Download-Link. Fork-PRs erhalten dadurch keinen schreibenden Token oder Zugriff auf Deployment-Secrets. Ein persönlicher Zugriffstoken für GitHub User Attachments wird bewusst nicht an PR-Code übergeben.
+Der Screenshot-Workflow läuft auf `pull_request` und führt den Code des Pull Requests niemals über `pull_request_target` aus. Er verwendet ausschließlich die versionierten Demo-Daten und offensichtlich unechte lokale Zugangsdaten. Screenshots werden für alle PRs mit ausschließlich lesenden Rechten als Artefakt gespeichert.
+
+Die direkte Einbettung läuft getrennt über `workflow_run` mit der unveränderlich vom Standardbranch geladenen Workflowdefinition. Nur erfolgreiche Screenshot-Läufe für Quell-Branches desselben Repositorys werden verarbeitet. Dieser zweite Workflow lädt ausschließlich das erzeugte Artefakt, führt keinen PR-Code aus und erhält die für GitHub-Medienanhänge erforderlichen Schreibrechte. GitHub CLI 2.99.0 wird mit fester Version und SHA-256-Prüfsumme geladen; ein persönlicher Zugriffstoken oder Deployment-Secret wird nicht verwendet. Fork-PRs erreichen den schreibenden Job nicht und erhalten weiterhin ausschließlich das Artefakt.
 
 ## Build-ID vom 3. September 2026
 
