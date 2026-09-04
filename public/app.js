@@ -55,7 +55,7 @@ function home(){const selectedStatus=incidentFilterPreference();app.innerHTML=`<
   focusMain();bindUnitPickers(app);bindForm('#incident',async d=>{d.unitIds=[...document.querySelectorAll('#incident [name=unitIds]:checked')].map(o=>o.value);d.startedAt=new Date(d.startedAt).toISOString();await api('/api/incidents',{method:'POST',body:JSON.stringify(d)});await load();home()});checkPendingDivera().catch(showError)}
 async function checkPendingDivera(){
   const out=document.querySelector('#pendingDivera'),content=out?.querySelector('.resource-section-content'),allowed=units.filter(unit=>unit.divera_configured&&(me.role==='wehrleitung'||me.unitIds.includes(unit.id)));
-  if(!out||!allowed.length)return;
+  if(!out||!content||!allowed.length)return;
   const importTimes=allowed.map(unit=>`${esc(unit.name)}: ${unit.last_divera_import_at?esc(formatDateTime(unit.last_divera_import_at)):'noch kein Import'}`).join('<br>');
   out.hidden=false;content.innerHTML=`<p><b>Letzter Import:</b><br>${importTimes}</p><p class="muted">Prüfe auf neue Einsätze …</p>`;
   const results=await Promise.allSettled(allowed.map(async unit=>({unit,data:await api(`/api/units/${unit.id}/divera?summary=1`)})));
