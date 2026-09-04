@@ -49,15 +49,15 @@ function home(){const selectedStatus=incidentFilterPreference();app.innerHTML=`<
   <details class="card resource-section"><summary>Einsatz anlegen</summary><div class="resource-section-content"><p class="muted">Nur für Einsätze verwenden, die nicht über DIVERA alarmiert wurden.</p><form id="incident" class="grid">
   <label>Stichwort<input name="title" required></label><label>Zeitpunkt<input name="startedAt" type="datetime-local" required></label>
   <label>Adresse<input name="address" autocomplete="street-address"></label><fieldset class="unit-picker"><legend>Einheiten</legend><details><summary>Einheiten auswählen</summary><div class="check-grid">${units.filter(u=>me.role==='wehrleitung'||me.unitIds.includes(u.id)).map(u=>`<label><input type="checkbox" name="unitIds" value="${u.id}">${esc(u.name)}</label>`).join('')}</div></details></fieldset><button class="form-action">Anlegen</button></form></div></details>
-  <section id="pendingDivera" class="card" hidden aria-live="polite"></section>
+  <details id="pendingDivera" class="card resource-section" hidden aria-live="polite"><summary>DIVERA Import</summary><div class="resource-section-content"></div></details>
   <section><h2>Einsätze</h2>${incidents.length?`<label>Status filtern<select id="incidentStatusFilter"><option value="">Alle Status</option>${incidentFilterOptions(incidents,selectedStatus)}</select></label>`:''}${incidents.map(i=>`<article class="card" data-incident-status="${esc(i.reportStatus.key)}"><h3>${esc(i.title)}</h3>${incidentStatus(i)}<p>${esc(formatDateTime(i.started_at))} · ${esc(i.address)}<br><span class="muted">${esc(i.foreign_id||'')} ${esc(i.units)}</span></p><button data-action="incident" data-id="${i.id}">Öffnen</button></article>`).join('')||'<p>Noch keine Einsätze.</p>'}<p id="noFilteredIncidents" role="status" hidden>Keine Einsätze mit diesem Status.</p></section>`;
   const statusFilter=document.querySelector('#incidentStatusFilter');if(statusFilter){statusFilter.value=selectedStatus;statusFilter.addEventListener('change',()=>filterIncidents(statusFilter.value));filterIncidents(statusFilter.value)}
   focusMain();bindUnitPickers(app);bindForm('#incident',async d=>{d.unitIds=[...document.querySelectorAll('#incident [name=unitIds]:checked')].map(o=>o.value);d.startedAt=new Date(d.startedAt).toISOString();await api('/api/incidents',{method:'POST',body:JSON.stringify(d)});await load();home()});checkPendingDivera().catch(showError)}
 async function checkPendingDivera(){
-  const out=document.querySelector('#pendingDivera'),allowed=units.filter(unit=>unit.divera_configured&&(me.role==='wehrleitung'||me.unitIds.includes(unit.id)));
+  const out=document.querySelector('#pendingDivera'),content=out?.querySelector('.resource-section-content'),allowed=units.filter(unit=>unit.divera_configured&&(me.role==='wehrleitung'||me.unitIds.includes(unit.id)));
   if(!out||!allowed.length)return;
   const importTimes=allowed.map(unit=>`${esc(unit.name)}: ${unit.last_divera_import_at?esc(formatDateTime(unit.last_divera_import_at)):'noch kein Import'}`).join('<br>');
-  out.hidden=false;out.innerHTML=`<h2>DIVERA</h2><p><b>Letzter Import:</b><br>${importTimes}</p><p class="muted">Prüfe auf neue Einsätze …</p>`;
+  out.hidden=false;content.innerHTML=`<p><b>Letzter Import:</b><br>${importTimes}</p><p class="muted">Prüfe auf neue Einsätze …</p>`;
   const results=await Promise.allSettled(allowed.map(async unit=>({unit,data:await api(`/api/units/${unit.id}/divera?summary=1`)})));
   if(!out.isConnected)return;
   pendingDivera=results.filter(result=>result.status==='fulfilled').flatMap(({value})=>{
@@ -65,7 +65,7 @@ async function checkPendingDivera(){
     return value.data.alarms.filter(alarm=>!importedForUnit(alarm.id,value.unit.id)&&(!latest||Date.parse(alarm.startedAt)>latest)).map(alarm=>({unit:value.unit,alarm}));
   }).sort((a,b)=>Date.parse(b.alarm.startedAt)-Date.parse(a.alarm.startedAt));
   const failures=results.filter(result=>result.status==='rejected').length;
-  out.innerHTML=`<h2>${pendingDivera.length?'Neue DIVERA-Einsätze':'DIVERA'}</h2><p><b>Letzter Import:</b><br>${importTimes}</p>${pendingDivera.map(({unit,alarm},index)=>`<article class="report"><b>${esc(alarm.title)}</b><p>${esc(formatDateTime(alarm.startedAt))} · ${esc(alarm.address)}<br><span class="muted">${esc(unit.name)}</span></p><button data-pending="${index}">Importieren</button></article>`).join('')||(!failures?'<p>Keine neueren Einsätze vorhanden.</p>':'')}${failures?`<p class="error" role="alert">DIVERA konnte für ${failures} ${failures===1?'Einheit':'Einheiten'} nicht geprüft werden.</p>`:''}`;
+  content.innerHTML=`${pendingDivera.length?'<p><b>Neue DIVERA-Einsätze</b></p>':''}<p><b>Letzter Import:</b><br>${importTimes}</p>${pendingDivera.map(({unit,alarm},index)=>`<article class="report"><b>${esc(alarm.title)}</b><p>${esc(formatDateTime(alarm.startedAt))} · ${esc(alarm.address)}<br><span class="muted">${esc(unit.name)}</span></p><button data-pending="${index}">Importieren</button></article>`).join('')||(!failures?'<p>Keine neueren Einsätze vorhanden.</p>':'')}${failures?`<p class="error" role="alert">DIVERA konnte für ${failures} ${failures===1?'Einheit':'Einheiten'} nicht geprüft werden.</p>`:''}`;
   out.querySelectorAll('[data-pending]').forEach(button=>button.onclick=()=>importPendingDivera(Number(button.dataset.pending),button));
 }
 async function importPendingDivera(index,button){
