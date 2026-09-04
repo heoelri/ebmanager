@@ -50,6 +50,8 @@ assert.match(screenshotCommentWorkflow, /actions\/download-artifact@v5/);
 assert.match(screenshotCommentWorkflow, /gh_2\.99\.0_linux_amd64/);
 assert.doesNotMatch(screenshotCommentWorkflow, /--attach|uploads\.github\.com|user-attachments/);
 assert.match(screenshotCommentWorkflow, /keine Medienanhänge hoch/);
+assert.match(screenshotCommentWorkflow, /filename="\$\(basename "\$file"\)"/);
+assert.match(screenshotCommentWorkflow, /\\`\$filename\\`/);
 assert.match(screenshotCommentWorkflow, /test "\$\{#files\[@\]\}" -eq 16/);
 assert.match(screenshotCommentWorkflow, /contains\(\\"\$marker\\"\)/);
 assert.match(screenshotCommentWorkflow, /commits\/\$HEAD_SHA\/pulls/);

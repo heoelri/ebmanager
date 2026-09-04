@@ -82,9 +82,10 @@ jobs:
               echo "<details><summary>$title</summary>"
               echo
               for file in "screenshots/$prefix"-*.png; do
-                label="$(basename "${file%.png}")"
+                filename="$(basename "$file")"
+                label="${filename%.png}"
                 label="${label//-/ }"
-                echo "- $label"
+                echo "- $label (\`$filename\`)"
               done
               echo '</details>'
             done
