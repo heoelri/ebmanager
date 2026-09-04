@@ -60,6 +60,7 @@ jobs:
         run: bash test/migrations.sh
       - name: Images bauen und End-to-End-Test ausführen
         env:
+          BUILD_ID: ${{ github.sha }}
           DIVERA_API_BASE_URL: http://divera:8090
         run: |
           docker compose --profile test up --build --detach --wait divera web

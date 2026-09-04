@@ -54,23 +54,8 @@ jobs:
         run: |
           set -euo pipefail
           marker='<!-- ui-screenshots -->'
-          repo_id="$(gh api "repos/$GITHUB_REPOSITORY" --jq .id)"
-          [[ "$repo_id" =~ ^[0-9]+$ ]]
-          body="$marker"$'\n\n'"## UI-Screenshots"$'\n'
-          for file in screenshots/*.png; do
-            name="$(basename -- "$file")"
-            url="$(curl --fail-with-body --silent --show-error --request POST \
-              'https://uploads.github.com/user-attachments/assets' \
-              --url-query "name=$name" \
-              --url-query 'content_type=image/png' \
-              --url-query "repository_id=$repo_id" \
-              --header 'Content-Type: application/octet-stream' \
-              --header 'X-GitHub-Api-Version: 2022-11-28' \
-              --header "Authorization: Bearer $GH_TOKEN" \
-              --data-binary "@$file" | jq --raw-output .url)"
-            [[ "$url" == https://* ]]
-            body+=$'\n'"![$name]($url)"$'\n'
-          done
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          body="$marker"$'\n\n'"## UI-Screenshots"$'\n\n'"[Workflow-Artefakt herunterladen]($run_url)"
           comment_ids="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
             --paginate --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$marker\"))) | .id")"
           comment_id="${comment_ids%%$'\n'*}"

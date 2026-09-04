@@ -85,7 +85,11 @@ Query-Parameter wählen ausschließlich bereits vorhandene Browseransichten aus 
 
 ## UI-Screenshot-Workflow vom 3. September 2026
 
-Der Screenshot-Workflow läuft auf `pull_request` und führt den Code des Pull Requests niemals über `pull_request_target` aus. Er verwendet ausschließlich die versionierten Demo-Daten und offensichtlich unechte lokale Zugangsdaten. Screenshots werden für alle PRs als Artefakt gespeichert; der schreibende Upload zu GitHub User Attachments und der PR-Kommentar laufen nur, wenn der Quell-Branch zum selben Repository gehört. Fork-PRs erhalten dadurch keinen schreibenden Token oder Zugriff auf Deployment-Secrets.
+Der Screenshot-Workflow läuft auf `pull_request` und führt den Code des Pull Requests niemals über `pull_request_target` aus. Er verwendet ausschließlich die versionierten Demo-Daten und offensichtlich unechte lokale Zugangsdaten. Screenshots werden für alle PRs als Artefakt gespeichert; nur für Quell-Branches desselben Repositorys aktualisiert der Workflow zusätzlich einen PR-Kommentar mit dem Download-Link. Fork-PRs erhalten dadurch keinen schreibenden Token oder Zugriff auf Deployment-Secrets. Ein persönlicher Zugriffstoken für GitHub User Attachments wird bewusst nicht an PR-Code übergeben.
+
+## Build-ID vom 3. September 2026
+
+Die am 3. September 2026 ergänzte Build-ID enthält ausschließlich den validierten Commit-SHA beziehungsweise den lokalen Fallback „Entwicklung“. Automatisierte Deployments schreiben sie in `.build-id`; Apache sperrt den direkten HTTP-Zugriff auf diese Datei. Die bereits rollenbeschränkte Systemübersicht gibt nur den validierten Wert aus und erweitert weder Konfigurations- noch Geheimniszugriff.
 
 ## SMTP-Versand vom 23. August 2026
 

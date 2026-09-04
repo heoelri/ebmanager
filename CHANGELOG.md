@@ -10,7 +10,9 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 - Bearbeitbare Einheitsberichte können zusätzliche Fahrzeuge aus dem aktuellen Stamm der eigenen Einheit aufnehmen. Die Fahrzeuge stehen als Besatzungsziele bereit, bleiben von DIVERA-Neuimporten unberührt und erscheinen in Ansichten sowie PDF-Exporten.
 - Die Ressourcenansicht hebt die weiterhin gespeicherte Auswahl „Inaktive Mitglieder anzeigen“ bei der Einheitsauswahl hervor; Mitglieder und eigene Fahrzeuge sind standardmäßig geöffnet und nativ einklappbar.
 - Alle Hauptbereiche besitzen Query-basierte Deep Links, die Ansichten nach einem Browser-Refresh sowie bei Vorwärts- und Zurücknavigation wiederherstellen.
-- Pull Requests mit Änderungen unter `public/**` erhalten automatisch in `de-DE` und `Europe/Berlin` gerenderte Demo-Screenshots als Workflow-Artefakt und bei vertrauenswürdigen Repository-Branches zusätzlich als aktualisierten PR-Kommentar.
+- Pull Requests mit Änderungen unter `public/**` erhalten automatisch in `de-DE` und `Europe/Berlin` gerenderte Demo-Screenshots als Workflow-Artefakt und bei vertrauenswürdigen Repository-Branches zusätzlich einen aktualisierten PR-Kommentar mit Download-Link.
+- Die Verwaltung führt alle Einheiten der Organisation in einer eigenen Box auf. Automatisierte Builds erhalten die getestete Commit-ID als Build-ID, die unter „System“ angezeigt wird.
+- Die Statistik „Alarmierte Fahrzeuge“ berücksichtigt ausschließlich Fahrzeuge der eigenen Einheit.
 
 ### Breaking Changes
 

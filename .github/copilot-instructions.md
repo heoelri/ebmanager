@@ -21,6 +21,7 @@
 - `.htaccess` erzwingt HTTPS, schützt nicht öffentliche Dateien, leitet `/api/*` an `api.php` weiter und liefert `public/index.html` aus.
 - Root- und Unterverzeichnis-Deployment funktionieren ohne separate Pfadkonfiguration.
 - API-Fehler haben die Form `{ "error": "..." }`. Eingaben werden an der API-Grenze validiert; Fehler werden weder verschluckt noch als Erfolg dargestellt.
+- API-Listen und abgeleitete Zusammenfassungen haben eine explizite stabile Sortierung. Verlasse dich bei MySQL-Aggregaten nicht auf eine implizite Reihenfolge; sortiere die Eingabezeilen oder das Ergebnis.
 - `GET /api/bootstrap` meldet fehlende Konfiguration, Datenbankfehler und unvollständige Schemata ohne Zugangsdaten mit HTTP 503.
 
 ## Datenbank und Migrationen
@@ -30,6 +31,7 @@
 - Arbeite jede Migration zusätzlich in `schema.sql` ein und markiere sie dort in `schema_migrations` als angewendet.
 - Lokales Docker Compose führt ausstehende Migrationen mit `docker/migrate.sh` vor dem Webstart genau einmal aus. Bestehende Dev-Volumes müssen ohne Verlust fachlicher Daten aktualisiert werden.
 - Produktionsmigrationen werden nicht per SFTP automatisiert; dokumentiere ihre manuelle Ausführung in `CHANGELOG.md` und `docs/WEBSPACE-DEPLOYMENT.md`.
+- Zeitpunkte, die die Anwendung als UTC interpretiert, werden mit `UTC_TIMESTAMP()` oder über eine ausdrücklich auf UTC gesetzte Datenbankverbindung geschrieben. Verlasse dich nicht auf die Zeitzone des MySQL-Hosts oder ein ungesichertes `CURRENT_TIMESTAMP`.
 
 ## Mandanten, Rollen und Benutzer
 
@@ -71,7 +73,7 @@
 - Eine Rückgabe durch die Wehrführung oder die nachträgliche Zuordnung einer weiteren Einheit leert `incidents.consolidated_at`, erhält den bisherigen Text aber als Arbeitsstand. Wiederholte oder veraltete Statusübergänge liefern HTTP 409.
 - Die Wehrführung darf erst konsolidieren, wenn jede alarmierte Einheit einen Bericht in `wehr_review` hat. Führungskräfte sehen nach dem Absenden dessen Zeitpunkt, den aktuellen Status und einen ausdrücklichen Nur-Lese-Hinweis.
 - `patient`, `caller`, Geschädigte, Schädiger und Berichtstexte sind sensible, mandantengebundene Einsatzdaten. Protokolliere sie nicht.
-- Die erste Statistikansicht ist ausschließlich für Einheitsführungen verfügbar und aggregiert nur deren aktuell zugeordnete Einheit. Alarmierte Fahrzeuge stammen aus `incident_units.vehicles`, tatsächliche Beteiligung aus `report_crew` und zusätzliche Fahrzeuge aus `report_additional_vehicles`; Zeitkategorien werden mit den Grenzen aus `constants.php` in `Europe/Berlin` berechnet.
+- Die erste Statistikansicht ist ausschließlich für Einheitsführungen verfügbar und aggregiert nur deren aktuell zugeordnete Einheit. Alarmierte Fahrzeuge der eigenen Einheit stammen aus `incident_units.vehicles`; dort als fremd markierte Fahrzeuge werden nicht gezählt. Tatsächliche Beteiligung stammt aus `report_crew` und zusätzliche Fahrzeuge aus `report_additional_vehicles`; Zeitkategorien werden mit den Grenzen aus `constants.php` in `Europe/Berlin` berechnet.
 
 ## Mitglieder, Fahrzeuge und Besatzung
 
@@ -103,7 +105,7 @@
 ## Oberfläche und Barrierefreiheit
 
 - Hauptnavigation: Einsätze, Mitglieder & Fahrzeuge, rollenabhängig Statistik, Verwaltung, System und DIVERA sowie Abmelden.
-- „System“ ist nur für die Wehrleitung sichtbar und zeigt ausschließlich kuratierte, nicht geheime Zustandsdaten. Gib niemals DSN, Kennwörter, Einrichtungstoken oder DIVERA-Schlüssel aus.
+- „System“ ist nur für die Wehrleitung sichtbar und zeigt ausschließlich kuratierte, nicht geheime Zustandsdaten einschließlich der Build-ID. Gib niemals DSN, Kennwörter, Einrichtungstoken oder DIVERA-Schlüssel aus.
 - Die Oberfläche bleibt ohne Framework responsiv und mit Tastatur, Screenreader und Touch bedienbar.
 - Interaktive Ziele sind mindestens 44 Pixel groß, Tastaturfokus ist sichtbar und dynamische Fehler sowie Statusänderungen werden angekündigt.
 - Verwende die CSS-Custom-Properties in `public/styles.css` und wiederverwendbare Klassen statt Inline-Styles. Externe Stylesheets, Webfonts und CSS-Frameworks sind nicht vorgesehen.
@@ -129,9 +131,9 @@
 - `test/migrations.sh` prüft, dass spätere Migrationen in Dev-Volumes genau einmal ausgeführt werden.
 - `test/fake-divera.php` verweist auf die offiziellen OpenAPI-Dokumente. Halte seine GET-Antworten damit konsistent und die `demo-local-*`-Fixtures deckungsgleich mit `demo/seed.sql`; `.github/workflows/divera-api-contract.yml` prüft Pfade und dokumentierte Felder monatlich, während undokumentierte Antwortdetails vor Änderungen manuell mit einer separaten DIVERA-Testeinheit geprüft werden müssen.
 - GitHub Actions prüft PHP- und JavaScript-Syntax, Shellskripte, `schema.sql`, den HTTP-End-to-End-Fluss sowie Docker Compose gegen Apache/HTTPS und MySQL.
-- Änderungen unter `public/**` erzeugen mit dem lokalen Demo-Profil und einer gepinnten Playwright-Version drei UI-Screenshots als Workflow-Artefakt. Nur PRs aus Branches dieses Repositorys dürfen die Bilder zusätzlich als GitHub User Attachments in einen aktualisierten PR-Kommentar schreiben; verwende dafür niemals `pull_request_target`.
+- Änderungen unter `public/**` erzeugen mit dem lokalen Demo-Profil und einer gepinnten Playwright-Version drei UI-Screenshots als Workflow-Artefakt. Nur PRs aus Branches dieses Repositorys erhalten zusätzlich einen aktualisierten PR-Kommentar mit Download-Link; verwende dafür niemals `pull_request_target` oder einen persönlichen Zugriffstoken im PR-Workflow.
 - Pull Requests erhalten keinen Zugriff auf Deployment-Secrets.
-- Nach erfolgreichen Tests eines Pushs auf `main` lädt der Workflow nur `.htaccess`, `api.php`, `constants.php`, `support.php`, `public/index.html`, `public/app.js` und `public/styles.css` per SFTP mit geprüftem Host-Key hoch. Lokale Konfiguration, Schema und Migrationen werden nie automatisch deployt.
+- Nach erfolgreichen Tests eines Pushs auf `main` schreibt der Workflow den getesteten Commit-SHA in `.build-id` und lädt diese Datei sowie `.htaccess`, `api.php`, `constants.php`, `support.php`, `public/index.html`, `public/app.js` und `public/styles.css` per SFTP mit geprüftem Host-Key hoch. Lokale Konfiguration, Schema und Migrationen werden nie automatisch deployt.
 - Das produktive GitHub-Environment heißt `hiba`. Jedes weitere Ziel benötigt eigene Secrets, Schutzregeln und eine eigene Concurrency-Gruppe.
 
 ## Betrieb und Zurücksetzen

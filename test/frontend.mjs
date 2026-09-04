@@ -8,6 +8,9 @@ const css = fs.readFileSync('public/styles.css', 'utf8');
 const deployment = fs.readFileSync('.github/workflows/deploy.yml', 'utf8');
 const screenshotsWorkflow = fs.readFileSync('.github/workflows/ui-screenshots.yml', 'utf8');
 const screenshotsScript = fs.readFileSync('test/ui-screenshots.mjs', 'utf8');
+const testWorkflow = fs.readFileSync('.github/workflows/test.yml', 'utf8');
+const dockerfile = fs.readFileSync('Dockerfile', 'utf8');
+const compose = fs.readFileSync('compose.yaml', 'utf8');
 const htaccess = fs.readFileSync('.htaccess', 'utf8');
 assert.match(documentHtml, /<link rel="stylesheet" href="public\/styles\.css">/);
 assert.match(documentHtml, /<script src="public\/app\.js" defer><\/script>/);
@@ -36,11 +39,20 @@ assert.match(screenshotsWorkflow, /--network "\$network"/);
 assert.match(screenshotsWorkflow, /SCREENSHOT_BASE_URL=https:\/\/web/);
 assert.doesNotMatch(screenshotsWorkflow, /host\.docker\.internal/);
 assert.match(screenshotsWorkflow, /contains\(\\"\$marker\\"\)/);
+assert.match(screenshotsWorkflow, /actions\/runs\/\$GITHUB_RUN_ID/);
+assert.doesNotMatch(screenshotsWorkflow, /uploads\.github\.com|user-attachments/);
 assert.equal((screenshotsScript.match(/page\.screenshot\(/g) ?? []).length, 3);
 assert.match(screenshotsScript, /viewport: \{width: 1440, height: 1000\}/);
 assert.match(screenshotsScript, /locale: 'de-DE'/);
 assert.match(screenshotsScript, /timezoneId: 'Europe\/Berlin'/);
 assert.match(screenshotsScript, /\?view=resources/);
+assert.match(deployment, /BUILD_ID: \$\{\{ github\.event\.workflow_run\.head_sha \}\}/);
+assert.match(deployment, /put "\.build-id" "\.build-id"/);
+assert.match(testWorkflow, /BUILD_ID: \$\{\{ github\.sha \}\}/);
+assert.match(dockerfile, /ARG BUILD_ID=Entwicklung[\s\S]*?RUN printf '%s\\n' "\$BUILD_ID" > \.build-id/);
+assert.equal((compose.match(/^\s*BUILD_ID: \$\{BUILD_ID:-Entwicklung\}$/gm) ?? []).length, 2);
+assert.match(compose, /EXPECTED_BUILD_ID: \$\{BUILD_ID:-Entwicklung\}/);
+assert.match(htaccess, /FilesMatch "\^\(\\\.build-id\|/);
 assert.match(htaccess, /Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'"/);
 assert.match(javascript, /document\.addEventListener\('click'/);
 
@@ -403,6 +415,14 @@ assert.match(renderResourcesSource, /filterResourceMembers\(root,showInactive\)/
 assert.match(css, /\.resource-filter\s*\{[\s\S]*?border-inline-start:\s*4px solid/);
 assert.match(css, /\.resource-section > summary\s*\{[\s\S]*?min-height:\s*var\(--control-height\)/);
 assert.match(css, /\.resource-section > summary:focus-visible\s*\{[\s\S]*?outline-offset:\s*-3px/);
+
+const adminSource = html.match(/async function admin\(\)[\s\S]*?(?=\nfunction editUser)/)?.[0];
+assert(adminSource, 'Verwaltungsbereich fehlt');
+assert.match(adminSource, /<h2>Einheiten \(\$\{units\.length\}\)<\/h2>/);
+assert.match(adminSource, /units\.map\(unit=>`<p><b>\$\{esc\(unit\.name\)\}<\/b><\/p>`\)/);
+const systemOverviewSource = html.match(/async function systemOverview[\s\S]*?(?=\nfunction divera)/)?.[0];
+assert(systemOverviewSource, 'Systemübersicht fehlt');
+assert.match(systemOverviewSource, /<b>Build-ID:<\/b> \$\{esc\(data\.application\.buildId\)\}/);
 
 const inactivePreferenceSource = html.match(/function inactiveMembersPreference[^\n]+/)?.[0];
 assert(inactivePreferenceSource, 'Speicherung des Mitgliederfilters fehlt');
