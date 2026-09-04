@@ -17,6 +17,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Changed
 
+- „Einsatz anlegen“ ist auf der Einsatzübersicht standardmäßig eingeklappt und weist auf die ausschließliche Nutzung für nicht über DIVERA alarmierte Einsätze hin.
 - Sichtbare Datums- und Uhrzeitangaben der Browser-Oberfläche verwenden durchgängig das Gebietsschema und das 12-/24-Stunden-Schema des Nutzers; native Datumsfelder behalten die Browserdarstellung.
 
 ### Breaking Changes
