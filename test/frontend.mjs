@@ -46,7 +46,9 @@ assert.match(screenshotsScript, /viewport: \{width: 1440, height: 1000\}/);
 assert.match(screenshotsScript, /locale: 'de-DE'/);
 assert.match(screenshotsScript, /timezoneId: 'Europe\/Berlin'/);
 assert.match(screenshotsScript, /\?view=resources/);
-assert.match(deployment, /BUILD_ID: \$\{\{ github\.event\.workflow_run\.head_sha \}\}/);
+assert.match(deployment, /workflow_dispatch:/);
+assert.match(deployment, /github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/main'/);
+assert.equal((deployment.match(/github\.event_name == 'workflow_dispatch' && github\.sha \|\| github\.event\.workflow_run\.head_sha/g) ?? []).length, 2);
 assert.match(deployment, /put "\.build-id" "\.build-id"/);
 assert.match(testWorkflow, /BUILD_ID: \$\{\{ github\.sha \}\}/);
 assert.match(dockerfile, /ARG BUILD_ID=Entwicklung[\s\S]*?RUN printf '%s\\n' "\$BUILD_ID" > \.build-id/);
@@ -210,6 +212,14 @@ const durationText = new Function(`${durationSource}; return durationText;`)();
 assert.equal(durationText(null, null), '–');
 assert.equal(durationText(null, '2026-08-22T19:00:00Z'), '–');
 
+const formatDateTimeSource = html.match(/function formatDateTime[^\n]+/)?.[0];
+assert(formatDateTimeSource, 'formatDateTime fehlt');
+const formatDateTime = new Function(`${formatDateTimeSource}; return formatDateTime;`)();
+const sampleDateTime = '2026-09-04T07:05:00Z';
+assert.equal(formatDateTime(sampleDateTime), new Date(sampleDateTime).toLocaleString(undefined, {dateStyle: 'medium', timeStyle: 'short'}));
+assert.equal(formatDateTime(null), '–');
+assert.equal(formatDateTime('ungültig'), '–');
+
 const reportTimesSource = html.match(/function reportTimes[^\n]+/)?.[0];
 assert(reportTimesSource, 'reportTimes fehlt');
 const reportTimes = new Function(
@@ -370,7 +380,9 @@ assert.match(css, /\.table-scroll:focus-visible/);
 
 const statisticsSource = html.match(/function statisticsDateValue[\s\S]*?(?=\nfunction membershipFields)/)?.[0];
 assert(statisticsSource, 'Statistikansicht fehlt');
-const {statisticsMarkup} = new Function('esc', `${statisticsSource}; return {statisticsMarkup};`)(value => String(value ?? ''));
+const {statisticsMarkup, statisticsWeekday, statisticsMonth} = new Function('esc', `${statisticsSource}; return {statisticsMarkup,statisticsWeekday,statisticsMonth};`)(value => String(value ?? ''));
+assert.equal(statisticsWeekday(1), new Date(2024, 0, 1, 12).toLocaleDateString(undefined, {weekday: 'long'}));
+assert.equal(statisticsMonth('2026-09'), new Date(2026, 8, 1, 12).toLocaleDateString(undefined, {month: 'long', year: 'numeric'}));
 const statisticsHtml = statisticsMarkup({
   range: {timezone: 'Europe/Berlin'},
   totals: {incidents: 4, reports: 2, crewAssignments: 2, averageCrew: 1},
@@ -407,10 +419,10 @@ assert.match(renderResourcesSource, /if\(!root\.isConnected\|\|root\.dataset\.re
 assert.match(renderResourcesSource, /catch\(error\)\{if\(!root\.isConnected\|\|root\.dataset\.request!==request\)return;throw error\}/);
 assert.match(resourcesSource, /<fieldset class="resource-filter"><legend>Ansicht<\/legend><label><input id="showInactiveMembers"/);
 assert.doesNotMatch(renderResourcesSource, /showInactiveMembers|Inaktive Mitglieder anzeigen/);
-assert.equal((renderResourcesSource.match(/<details class="card resource-section" open>/g) ?? []).length, 2);
+assert.equal((renderResourcesSource.match(/<details class="card resource-section" open>/g) ?? []).length, 3);
 assert.match(renderResourcesSource, /<summary>Mitglieder \(<span id="memberCount"><\/span>\)<\/summary>/);
 assert.match(renderResourcesSource, /<summary>Eigene Fahrzeuge \(\$\{own\.length\}\)<\/summary>/);
-assert.match(renderResourcesSource, /<section class="card"><h2>Fahrzeuge anderer Einheiten/);
+assert.match(renderResourcesSource, /<summary>Fahrzeuge anderer Einheiten \(\$\{external\.size\}\)<\/summary>/);
 assert.match(renderResourcesSource, /filterResourceMembers\(root,showInactive\)/);
 assert.match(css, /\.resource-filter\s*\{[\s\S]*?border-inline-start:\s*4px solid/);
 assert.match(css, /\.resource-section > summary\s*\{[\s\S]*?min-height:\s*var\(--control-height\)/);

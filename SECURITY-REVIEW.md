@@ -89,7 +89,7 @@ Der Screenshot-Workflow läuft auf `pull_request` und führt den Code des Pull R
 
 ## Build-ID vom 3. September 2026
 
-Die am 3. September 2026 ergänzte Build-ID enthält ausschließlich den validierten Commit-SHA beziehungsweise den lokalen Fallback „Entwicklung“. Automatisierte Deployments schreiben sie in `.build-id`; Apache sperrt den direkten HTTP-Zugriff auf diese Datei. Die bereits rollenbeschränkte Systemübersicht gibt nur den validierten Wert aus und erweitert weder Konfigurations- noch Geheimniszugriff.
+Die am 3. September 2026 ergänzte Build-ID enthält ausschließlich den validierten Commit-SHA beziehungsweise den lokalen Fallback „Entwicklung“. Automatische und manuelle Deployments schreiben den jeweils ausgecheckten `main`-Commit in `.build-id`; manuelle Läufe anderer Branches werden abgewiesen. Apache sperrt den direkten HTTP-Zugriff auf diese Datei. Die bereits rollenbeschränkte Systemübersicht gibt nur den validierten Wert aus und erweitert weder Konfigurations- noch Geheimniszugriff.
 
 ## SMTP-Versand vom 23. August 2026
 
@@ -147,9 +147,9 @@ Secrets, HTTPS und externe DIVERA-Aufrufe.
   Deployment-Zugangsdaten in Pull-Request-Workflows.
 - CI prüft Anwendung und Schema direkt sowie unabhängig davon das gebaute
   Docker-/Apache-System; veraltete Läufe derselben Referenz werden abgebrochen.
-- Das Deployment läuft nur nach erfolgreichen Tests eines Pushs auf `main`,
-  checkt den exakt getesteten Commit aus und überträgt ausschließlich per SSH
-  gesichertes SFTP mit geprüftem Host-Key.
+- Das Deployment läuft nach erfolgreichen Tests eines Pushs auf `main` oder
+  manuell ausschließlich für `main`, checkt den zugehörigen Commit aus und
+  überträgt ausschließlich per SSH gesichertes SFTP mit geprüftem Host-Key.
   Datenbankkonfiguration und SQL-Schema werden nicht übertragen.
 
 ## Defense in Depth

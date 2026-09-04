@@ -190,7 +190,7 @@ Die Ersteinrichtung ist nach dem ersten Benutzer dauerhaft geschlossen.
 
 ## 9. Automatisches Deployment mit GitHub Actions einrichten
 
-Das Repository deployt nach erfolgreichen Tests eines Pushs auf `main` den exakt getesteten Commit. Der Workflow verwendet das GitHub-Environment `hiba`.
+Das Repository deployt nach erfolgreichen Tests eines Pushs auf `main` den exakt getesteten Commit. Der Workflow verwendet das GitHub-Environment `hiba` und kann zum erneuten Deployment des aktuellen `main`-Commits auch manuell gestartet werden.
 
 Der GitHub-Workflow unterstützt SFTP wahlweise mit privatem Schlüssel oder Passwort und prüft den Host-Key verpflichtend.
 
@@ -209,7 +209,7 @@ Der GitHub-Workflow unterstützt SFTP wahlweise mit privatem Schlüssel oder Pas
 | `SFTP_PATH` | Optionales, bereits vorhandenes Zielverzeichnis relativ zum SFTP-Stamm |
 
 4. Prüfen, dass der Server SFTP über SSH anbietet und der ermittelte Host-Key mit der Angabe des Hosters übereinstimmt.
-5. Einen Push auf `main` durchführen und zuerst den Workflow `Tests`, danach den Workflow `Deployment` beobachten.
+5. Einen Push auf `main` durchführen und zuerst den Workflow `Tests`, danach den Workflow `Deployment` beobachten. Für ein manuelles erneutes Deployment unter **Actions → Deployment → Run workflow** ausschließlich den Branch `main` auswählen.
 
 Der Workflow schreibt den exakt getesteten Commit-SHA in die nicht öffentlich abrufbare Datei `.build-id` und lädt sie zusammen mit `.htaccess`, `api.php`, `constants.php`, `support.php`, `public/index.html`, `public/app.js` und `public/styles.css` hoch. `config.local.php`, Datenbankzugangsdaten, `schema.sql` und Migrationen werden absichtlich nicht automatisiert übertragen.
 
