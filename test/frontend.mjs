@@ -30,6 +30,8 @@ assert.match(css, /@media \(forced-colors: active\)/);
 assert.match(css, /@media \(forced-colors: active\)[\s\S]*?\.error\s*\{[\s\S]*?border-inline-start-width:\s*4px/);
 assert.match(javascript, /<details(?=[^>]*\bid="pendingDivera")(?=[^>]*\bhidden\b)(?=[^>]*\baria-live="polite")[^>]*>\s*<summary>\s*DIVERA Import\s*<\/summary>/);
 assert.doesNotMatch(javascript, /<details(?=[^>]*\bid="pendingDivera")[^>]*\bopen(?:\s|=|>)/);
+assert.match(javascript, /summary\.textContent='DIVERA Import – Prüfung läuft …'/);
+assert.match(javascript, /summary\.textContent=`DIVERA Import – \$\{statuses\.join\(', '\)\|\|'keine neuen Einsätze'\}`/);
 assert.match(deployment, /put "public\/styles\.css" "public\/styles\.css"/);
 assert.match(deployment, /put "public\/app\.js" "public\/app\.js"/);
 assert.match(screenshotsWorkflow, /pull_request:\s*\n\s*paths:\s*\n\s*- public\/\*\*/);

@@ -89,6 +89,10 @@ Der Screenshot-Workflow läuft auf `pull_request` und führt den Code des Pull R
 
 Die direkte Einbettung läuft getrennt über `workflow_run` mit der unveränderlich vom Standardbranch geladenen Workflowdefinition. Nur erfolgreiche Screenshot-Läufe für Quell-Branches desselben Repositorys werden verarbeitet. Dieser zweite Workflow lädt ausschließlich das erzeugte Artefakt, führt keinen PR-Code aus und erhält die für GitHub-Medienanhänge erforderlichen Schreibrechte. GitHub CLI 2.99.0 wird mit fester Version und SHA-256-Prüfsumme geladen; ein persönlicher Zugriffstoken oder Deployment-Secret wird nicht verwendet. Fork-PRs erreichen den schreibenden Job nicht und erhalten weiterhin ausschließlich das Artefakt.
 
+## Wehrweite Fahrzeugnamen vom 4. September 2026
+
+Die Auflösung fremder DIVERA-Fahrzeug-IDs liest ausschließlich bereits synchronisierte Stammdaten von Einheiten mit derselben `organization_id`. Die aktuell abgefragte Einheit bleibt für die Eigentumskennzeichnung maßgeblich; ergänzte Fahrzeuge bleiben `own: false` und damit als Besatzungsziel unzulässig. Treffer anderer Organisationen werden ignoriert, und bei mehreren Treffern innerhalb der Organisation wird kein Klartext übernommen. Ein Smoke-Test prüft Mandantentrennung, Mehrdeutigkeits-Fallback und die Aktualisierung durch erneuten Import.
+
 ## Build-ID vom 3. September 2026
 
 Die am 3. September 2026 ergänzte Build-ID enthält ausschließlich den validierten Commit-SHA beziehungsweise den lokalen Fallback „Entwicklung“. Automatische und manuelle Deployments schreiben den jeweils ausgecheckten `main`-Commit in `.build-id`; manuelle Läufe anderer Branches werden abgewiesen. Apache sperrt den direkten HTTP-Zugriff auf diese Datei. Die bereits rollenbeschränkte Systemübersicht gibt nur den validierten Wert aus und erweitert weder Konfigurations- noch Geheimniszugriff.
