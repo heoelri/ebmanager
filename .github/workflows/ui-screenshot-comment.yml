@@ -32,7 +32,7 @@ jobs:
           path: screenshots
           github-token: ${{ github.token }}
           run-id: ${{ github.event.workflow_run.id }}
-      - name: GitHub CLI mit Medienanhängen installieren
+      - name: GitHub CLI installieren
         shell: bash
         run: |
           set -euo pipefail
@@ -73,6 +73,8 @@ jobs:
             echo '## UI-Screenshots'
             echo
             echo "[Workflow-Artefakt herunterladen]($RUN_URL)"
+            echo
+            echo 'Die PNG-Dateien stehen im Artefakt bereit; der Kommentar lädt keine Medienanhänge hoch, damit der Workflow ausschließlich mit dem automatisch bereitgestellten `GITHUB_TOKEN` läuft.'
             for group in '01:Anmeldung' '10:Führungskraft' '20:Einheitsführung' '30:Wehrführung'; do
               prefix="${group%%:*}"
               title="${group#*:}"
@@ -82,22 +84,16 @@ jobs:
               for file in "screenshots/$prefix"-*.png; do
                 label="$(basename "${file%.png}")"
                 label="${label//-/ }"
-                echo "### $label"
-                echo
-                echo "![$label]($file)"
-                echo
+                echo "- $label"
               done
               echo '</details>'
             done
           } > /tmp/ui-screenshots.md
           marker='<!-- ui-screenshots -->'
-          marker='<!-- ui-screenshots -->'
           mapfile -t old_comments < <(gh api "repos/$GITHUB_REPOSITORY/issues/$pr_number/comments" --paginate \
             --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$marker\"))) | .id")
-          attachments=()
-          for file in "${files[@]}"; do attachments+=(--attach "$file"); done
           gh pr comment "$pr_number" --repo "$GITHUB_REPOSITORY" \
-            --body-file /tmp/ui-screenshots.md "${attachments[@]}"
+            --body-file /tmp/ui-screenshots.md
           for comment_id in "${old_comments[@]}"; do
             gh api --method DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id"
           done
