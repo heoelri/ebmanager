@@ -7,6 +7,7 @@ const html = `${documentHtml}\n${javascript}`;
 const css = fs.readFileSync('public/styles.css', 'utf8');
 const deployment = fs.readFileSync('.github/workflows/deploy.yml', 'utf8');
 const screenshotsWorkflow = fs.readFileSync('.github/workflows/ui-screenshots.yml', 'utf8');
+const screenshotCommentWorkflow = fs.readFileSync('.github/workflows/ui-screenshot-comment.yml', 'utf8');
 const screenshotsScript = fs.readFileSync('test/ui-screenshots.mjs', 'utf8');
 const testWorkflow = fs.readFileSync('.github/workflows/test.yml', 'utf8');
 const dockerfile = fs.readFileSync('Dockerfile', 'utf8');
@@ -31,21 +32,44 @@ assert.match(deployment, /put "public\/styles\.css" "public\/styles\.css"/);
 assert.match(deployment, /put "public\/app\.js" "public\/app\.js"/);
 assert.match(screenshotsWorkflow, /pull_request:\s*\n\s*paths:\s*\n\s*- public\/\*\*/);
 assert.doesNotMatch(screenshotsWorkflow, /pull_request_target/);
-assert.match(screenshotsWorkflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
 assert.match(screenshotsWorkflow, /actions\/upload-artifact@v4/);
 assert.match(screenshotsWorkflow, /playwright@1\.55\.0/);
 assert.match(screenshotsWorkflow, /mcr\.microsoft\.com\/playwright:v1\.55\.0-noble/);
 assert.match(screenshotsWorkflow, /--network "\$network"/);
 assert.match(screenshotsWorkflow, /SCREENSHOT_BASE_URL=https:\/\/web/);
 assert.doesNotMatch(screenshotsWorkflow, /host\.docker\.internal/);
-assert.match(screenshotsWorkflow, /contains\(\\"\$marker\\"\)/);
-assert.match(screenshotsWorkflow, /actions\/runs\/\$GITHUB_RUN_ID/);
 assert.doesNotMatch(screenshotsWorkflow, /uploads\.github\.com|user-attachments/);
-assert.equal((screenshotsScript.match(/page\.screenshot\(/g) ?? []).length, 3);
+assert.match(screenshotCommentWorkflow, /workflow_run:/);
+assert.doesNotMatch(screenshotCommentWorkflow, /pull_request_target|secrets\.[A-Z_]*TOKEN/);
+assert.match(screenshotCommentWorkflow, /head_repository\.full_name == github\.repository/);
+assert.match(screenshotCommentWorkflow, /actions\/download-artifact@v5/);
+assert.match(screenshotCommentWorkflow, /gh_2\.99\.0_linux_amd64/);
+assert.match(screenshotCommentWorkflow, /--attach "\$file"/);
+assert.match(screenshotCommentWorkflow, /test "\$\{#files\[@\]\}" -eq 16/);
+assert.match(screenshotCommentWorkflow, /contains\(\\"\$marker\\"\)/);
+assert.match(screenshotCommentWorkflow, /commits\/\$HEAD_SHA\/pulls/);
+assert.match(screenshotCommentWorkflow, /concurrency:[\s\S]*?cancel-in-progress: true/);
+assert.match(screenshotCommentWorkflow, /current_head[\s\S]*?!= "\$HEAD_SHA"/);
+assert.ok(
+  screenshotCommentWorkflow.indexOf('gh pr comment') <
+    screenshotCommentWorkflow.indexOf('issues/comments/$comment_id'),
+  'Der neue Screenshot-Kommentar muss vor dem Löschen des alten veröffentlicht werden.'
+);
+assert.doesNotMatch(screenshotCommentWorkflow, /actions\/checkout/);
+assert.match(screenshotsScript, /01-anmeldung\.png/);
+for (const prefix of ['10-fuehrungskraft', '20-einheitsfuehrung', '30-wehrfuehrung']) {
+  assert.match(screenshotsScript, new RegExp(`prefix: '${prefix}'`));
+}
+assert.equal((screenshotsScript.match(/\['[^']+', '[^']+', '[^']+'/g) ?? []).length, 12);
 assert.match(screenshotsScript, /viewport: \{width: 1440, height: 1000\}/);
 assert.match(screenshotsScript, /locale: 'de-DE'/);
 assert.match(screenshotsScript, /timezoneId: 'Europe\/Berlin'/);
-assert.match(screenshotsScript, /\?view=resources/);
+for (const view of ['home', 'resources', 'statistics', 'admin', 'system', 'divera']) {
+  assert.match(screenshotsScript, new RegExp(`'${view}'`));
+}
+for (const account of ['fuehrung.springer', 'leitung.mitte', 'wehrleitung']) {
+  assert.match(screenshotsScript, new RegExp(`${account.replace('.', '\\.')}@demo\\.local`));
+}
 assert.match(deployment, /workflow_dispatch:/);
 assert.match(deployment, /github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/main'/);
 assert.equal((deployment.match(/github\.event_name == 'workflow_dispatch' && github\.sha \|\| github\.event\.workflow_run\.head_sha/g) ?? []).length, 2);

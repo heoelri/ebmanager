@@ -4,11 +4,12 @@ on:
   pull_request:
     paths:
       - public/**
+      - test/ui-screenshots.mjs
+      - .github/workflows/ui-screenshots.yml
   workflow_dispatch:
 
 permissions:
   contents: read
-  pull-requests: write
 
 concurrency:
   group: ui-screenshots-${{ github.event.pull_request.number || github.ref }}
@@ -45,25 +46,6 @@ jobs:
           name: ui-screenshots
           path: screenshots/*.png
           if-no-files-found: error
-      - name: Screenshots im Pull Request anzeigen
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          marker='<!-- ui-screenshots -->'
-          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-          body="$marker"$'\n\n'"## UI-Screenshots"$'\n\n'"[Workflow-Artefakt herunterladen]($run_url)"
-          comment_ids="$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
-            --paginate --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$marker\"))) | .id")"
-          comment_id="${comment_ids%%$'\n'*}"
-          if [[ -n "$comment_id" ]]; then
-            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" -f body="$body"
-          else
-            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body"
-          fi
       - name: Container und Volumes entfernen
         if: always()
         run: docker compose --profile demo down --volumes
