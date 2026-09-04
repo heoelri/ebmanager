@@ -48,12 +48,32 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
-          RUN_URL: ${{ github.event.workflow_run.html_url }}
         shell: bash
         run: |
           set -euo pipefail
           mapfile -t files < <(find screenshots -maxdepth 1 -type f -name '*.png' | sort)
-          test "${#files[@]}" -eq 16
+          expected_files=(
+            01-anmeldung.png
+            10-fuehrungskraft-divera.png
+            10-fuehrungskraft-einsaetze.png
+            10-fuehrungskraft-einsatzdetail.png
+            10-fuehrungskraft-mitglieder-fahrzeuge.png
+            20-einheitsfuehrung-divera.png
+            20-einheitsfuehrung-einsaetze.png
+            20-einheitsfuehrung-einsatzdetail.png
+            20-einheitsfuehrung-mitglieder-fahrzeuge.png
+            20-einheitsfuehrung-statistik.png
+            30-wehrfuehrung-divera.png
+            30-wehrfuehrung-einsaetze.png
+            30-wehrfuehrung-einsatzdetail.png
+            30-wehrfuehrung-mitglieder-fahrzeuge.png
+            30-wehrfuehrung-system.png
+            30-wehrfuehrung-verwaltung.png
+          )
+          test "${#files[@]}" -eq "${#expected_files[@]}"
+          for index in "${!expected_files[@]}"; do
+            test "$(basename "${files[$index]}")" = "${expected_files[$index]}"
+          done
           pr_number="$PR_NUMBER"
           if [[ -z "$pr_number" ]]; then
             mapfile -t pull_requests < <(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/pulls" \
@@ -67,14 +87,42 @@ jobs:
             exit 0
           fi
 
+          screenshot_branch="ui-screenshots-pr-$pr_number"
+          : > /tmp/screenshot-tree.jsonl
+          for file in "${files[@]}"; do
+            blob_sha="$(base64 --wrap=0 "$file" \
+              | jq -Rs '{content: ., encoding: "base64"}' \
+              | gh api --method POST "repos/$GITHUB_REPOSITORY/git/blobs" --input - --jq '.sha')"
+            jq -n \
+              --arg path "$(basename "$file")" \
+              --arg sha "$blob_sha" \
+              '{path: $path, mode: "100644", type: "blob", sha: $sha}' \
+              >> /tmp/screenshot-tree.jsonl
+          done
+          jq -s '{tree: .}' /tmp/screenshot-tree.jsonl > /tmp/screenshot-tree.json
+          tree_sha="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/trees" \
+            --input /tmp/screenshot-tree.json --jq '.sha')"
+          jq -n \
+            --arg message "UI-Screenshots für PR #$pr_number" \
+            --arg tree "$tree_sha" \
+            '{message: $message, tree: $tree}' \
+            > /tmp/screenshot-commit.json
+          screenshot_commit="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/commits" \
+            --input /tmp/screenshot-commit.json --jq '.sha')"
+          existing_ref="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/heads/$screenshot_branch" \
+            --jq '.[].ref' | grep --fixed-strings --line-regexp "refs/heads/$screenshot_branch" || true)"
+          if [[ -n "$existing_ref" ]]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/$screenshot_branch" \
+              -f sha="$screenshot_commit" -F force=true >/dev/null
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/heads/$screenshot_branch" -f sha="$screenshot_commit" >/dev/null
+          fi
+
           {
             echo '<!-- ui-screenshots -->'
             echo
             echo '## UI-Screenshots'
-            echo
-            echo "[Workflow-Artefakt herunterladen]($RUN_URL)"
-            echo
-            echo 'Die PNG-Dateien stehen im Artefakt bereit; der Kommentar lädt keine Medienanhänge hoch, damit der Workflow ausschließlich mit dem automatisch bereitgestellten `GITHUB_TOKEN` läuft.'
             for group in '01:Anmeldung' '10:Führungskraft' '20:Einheitsführung' '30:Wehrführung'; do
               prefix="${group%%:*}"
               title="${group#*:}"
@@ -85,7 +133,11 @@ jobs:
                 filename="$(basename "$file")"
                 label="${filename%.png}"
                 label="${label//-/ }"
-                echo "- $label (\`$filename\`)"
+                image_url="https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$screenshot_commit/$filename"
+                echo "### $label"
+                echo
+                echo "![$label]($image_url)"
+                echo
               done
               echo '</details>'
             done
