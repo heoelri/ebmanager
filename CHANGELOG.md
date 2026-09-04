@@ -19,6 +19,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 - „Einsatz anlegen“ ist auf der Einsatzübersicht standardmäßig eingeklappt und weist auf die ausschließliche Nutzung für nicht über DIVERA alarmierte Einsätze hin.
 - Die Box „DIVERA Import“ auf der Einsatzübersicht ist standardmäßig eingeklappt.
+- Der UI-Screenshot-Kommentar bettet die 16 erzeugten Ansichten direkt über unveränderliche Dateien in einem separaten Screenshot-Branch je Pull Request ein.
 - Fremde Alarmfahrzeuge zeigen bei eindeutigem, bereits synchronisiertem Fahrzeugstamm einer anderen Einheit derselben Wehr Name und Typ statt nur der DIVERA-ID; fehlende oder mehrdeutige Zuordnungen bleiben bei der ID.
 - Sichtbare Datums- und Uhrzeitangaben der Browser-Oberfläche verwenden durchgängig das Gebietsschema und das 12-/24-Stunden-Schema des Nutzers; native Datumsfelder behalten die Browserdarstellung.
 
