@@ -86,7 +86,7 @@
 - Zulässige Funktionen sind `maschinist`, `einheitsfuehrer` und `besatzung`. Pro Fahrzeug gibt es höchstens einen Maschinisten und einen Einheitsführer; die Besatzung ist unbegrenzt.
 - Nur eigene Fahrzeuge der berichtenden Einheit oder „Ohne Fahrzeug“ sind Besatzungsziele. Der Server erzwingt diese Regel.
 - Bearbeitbare Berichte dürfen weitere Fahrzeuge aus dem aktuellen Stamm der eigenen Einheit aufnehmen. Später nicht mehr gelieferte Fahrzeuge bleiben historisch erhalten, sind aber nicht neu als Besatzungsziel auswählbar.
-- Die Ressourcenansicht zeigt standardmäßig nur aktive Mitglieder. „Inaktive Mitglieder anzeigen“ steht hervorgehoben bei der Einheitsauswahl und wird wie der Einsatzstatusfilter benutzer- und rollenbezogen im Browser gespeichert; Mitglieder und eigene Fahrzeuge sind als standardmäßig geöffnete native `<details>` einklappbar.
+- Die Ressourcenansicht zeigt standardmäßig nur aktive Mitglieder. „Inaktive Mitglieder anzeigen“ steht hervorgehoben bei der Einheitsauswahl und wird wie der Einsatzstatusfilter benutzer- und rollenbezogen im Browser gespeichert; Mitglieder, eigene Fahrzeuge und Fahrzeuge anderer Einheiten sind als standardmäßig geöffnete native `<details>` einklappbar.
 
 ## DIVERA 24/7
 
@@ -116,6 +116,7 @@
 - Drag-and-drop ist nur eine optionale Mausbedienung. Auswahlfelder bleiben die gleichwertige Tastatur- und Touchbedienung.
 - Externe Kartenlinks verwenden OpenStreetMap, kündigen das neue Fenster an und setzen `rel="noopener"`.
 - Hauptbereiche verwenden Query-basierte Deep Links über `view` beziehungsweise `incident`. Refresh und Browser-Historie stellen nur für die aktuelle Rolle erlaubte Ansichten wieder her; Hash-Fragmente bleiben Einladungs- und Wiederherstellungslinks vorbehalten.
+- Sichtbare Datums- und Uhrzeitangaben der Browser-Oberfläche verwenden das Gebietsschema und das 12-/24-Stunden-Schema des Nutzers. Nutze dafür die zentralen nativen `Intl`-/`toLocale*`-Formatter; technische API- und Formulareingabewerte bleiben ISO-konform.
 
 ## Datenschutz und Geheimnisse
 
@@ -131,9 +132,10 @@
 - `test/migrations.sh` prüft, dass spätere Migrationen in Dev-Volumes genau einmal ausgeführt werden.
 - `test/fake-divera.php` verweist auf die offiziellen OpenAPI-Dokumente. Halte seine GET-Antworten damit konsistent und die `demo-local-*`-Fixtures deckungsgleich mit `demo/seed.sql`; `.github/workflows/divera-api-contract.yml` prüft Pfade und dokumentierte Felder monatlich, während undokumentierte Antwortdetails vor Änderungen manuell mit einer separaten DIVERA-Testeinheit geprüft werden müssen.
 - GitHub Actions prüft PHP- und JavaScript-Syntax, Shellskripte, `schema.sql`, den HTTP-End-to-End-Fluss sowie Docker Compose gegen Apache/HTTPS und MySQL.
+- Jeder Pull Request benötigt vor dem Merge einen abgeschlossenen Copilot-Review für den aktuellen Head-Commit. Setze relevante Hinweise um, beantworte und schließe alle Review-Threads und fordere nach jeder Änderung einen neuen Review an; merge erst ohne offene relevante Hinweise und mit grünen Pflichtprüfungen.
 - Änderungen unter `public/**` erzeugen mit dem lokalen Demo-Profil und einer gepinnten Playwright-Version drei UI-Screenshots als Workflow-Artefakt. Nur PRs aus Branches dieses Repositorys erhalten zusätzlich einen aktualisierten PR-Kommentar mit Download-Link; verwende dafür niemals `pull_request_target` oder einen persönlichen Zugriffstoken im PR-Workflow.
 - Pull Requests erhalten keinen Zugriff auf Deployment-Secrets.
-- Nach erfolgreichen Tests eines Pushs auf `main` schreibt der Workflow den getesteten Commit-SHA in `.build-id` und lädt diese Datei sowie `.htaccess`, `api.php`, `constants.php`, `support.php`, `public/index.html`, `public/app.js` und `public/styles.css` per SFTP mit geprüftem Host-Key hoch. Lokale Konfiguration, Schema und Migrationen werden nie automatisch deployt.
+- Nach erfolgreichen Tests eines Pushs auf `main` oder bei manueller Ausführung ausschließlich für `main` schreibt der Workflow den ausgecheckten Commit-SHA in `.build-id` und lädt diese Datei sowie `.htaccess`, `api.php`, `constants.php`, `support.php`, `public/index.html`, `public/app.js` und `public/styles.css` per SFTP mit geprüftem Host-Key hoch. Lokale Konfiguration, Schema und Migrationen werden nie automatisch deployt.
 - Das produktive GitHub-Environment heißt `hiba`. Jedes weitere Ziel benötigt eigene Secrets, Schutzregeln und eine eigene Concurrency-Gruppe.
 
 ## Betrieb und Zurücksetzen

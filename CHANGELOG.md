@@ -8,11 +8,16 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 - Einheitsführungen erhalten einen eigenen Bereich „Statistik“ mit Zeitraumfilter, Fahrzeug- und Mitgliederhäufigkeiten, zeitlichen Verteilungen sowie der durchschnittlichen Besatzungsstärke ihrer Einheit.
 - Bearbeitbare Einheitsberichte können zusätzliche Fahrzeuge aus dem aktuellen Stamm der eigenen Einheit aufnehmen. Die Fahrzeuge stehen als Besatzungsziele bereit, bleiben von DIVERA-Neuimporten unberührt und erscheinen in Ansichten sowie PDF-Exporten.
-- Die Ressourcenansicht hebt die weiterhin gespeicherte Auswahl „Inaktive Mitglieder anzeigen“ bei der Einheitsauswahl hervor; Mitglieder und eigene Fahrzeuge sind standardmäßig geöffnet und nativ einklappbar.
+- Die Ressourcenansicht hebt die weiterhin gespeicherte Auswahl „Inaktive Mitglieder anzeigen“ bei der Einheitsauswahl hervor; Mitglieder, eigene Fahrzeuge und Fahrzeuge anderer Einheiten sind standardmäßig geöffnet und nativ einklappbar.
 - Alle Hauptbereiche besitzen Query-basierte Deep Links, die Ansichten nach einem Browser-Refresh sowie bei Vorwärts- und Zurücknavigation wiederherstellen.
 - Pull Requests mit Änderungen unter `public/**` erhalten automatisch in `de-DE` und `Europe/Berlin` gerenderte Demo-Screenshots als Workflow-Artefakt und bei vertrauenswürdigen Repository-Branches zusätzlich einen aktualisierten PR-Kommentar mit Download-Link.
 - Die Verwaltung führt alle Einheiten der Organisation in einer eigenen Box auf. Automatisierte Builds erhalten die getestete Commit-ID als Build-ID, die unter „System“ angezeigt wird.
 - Die Statistik „Alarmierte Fahrzeuge“ berücksichtigt ausschließlich Fahrzeuge der eigenen Einheit.
+- Das produktive Deployment kann zusätzlich zum automatischen Lauf nach erfolgreichen `main`-Tests manuell für den aktuellen `main`-Commit gestartet werden.
+
+### Changed
+
+- Sichtbare Datums- und Uhrzeitangaben der Browser-Oberfläche verwenden durchgängig das Gebietsschema und das 12-/24-Stunden-Schema des Nutzers; native Datumsfelder behalten die Browserdarstellung.
 
 ### Breaking Changes
 
