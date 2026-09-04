@@ -96,6 +96,7 @@
 - Lies Einsätze über `GET /api/v2/alarms` und Mitglieder, Qualifikationen sowie Fahrzeugstammdaten über `GET /api/v2/pull/all`.
 - Rufe `pull/vehicle-status` und DIVERA-Besatzungsendpunkte nicht auf.
 - `cluster.vehicle` definiert die eigenen Fahrzeuge einer Einheit. Importiere Alarmfahrzeuge als eigene oder fremde Fahrzeuge; nur eigene Fahrzeuge sind Besatzungsziele.
+- Löse fremde Alarmfahrzeug-IDs nur aus einem eindeutigen Fahrzeugstamm einer anderen Einheit derselben Organisation auf. Bei fehlenden oder mehrdeutigen Treffern bleibt die ID als Anzeigename erhalten.
 - Lokale POST-Importe und Synchronisationen schreiben ausschließlich in MySQL.
 - Echte Access-Keys werden nie protokolliert, an den Browser ausgegeben oder committed. Ausschließlich die offensichtlich unechten `demo-local-*`-Keys aus `demo/seed.sql` dürfen für den lokalen Fake versioniert werden.
 - Ein DIVERA-Einsatz ist innerhalb einer Organisation über `divera_id` eindeutig. Wiederholter Import aktualisiert Einsatz und `incident_units`, statt sie zu duplizieren.

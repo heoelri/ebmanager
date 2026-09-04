@@ -881,10 +881,39 @@ function diveraData(array $unit, bool $includeVehicles = true, ?array $cluster =
 {
     $alarmsRaw = diveraGet(diveraUrl('/api/v2/alarms', $unit['divera_access_key']), 'DIVERA-Abfrage fehlgeschlagen');
     $ownVehicles = [];
+    $organizationVehicles = [];
     if ($includeVehicles) {
         $cluster ??= diveraCluster($unit);
         foreach (($cluster['vehicle'] ?? []) as $id => $vehicle) {
             $ownVehicles[(string)($vehicle['id'] ?? $id)] = $vehicle;
+        }
+    }
+    $source = $alarmsRaw['data']['items'] ?? $alarmsRaw['data'] ?? $alarmsRaw['items'] ?? $alarmsRaw;
+    $alarmRows = is_array($source) ? array_values($source) : [];
+    $alarmVehicleIds = [];
+    $foreignIds = [];
+    foreach ($alarmRows as $alarm) {
+        $assigned = $alarm['vehicles'] ?? $alarm['vehicle_ids'] ?? $alarm['vehicle'] ?? [];
+        $ids = is_array($assigned) ? (array_is_list($assigned) ? $assigned : array_keys($assigned)) : explode(',', (string)$assigned);
+        $normalized = [];
+        foreach ($ids as $id) {
+            $id = trim((string)$id);
+            if (!$id) continue;
+            $normalized[] = $id;
+            if ($includeVehicles && !isset($ownVehicles[$id])) $foreignIds[$id] = true;
+        }
+        $alarmVehicleIds[] = $normalized;
+    }
+    if ($foreignIds) {
+        $placeholders = implode(',', array_fill(0, count($foreignIds), '?'));
+        foreach (query(
+            "SELECT v.divera_id,MIN(v.name) name,MIN(v.shortname) shortname,MIN(v.fullname) fullname
+             FROM vehicles v JOIN units u ON u.id=v.unit_id
+             WHERE u.organization_id=? AND v.unit_id<>? AND v.divera_id IN ($placeholders)
+             GROUP BY v.divera_id HAVING COUNT(*)=1 ORDER BY v.divera_id",
+            array_merge([$unit['organization_id'], $unit['id']], array_keys($foreignIds))
+        )->fetchAll() as $vehicle) {
+            $organizationVehicles[$vehicle['divera_id']] = $vehicle;
         }
     }
     $vehicles = [];
@@ -892,20 +921,16 @@ function diveraData(array $unit, bool $includeVehicles = true, ?array $cluster =
         'id' => $id, 'name' => $vehicle['name'] ?? $vehicle['shortname'] ?? $id,
         'shortname' => (string)($vehicle['shortname'] ?? ''), 'fullname' => (string)($vehicle['fullname'] ?? ''), 'own' => true
     ];
-    $source = $alarmsRaw['data']['items'] ?? $alarmsRaw['data'] ?? $alarmsRaw['items'] ?? $alarmsRaw;
     $alarms = [];
-    foreach (is_array($source) ? array_values($source) : [] as $alarm) {
-        $assigned = $alarm['vehicles'] ?? $alarm['vehicle_ids'] ?? $alarm['vehicle'] ?? [];
-        $ids = is_array($assigned) ? (array_is_list($assigned) ? $assigned : array_keys($assigned)) : explode(',', (string)$assigned);
+    foreach ($alarmRows as $index => $alarm) {
         $alarmVehicles = [];
-        foreach ($ids as $id) {
-            $id = trim((string)$id);
-            if (!$id) continue;
-            $vehicle = $ownVehicles[$id] ?? null;
+        foreach ($alarmVehicleIds[$index] as $id) {
+            $own = isset($ownVehicles[$id]);
+            $vehicle = $ownVehicles[$id] ?? $organizationVehicles[$id] ?? null;
             $alarmVehicles[] = [
                 'id' => $id, 'name' => $vehicle['name'] ?? $vehicle['shortname'] ?? $id,
                 'shortname' => (string)($vehicle['shortname'] ?? ''), 'fullname' => (string)($vehicle['fullname'] ?? ''),
-                'own' => (bool)$vehicle
+                'own' => $own
             ];
         }
         $alarms[] = [
