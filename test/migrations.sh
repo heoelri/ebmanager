@@ -16,8 +16,12 @@ for _ in {1..60}; do
 done
 "${compose[@]}" exec -T db mysql --host=127.0.0.1 --user=root -ptest-password einsatzberichte --execute="SELECT 1" >/dev/null
 
-# Eine Installation vor den Migrationen erhält Workflow, Stammdaten, Aktivstatus, Zusatzfahrzeuge und Revisionen genau einmal.
+# Eine Altinstallation erhält Workflow, Stammdaten, Revisionen und historische Namens-Snapshots genau einmal.
 "${compose[@]}" exec -T db mysql --user=root -ptest-password einsatzberichte --execute="
+  ALTER TABLE reports DROP COLUMN author_name;
+  ALTER TABLE report_crew DROP COLUMN member_name;
+  ALTER TABLE incidents DROP COLUMN report_data_frozen;
+  DELETE FROM schema_migrations WHERE name='005-historical-report-snapshots.sql';
   ALTER TABLE incidents DROP COLUMN revision;
   ALTER TABLE reports DROP COLUMN revision;
   DELETE FROM schema_migrations WHERE name='004-report-revisions.sql';
@@ -39,7 +43,7 @@ done
     (10,10,'A','2026-01-01','','','','','',''),(11,10,'B','2026-01-01','','','','','',''),
     (12,10,'C','2026-01-01','','','','','',''),(13,10,'D','2026-01-01','','','','','','');
   INSERT INTO reports(id,incident_id,unit_id,author_id,narrative,vehicles,personnel,classification,status,released_at) VALUES
-    (10,10,10,10,'','','',JSON_OBJECT(),'draft',NULL),
+    (10,10,10,10,'','','Nicht rekonstruierbarer alter Name',JSON_OBJECT(),'draft',NULL),
     (11,11,10,11,'','','',JSON_OBJECT(),'draft',NULL),
     (12,12,10,12,'','','',JSON_OBJECT(),'draft',NULL),
     (13,13,10,10,'','','',JSON_OBJECT(),'released','2026-01-02');
@@ -48,10 +52,12 @@ done
     (11,11,'fremd','Fremdes Mitglied');
   INSERT INTO report_crew(report_id,member_id) VALUES(10,10),(10,11);"
 "${compose[@]}" run --rm migrate
-# Bestandsrevisionen starten bei eins und dürfen bei wiederholtem Migrationslauf nicht zurückgesetzt werden.
+# Der Snapshot-Backfill erhöht Bestandsrevisionen einmal; spätere Stammdatenänderungen dürfen weder Namen noch Revisionen zurücksetzen.
 "${compose[@]}" exec -T db mysql --user=root -ptest-password einsatzberichte --execute="
   UPDATE reports SET revision=7 WHERE id=10;
-  UPDATE incidents SET revision=9 WHERE id=10;"
+  UPDATE incidents SET revision=9 WHERE id=10;
+  UPDATE users SET name='Heute umbenannte Führungskraft' WHERE id=10;
+  UPDATE members SET name='Heute umbenanntes Mitglied' WHERE id=10;"
 "${compose[@]}" exec -T db mysql --user=root -ptest-password einsatzberichte \
   --execute="DELETE FROM schema_migrations WHERE name='001-report-workflow-and-vehicles.sql'"
 "${compose[@]}" run --rm migrate
@@ -73,7 +79,18 @@ result="$("${compose[@]}" exec -T db mysql --user=root -ptest-password --batch -
     (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='member_units' AND column_name='active'),'|',
     (SELECT CONCAT(COUNT(*),':',COALESCE(MAX(active),9)) FROM member_units WHERE member_id=10 AND unit_id=10)
   )")"
-test "$result" = '1|1|author_draft,unit_review,wehr_review,wehr_review|4|1|1|1|1|7,1,1,1|9,1,1,1|1|1|1:0'
+test "$result" = '1|1|author_draft,unit_review,wehr_review,wehr_review|4|1|1|1|1|7,2,2,2|9,2,2,2|1|1|1:0'
+
+# Migration 005 bewahrt heutige Namen, synchronisiert Zusammenfassungen und übernimmt keine Namen aus Fremdmandanten.
+test "$("${compose[@]}" exec -T db mysql --default-character-set=utf8mb4 --user=root -ptest-password --batch --skip-column-names einsatzberichte --execute="
+  SELECT CONCAT(
+    (SELECT COUNT(*) FROM schema_migrations WHERE name='005-historical-report-snapshots.sql'),'|',
+    (SELECT SUM(report_data_frozen) FROM incidents WHERE id BETWEEN 10 AND 13),'|',
+    (SELECT author_name FROM reports WHERE id=10),'|',
+    (SELECT personnel FROM reports WHERE id=10),'|',
+    (SELECT member_name FROM report_crew WHERE report_id=10 AND member_id=10),'|',
+    (SELECT member_name='' FROM report_crew WHERE report_id=10 AND member_id=11)
+  )")" = '1|4|Führungskraft|Historisches Mitglied|Historisches Mitglied|1'
 
 # Migration 002 stellt keine historische Einheitszuordnung über Mandantengrenzen hinweg her.
 test "$("${compose[@]}" exec -T db mysql --user=root -ptest-password --batch --skip-column-names einsatzberichte \

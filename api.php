@@ -30,6 +30,12 @@ function databaseConfigurationError(): ?string
              AND table_name IN ('incidents','reports') AND column_name='revision'"
         )->fetchColumn();
         if ((int)$revisionColumns !== 2) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
+        $nameColumns = db()->query(
+            "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND is_nullable='NO'
+             AND ((table_name='reports' AND column_name='author_name') OR (table_name='report_crew' AND column_name='member_name')
+               OR (table_name='incidents' AND column_name='report_data_frozen'))"
+        )->fetchColumn();
+        if ((int)$nameColumns !== 3) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
     } catch (PDOException $error) {
         error_log((string)$error);
         return 'Datenbankverbindung fehlgeschlagen. Prüfen Sie DSN, Benutzername, Passwort und Erreichbarkeit.';
@@ -318,10 +324,11 @@ function unitStatistics(array $user, string $fromValue, string $toValue): array
     if ($reportIds) {
         $placeholders = implode(',', array_fill(0, count($reportIds), '?'));
         foreach (query(
-            "SELECT rc.report_id,m.id,m.name FROM report_crew rc
+            "SELECT rc.report_id,m.id,rc.member_name name FROM report_crew rc
              JOIN members m ON m.id=rc.member_id
+             JOIN reports r ON r.id=rc.report_id JOIN incidents i ON i.id=r.incident_id
              WHERE rc.report_id IN ($placeholders) AND m.organization_id=?
-             ORDER BY m.name,m.id,rc.report_id",
+             ORDER BY i.started_at,r.id,m.id",
             array_merge($reportIds, [$user['organization_id']])
         )->fetchAll() as $member) {
             $id = (int)$member['id'];
@@ -428,7 +435,7 @@ function visibleIncidentReports(int $incidentId, array $user): array
     $where = " AND $visibility";
     $params = array_merge([$incidentId, $user['organization_id']], $visibilityParams);
     $rows = query(
-        "SELECT r.*,u.name author_name,un.name unit_name FROM reports r
+        "SELECT r.*,un.name unit_name FROM reports r
          JOIN incidents i ON i.id=r.incident_id
          JOIN users u ON u.id=r.author_id AND u.organization_id=i.organization_id
          JOIN units un ON un.id=r.unit_id AND un.organization_id=i.organization_id
@@ -437,7 +444,7 @@ function visibleIncidentReports(int $incidentId, array $user): array
     )->fetchAll();
     $crew = [];
     foreach (query(
-        "SELECT rc.report_id reportId,rc.member_id memberId,m.name,rc.vehicle,rc.role
+        "SELECT rc.report_id reportId,rc.member_id memberId,rc.member_name name,rc.vehicle,rc.role
          FROM report_crew rc JOIN members m ON m.id=rc.member_id JOIN reports r ON r.id=rc.report_id
          JOIN incidents i ON i.id=r.incident_id AND m.organization_id=i.organization_id
          WHERE r.incident_id=? AND i.organization_id=?$where ORDER BY rc.report_id,rc.member_id",
@@ -804,7 +811,7 @@ function replaceCrew(
         [$organizationId, $unitId, $reportId]
     )->fetchAll() as $member) $members[(int)$member['id']] = $member;
     $existingCrew = [];
-    foreach (query('SELECT member_id,vehicle,role FROM report_crew WHERE report_id=?', [$reportId])->fetchAll() as $item) {
+    foreach (query('SELECT member_id,member_name,vehicle,role FROM report_crew WHERE report_id=?', [$reportId])->fetchAll() as $item) {
         $existingCrew[(int)$item['member_id']] = $item;
     }
     $seen = $occupied = $rows = [];
@@ -830,12 +837,13 @@ function replaceCrew(
         }
         $seen[$memberId] = true;
         if ($slot) $occupied[$slot] = true;
-        $rows[] = compact('memberId', 'vehicle', 'role') + ['name' => $members[$memberId]['name']];
+        $rows[] = compact('memberId', 'vehicle', 'role') + ['name' => $existingCrew[$memberId]['member_name'] ?? $members[$memberId]['name']];
     }
+    usort($rows, fn($left, $right) => $left['memberId'] <=> $right['memberId']);
     query('DELETE FROM report_crew WHERE report_id=?', [$reportId]);
     foreach ($rows as $row) query(
-        'INSERT INTO report_crew(report_id,member_id,vehicle,role) VALUES(?,?,?,?)',
-        [$reportId, $row['memberId'], $row['vehicle'], $row['role']]
+        'INSERT INTO report_crew(report_id,member_id,member_name,vehicle,role) VALUES(?,?,?,?,?)',
+        [$reportId, $row['memberId'], $row['name'], $row['vehicle'], $row['role']]
     );
     return [
         'vehicles' => implode(', ', array_values(array_unique(array_filter(array_column($rows, 'vehicle'))))),
@@ -1078,46 +1086,88 @@ function syncDiveraMembers(array $cluster, int $unitId, int $organizationId): ar
 function persistDiveraAlarm(array $alarm, int $unitId, array $user): array
 {
     $diveraId = required($alarm['id'] ?? null, 'DIVERA-ID', 200);
+    $fields = [
+        'foreign_id' => optional($alarm['foreignId'] ?? '', 'Einsatznummer', 200),
+        'divera_date' => finiteNumber($alarm['date'] ?? null, 'Alarmierungszeit'),
+        'title' => required($alarm['title'] ?? null, 'Stichwort', 300),
+        'started_at' => required($alarm['startedAt'] ?? null, 'Zeitpunkt', 100),
+        'message' => optional($alarm['text'] ?? '', 'Meldung'),
+        'address' => optional($alarm['address'] ?? '', 'Adresse', 500),
+        'lat' => finiteNumber($alarm['lat'] ?? null, 'Breitengrad'),
+        'lng' => finiteNumber($alarm['lng'] ?? null, 'Längengrad'),
+        'remark' => optional($alarm['remark'] ?? '', 'Bemerkung'),
+        'patient' => optional($alarm['patient'] ?? '', 'Patient'),
+        'caller' => optional($alarm['caller'] ?? '', 'Meldende Person'),
+    ];
     $saved = query(
         'INSERT INTO incidents(organization_id,divera_id,foreign_id,divera_date,title,started_at,message,address,lat,lng,remark,patient,caller,consolidated_text)
          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)',
-        [$user['organization_id'], $diveraId, optional($alarm['foreignId'] ?? '', 'Einsatznummer', 200),
-         finiteNumber($alarm['date'] ?? null, 'Alarmierungszeit'), required($alarm['title'] ?? null, 'Stichwort', 300),
-         required($alarm['startedAt'] ?? null, 'Zeitpunkt', 100), optional($alarm['text'] ?? '', 'Meldung'),
-         optional($alarm['address'] ?? '', 'Adresse', 500), finiteNumber($alarm['lat'] ?? null, 'Breitengrad'),
-         finiteNumber($alarm['lng'] ?? null, 'Längengrad'), optional($alarm['remark'] ?? '', 'Bemerkung'),
-         optional($alarm['patient'] ?? '', 'Patient'), optional($alarm['caller'] ?? '', 'Meldende Person'), '']
+        [$user['organization_id'], $diveraId, ...array_values($fields), '']
     );
     $incidentId = (int)db()->lastInsertId();
     $newIncident = $saved->rowCount() === 1;
-    if (!$newIncident) query(
-        'UPDATE incidents SET foreign_id=?,divera_date=?,title=?,started_at=?,message=?,address=?,lat=?,lng=?,remark=?,patient=?,caller=?,revision=revision+1 WHERE id=?',
-        [optional($alarm['foreignId'] ?? '', 'Einsatznummer', 200), finiteNumber($alarm['date'] ?? null, 'Alarmierungszeit'),
-         required($alarm['title'] ?? null, 'Stichwort', 300), required($alarm['startedAt'] ?? null, 'Zeitpunkt', 100),
-         optional($alarm['text'] ?? '', 'Meldung'), optional($alarm['address'] ?? '', 'Adresse', 500),
-         finiteNumber($alarm['lat'] ?? null, 'Breitengrad'), finiteNumber($alarm['lng'] ?? null, 'Längengrad'),
-         optional($alarm['remark'] ?? '', 'Bemerkung'), optional($alarm['patient'] ?? '', 'Patient'),
-         optional($alarm['caller'] ?? '', 'Meldende Person'), $incidentId]
-    );
-    $vehicles = json_encode(vehicleSnapshots($alarm['vehicles'] ?? []), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    // The first report sets this marker under the same parent lock, also across concurrent inserts.
+    $current = one('SELECT * FROM incidents WHERE id=? AND organization_id=? FOR UPDATE', [$incidentId, $user['organization_id']]);
+    $frozen = (bool)$current['report_data_frozen'];
+    $different = false;
+    foreach ($fields as $key => $value) {
+        $previous = $current[$key];
+        if (is_int($value) || is_float($value)) {
+            if ($previous === null || (float)$previous !== (float)$value) $different = true;
+        } elseif ($previous !== $value) {
+            $different = true;
+        }
+    }
+    $changed = false;
+    $ignoredChanges = [];
+    if ($different) {
+        if ($frozen) {
+            $ignoredChanges[] = 'Einsatzdaten';
+        } else {
+            query(
+                'UPDATE incidents SET foreign_id=?,divera_date=?,title=?,started_at=?,message=?,address=?,lat=?,lng=?,remark=?,patient=?,caller=? WHERE id=?',
+                [...array_values($fields), $incidentId]
+            );
+            $changed = true;
+        }
+    }
+    $snapshot = vehicleSnapshots($alarm['vehicles'] ?? []);
+    $vehicles = json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
     $assignment = query(
         'INSERT IGNORE INTO incident_units(incident_id,unit_id,vehicles) VALUES(?,?,?)',
         [$incidentId, $unitId, $vehicles]
     );
     $newAssignment = $assignment->rowCount() === 1;
-    if ($newAssignment) query('UPDATE incidents SET consolidated_at=NULL WHERE id=?', [$incidentId]);
-    if (!$newAssignment) query(
-        'UPDATE incident_units SET vehicles=? WHERE incident_id=? AND unit_id=?',
-        [$vehicles, $incidentId, $unitId]
-    );
-    // The incident upsert holds the parent lock before any report lock.
-    if (!$newIncident) query('UPDATE reports SET revision=revision+1 WHERE incident_id=? ORDER BY id', [$incidentId]);
+    if (!$newAssignment) {
+        $existing = one('SELECT vehicles FROM incident_units WHERE incident_id=? AND unit_id=? FOR UPDATE', [$incidentId, $unitId]);
+        $before = array_map('json_encode', vehicleSnapshots(json_decode($existing['vehicles'], true, 512, JSON_THROW_ON_ERROR)));
+        $after = array_map('json_encode', $snapshot);
+        sort($before, SORT_STRING);
+        sort($after, SORT_STRING);
+        if ($before !== $after) {
+            if ($frozen) {
+                $ignoredChanges[] = 'Fahrzeugliste';
+            } else {
+                query('UPDATE incident_units SET vehicles=? WHERE incident_id=? AND unit_id=?', [$vehicles, $incidentId, $unitId]);
+                $changed = true;
+            }
+        }
+    }
+    $changed = $changed || $newAssignment;
+    if (!$newIncident && $changed) query('UPDATE incidents SET revision=revision+1,consolidated_at=NULL WHERE id=?', [$incidentId]);
     query(
         'INSERT INTO divera_imports(unit_id,incident_id,imported_by,imported_at) VALUES(?,?,?,UTC_TIMESTAMP())',
         [$unitId, $incidentId, $user['id']]
     );
-    return ['id' => $incidentId, 'newIncident' => $newIncident, 'newAssignment' => $newAssignment];
+    return ['id' => $incidentId, 'newIncident' => $newIncident, 'newAssignment' => $newAssignment, 'changed' => $changed, 'ignoredChanges' => $ignoredChanges];
+}
+
+function diveraImportWarning(array $import): ?string
+{
+    if (!$import['ignoredChanges']) return null;
+    return 'Einsatz #' . $import['id'] . ': Abweichende DIVERA-Daten (' . implode(', ', $import['ignoredChanges'])
+        . ') wurden nicht übernommen. Seit dem ersten Einheitsbericht bleiben Einsatzdaten und bestehende Fahrzeuglisten historisch erhalten.';
 }
 
 try {
@@ -1518,7 +1568,7 @@ try {
         $assignmentParams = $user['role'] === 'wehrleitung' ? $params : array_merge([$user['id']], $params);
         foreach (query(
             "SELECT iu.incident_id,iu.unit_id unitId,iu.vehicles,u.name unitName,
-             r.id IS NOT NULL hasReport,r.status reportStatus,r.author_id reportAuthorId,author.name reportAuthorName
+             r.id IS NOT NULL hasReport,r.status reportStatus,r.author_id reportAuthorId,r.author_name reportAuthorName
              FROM incident_units iu JOIN incidents i ON i.id=iu.incident_id JOIN units u ON u.id=iu.unit_id AND u.organization_id=i.organization_id
              $membershipJoin
              LEFT JOIN reports r ON r.incident_id=iu.incident_id AND r.unit_id=iu.unit_id
@@ -1680,9 +1730,9 @@ try {
             $details = reportDetails($data, $foundIncident);
             $status = reportStatusForRole($user['role']);
             query(
-                'INSERT INTO reports(incident_id,unit_id,author_id,report_year,running_number,damaged_party,damaging_party,incident_command,narrative,alarmed_at,departed_at,arrived_at,ended_at,incident_type,classification,vehicles,personnel,status,released_at)
-                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                [$incidentId, $unitId, $user['id'], $details['reportYear'], $details['runningNumber'],
+                'INSERT INTO reports(incident_id,unit_id,author_id,author_name,report_year,running_number,damaged_party,damaging_party,incident_command,narrative,alarmed_at,departed_at,arrived_at,ended_at,incident_type,classification,vehicles,personnel,status,released_at)
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                [$incidentId, $unitId, $user['id'], $user['name'], $details['reportYear'], $details['runningNumber'],
                  $details['damagedParty'], $details['damagingParty'], $details['incidentCommand'], required($data['narrative'] ?? null, 'Bericht'),
                  $details['alarmedAt'], $details['departedAt'], $details['arrivedAt'], $details['endedAt'],
                  $details['incidentType'], $details['classification'], '', '', $status,
@@ -1702,7 +1752,7 @@ try {
                 'INSERT INTO report_transitions(report_id,from_status,to_status,actor_id,actor_name,actor_role,created_at) VALUES(?,NULL,?,?,?,?,UTC_TIMESTAMP())',
                 [$id, $status, $user['id'], $user['name'], $user['role']]
             );
-            query('UPDATE incidents SET revision=revision+1,consolidated_at=NULL WHERE id=?', [$incidentId]);
+            query('UPDATE incidents SET revision=revision+1,report_data_frozen=1,consolidated_at=NULL WHERE id=?', [$incidentId]);
             return $id;
         });
         respond(201, ['id' => $id]);
@@ -1842,11 +1892,16 @@ try {
         $data = diveraData($foundUnit, true, $cluster);
         usort($data['alarms'], fn($left, $right) => strcmp($left['id'], $right['id']));
         $result = transaction(function () use ($cluster, $data, $unitId, $user) {
-            $counts = ['incidentsCreated' => 0, 'incidentsUpdated' => 0, 'assignmentsCreated' => 0, 'notifications' => []];
+            $counts = ['incidentsCreated' => 0, 'incidentsUpdated' => 0, 'incidentsUnchanged' => 0, 'incidentsWithDifferences' => 0,
+                'assignmentsCreated' => 0, 'notifications' => [], 'importWarnings' => []];
             // Upserts also lock concurrently created incidents, before any member/vehicle locks.
             foreach ($data['alarms'] as $alarm) {
                 $import = persistDiveraAlarm($alarm, $unitId, $user);
-                $counts[$import['newIncident'] ? 'incidentsCreated' : 'incidentsUpdated']++;
+                $counts[$import['newIncident'] ? 'incidentsCreated' : ($import['changed'] ? 'incidentsUpdated' : 'incidentsUnchanged')]++;
+                if ($warning = diveraImportWarning($import)) {
+                    $counts['incidentsWithDifferences']++;
+                    $counts['importWarnings'][] = $warning;
+                }
                 if ($import['newAssignment']) {
                     $counts['assignmentsCreated']++;
                     $counts['notifications'][] = $import['id'];
@@ -1860,8 +1915,9 @@ try {
         foreach ($result['notifications'] as $incidentId) {
             if (sendWorkflowNotification('incident_imported', $incidentId, [$unitId], $user)) $warnings++;
         }
-        unset($result['notifications']);
-        if ($warnings) $result['warning'] = 'Die Synchronisation wurde gespeichert, aber nicht alle Benachrichtigungs-E-Mails konnten versendet werden.';
+        if ($warnings) $result['importWarnings'][] = 'Die Synchronisation wurde gespeichert, aber nicht alle Benachrichtigungs-E-Mails konnten versendet werden.';
+        if ($result['importWarnings']) $result['warning'] = implode(' ', $result['importWarnings']);
+        unset($result['notifications'], $result['importWarnings']);
         respond(200, $result);
     }
 
@@ -1883,7 +1939,8 @@ try {
         $warning = $import['newAssignment']
             ? sendWorkflowNotification('incident_imported', $import['id'], [$unitId], $user)
             : null;
-        respond(201, ['id' => $import['id']] + ($warning ? ['warning' => $warning] : []));
+        $warnings = array_filter([diveraImportWarning($import), $warning]);
+        respond(201, ['id' => $import['id']] + ($warnings ? ['warning' => implode(' ', $warnings)] : []));
     }
 
     respond(404, ['error' => 'Nicht gefunden']);

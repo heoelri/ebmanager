@@ -595,15 +595,15 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
       (@i3,1,JSON_ARRAY('TLF Statistik')),(@i4,1,JSON_ARRAY()),
       (@winter_outside,1,JSON_ARRAY()),(@winter_midnight,1,JSON_ARRAY()),
       (@i1,$second_unit_id,JSON_ARRAY(JSON_OBJECT('name','Gemeinsames Fremdfahrzeug','own',TRUE)));
-    INSERT INTO reports(incident_id,unit_id,author_id,narrative,vehicles,personnel,classification) VALUES
-      (@i1,1,@leader_id,'Statistik','','',JSON_OBJECT()),(@i2,1,@leader_id,'Statistik','','',JSON_OBJECT()),
-      (@i1,$second_unit_id,1,'Fremder Einheitsbericht','','',JSON_OBJECT());
+    INSERT INTO reports(incident_id,unit_id,author_id,author_name,narrative,vehicles,personnel,classification) VALUES
+      (@i1,1,@leader_id,'Einheitsleitung Eins','Statistik','','',JSON_OBJECT()),(@i2,1,@leader_id,'Einheitsleitung Eins','Statistik','','',JSON_OBJECT()),
+      (@i1,$second_unit_id,1,'Wehrführung','Fremder Einheitsbericht','','',JSON_OBJECT());
     SET @r1=LAST_INSERT_ID(); SET @r2=@r1+1;
     SET @foreign_report=@r1+2;
     INSERT INTO members(organization_id,divera_id,name) VALUES(1,'statistics-active','Aktives Statistikmitglied'),(1,'statistics-inactive','Historisches Statistikmitglied'),(1,'statistics-foreign-unit','Fremdes Statistikmitglied');
     SET @m1=LAST_INSERT_ID(); SET @m2=@m1+1; SET @foreign_member=@m1+2;
     INSERT INTO member_units(member_id,unit_id,active) VALUES(@m1,1,TRUE),(@m2,1,FALSE),(@foreign_member,$second_unit_id,TRUE);
-    INSERT INTO report_crew(report_id,member_id,vehicle,role) VALUES(@r1,@m1,'LF 20 Statistik','maschinist'),(@r1,@m2,'','besatzung'),(@foreign_report,@foreign_member,'','besatzung');
+    INSERT INTO report_crew(report_id,member_id,member_name,vehicle,role) VALUES(@r1,@m1,'Aktives Statistikmitglied','LF 20 Statistik','maschinist'),(@r1,@m2,'Historisches Statistikmitglied','','besatzung'),(@foreign_report,@foreign_member,'Fremdes Statistikmitglied','','besatzung');
     INSERT INTO report_additional_vehicles(report_id,vehicle) VALUES(@r1,'ELW Statistik');
     INSERT INTO organizations(name) VALUES('Fremde Statistikwehr'); SET @foreign_org=LAST_INSERT_ID();
     INSERT INTO units(organization_id,name) VALUES(@foreign_org,'Fremde Einheit'); SET @foreign_unit=LAST_INSERT_ID();
@@ -854,7 +854,7 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
     INSERT INTO users(id,organization_id,unit_id,name,email,password_hash,role) VALUES(900,900,NULL,'Fremde Wehrführung','fremd@example.test','x','wehrleitung');
     INSERT INTO incidents(id,organization_id,title,started_at,address,message,remark,patient,caller,consolidated_text,consolidated_at) VALUES(900,900,'Fremder Einsatz','2026-08-22T18:00:00.000Z','','','','','','Fremd konsolidiert',UTC_TIMESTAMP());
     INSERT INTO incident_units(incident_id,unit_id,vehicles) VALUES(900,900,JSON_ARRAY());
-    INSERT INTO reports(id,incident_id,unit_id,author_id,narrative,vehicles,personnel,classification,status) VALUES(900,900,900,900,'Fremder Bericht','','',JSON_OBJECT(),'wehr_review');
+    INSERT INTO reports(id,incident_id,unit_id,author_id,author_name,narrative,vehicles,personnel,classification,status) VALUES(900,900,900,900,'Fremde Wehrführung','Fremder Bericht','','',JSON_OBJECT(),'wehr_review');
     INSERT INTO report_transitions(report_id,from_status,to_status,actor_id,actor_name,actor_role,created_at) VALUES(900,NULL,'wehr_review',900,'Fremde Wehrführung','wehrleitung',UTC_TIMESTAMP())"
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/incidents/900/pdf")" = 404
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/reports/900/pdf")" = 404
@@ -872,7 +872,7 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' -
 
 # Besatzungsmitglieder werden unabhängig von der Einfügereihenfolge stabil sortiert ausgegeben.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
-  --execute="INSERT INTO members(id,organization_id,divera_id,name) VALUES(101,1,'test-101','Person 101'),(102,1,'test-102','Person 102'); INSERT INTO member_units(member_id,unit_id) VALUES(101,1),(102,1); INSERT INTO report_crew(report_id,member_id) VALUES($report_id_int,102),($report_id_int,101)"
+  --execute="INSERT INTO members(id,organization_id,divera_id,name) VALUES(101,1,'test-101','Person 101'),(102,1,'test-102','Person 102'); INSERT INTO member_units(member_id,unit_id) VALUES(101,1),(102,1); INSERT INTO report_crew(report_id,member_id,member_name) VALUES($report_id_int,102,'Person 102'),($report_id_int,101,'Person 101')"
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$incident_id/reports" |
   php -r '$reports=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $crew=json_decode($reports[0]["crew"],true,512,JSON_THROW_ON_ERROR); assert(array_column($crew,"memberId")===[101,102]);'
 
@@ -1246,7 +1246,7 @@ BEFORE="$before_assignment" AFTER="$after_assignment" php -r '
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' --request PUT --data "$before_assignment" "$base_url/api/incidents/$imported_incident_id/consolidation")" = 409
 
-# Ein bestehender Bericht erhält durch jeden Neuimport neue Quellen- und Berichtsrevisionen, ohne seinen Inhalt zu ersetzen.
+# Bereits der erste Bericht friert die Quellen ein; identische Neuimporte lassen seine Revision und den Gesamtstand unverändert.
 import_report_payload="${base_report_payload/69\/2026/86\/2026}"
 imported_report_id=$(curl --insecure --silent --fail --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' \
   --data "$import_report_payload" "$base_url/api/incidents/$imported_incident_id/reports" |
@@ -1265,10 +1265,13 @@ after_import=$(report_data "$import_report_payload" "$force_token" "$imported_in
 BEFORE="$before_import" AFTER="$after_import" php -r '
   $before=json_decode(getenv("BEFORE"),true,512,JSON_THROW_ON_ERROR);
   $after=json_decode(getenv("AFTER"),true,512,JSON_THROW_ON_ERROR);
-  assert($after["revision"]===$before["revision"]+1);
+  assert($after["revision"]===$before["revision"]);
 '
+# Ein identischer Neuimport lässt einen geladenen Editor gültig; erst dessen echte Speicherung widerruft alte Stände.
+test "$(consolidation_data 'Vor Neuimport' "$imported_incident_id")" = "$before_import_consolidation"
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" \
-  --header 'Content-Type: application/json' --request PUT --data "$before_import" "$base_url/api/reports/$imported_report_id")" = 409
+  --header 'Content-Type: application/json' --request PUT --data "$before_import" "$base_url/api/reports/$imported_report_id")" = 200
+# Die tatsächliche Berichtsspeicherung macht eine zuvor geladene Konsolidierung weiterhin ungültig.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' --request PUT --data "$before_import_consolidation" "$base_url/api/incidents/$imported_incident_id/consolidation")" = 409
 
@@ -1277,8 +1280,8 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' -
 sync_response=$(curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
   "$base_url/api/units/1/divera/sync")
-printf '%s' "$sync_response" | php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($data["members"]===2); assert($data["qualifications"]===2); assert($data["vehicles"]===2); assert($data["incidentsCreated"]===1); assert($data["incidentsUpdated"]===1); assert($data["assignmentsCreated"]===1);'
-# Auch der Gesamtabgleich widerruft die vor ihm geladene Berichtsrevision.
+printf '%s' "$sync_response" | php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($data["members"]===2); assert($data["qualifications"]===2); assert($data["vehicles"]===2); assert($data["incidentsCreated"]===1); assert($data["incidentsUpdated"]===0); assert($data["incidentsUnchanged"]===1); assert($data["incidentsWithDifferences"]===0); assert($data["assignmentsCreated"]===1);'
+# Eine tatsächlich überschriebene Berichtsrevision bleibt auch nach einem identischen Gesamtabgleich ungültig.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" \
   --header 'Content-Type: application/json' --request PUT --data "$after_import" "$base_url/api/reports/$imported_report_id")" = 409
 test "$(grep --count '^GET /api/v2/pull/all$' "$divera_log")" = 1
@@ -1287,16 +1290,18 @@ test "$(grep --count '^GET /api/v2/alarms$' "$divera_log")" = 1
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units/1/resources" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $members=array_column($data["members"],null,"divera_id"); assert(count($members)===4); assert(count($data["vehicles"])===2); assert($members["m1"]["active"]===1 && $members["m1"]["qualifications"]==="AGT"); assert($members["m2"]["active"]===1 && $members["m2"]["qualifications"]==="MA"); assert($members["test-101"]["active"]===0 && $members["test-102"]["active"]===0);'
 
-# Ein wiederholter Gesamtabgleich aktualisiert vorhandene Einsätze ohne Duplikate.
+# Ein identischer Gesamtabgleich lässt vorhandene Einsatz- und Berichtsrevisionen unverändert, ohne Duplikate oder Abweichungen zu melden.
 : > "$divera_log"
+before_identical_sync=$(consolidation_data 'Identischer Gesamtabgleich' "$imported_incident_id")
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
   "$base_url/api/units/1/divera/sync" |
-  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($data["incidentsCreated"]===0); assert($data["incidentsUpdated"]===2); assert($data["assignmentsCreated"]===0);'
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($data["incidentsCreated"]===0); assert($data["incidentsUpdated"]===0); assert($data["incidentsUnchanged"]===2); assert($data["incidentsWithDifferences"]===0); assert($data["assignmentsCreated"]===0); assert(!isset($data["warning"]));'
+test "$(consolidation_data 'Identischer Gesamtabgleich' "$imported_incident_id")" = "$before_identical_sync"
 test "$(grep --count '^GET /api/v2/pull/all$' "$divera_log")" = 1
 test "$(grep --count '^GET /api/v2/alarms$' "$divera_log")" = 1
 
-# Ein DIVERA-Neuimport verändert den Alarm-Snapshot, entfernt aber kein zusätzlich im Bericht gespeichertes Fahrzeug.
+# Ein DIVERA-Neuimport entfernt kein zusätzlich im Bericht gespeichertes Fahrzeug.
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT COUNT(*) FROM report_additional_vehicles WHERE report_id=$report_id_int AND vehicle='Zusatzfahrzeug'")" = 1
 
@@ -1383,6 +1388,7 @@ if [[ -n "${TEST_BASE_URL:-}" ]]; then
       }
       return json_decode(substr($output,0,-4),true,512,JSON_THROW_ON_ERROR);
     };
+    // Ohne Quellenänderung gelingen beide Startreihenfolgen; nur der echte Berichtsschreibzugriff erhöht Revisionen.
     foreach(["save","create"] as $action) foreach(["report","sync"] as $first) {
       $incidentId=$action==="save" ? (int)getenv("INCIDENT_ID") : $creationIncidentId;
       $reportId=(int)getenv("REPORT_ID");
@@ -1412,17 +1418,16 @@ if [[ -n "${TEST_BASE_URL:-}" ]]; then
         $requests[$second]=$second==="report" ? $reportRequest() : $syncRequest();
         $wait($firstTransaction,"incidents",$incidentId);
         db()->commit();
-        $expected=$action==="create" ? 201 : ($first==="report" ? 200 : 409);
+        $expected=$action==="create" ? 201 : 200;
         $saved=$finish($requests["report"],$expected);
         unset($requests["report"]);
         $synced=$finish($requests["sync"],200);
         unset($requests["sync"]);
-        assert($synced["incidentsUpdated"]===2 && $synced["incidentsCreated"]===0);
+        assert($synced["incidentsUpdated"]===0 && $synced["incidentsCreated"]===0 && $synced["incidentsUnchanged"]===2 && $synced["incidentsWithDifferences"]===0);
         if($action==="create") $reportId=(int)$saved["id"];
         $stored=one("SELECT narrative,revision FROM reports WHERE id=?",[$reportId]);
-        $expectedNarrative=$expected===409 ? $before["narrative"] : $payload["narrative"];
-        $expectedRevision=$action==="create" ? ($first==="report" ? 2 : 1) : (int)$before["revision"]+($first==="report" ? 2 : 1);
-        assert($stored["narrative"]===$expectedNarrative && (int)$stored["revision"]===$expectedRevision);
+        $expectedRevision=$action==="create" ? 1 : (int)$before["revision"]+1;
+        assert($stored["narrative"]===$payload["narrative"] && (int)$stored["revision"]===$expectedRevision);
         assert((int)query("SELECT COUNT(*) FROM report_crew WHERE report_id=? AND member_id=? AND vehicle=? AND role=?",
           [$reportId,$memberId,"","besatzung"])->fetchColumn()===1);
         if($action==="create") query("DELETE FROM reports WHERE id=? AND incident_id=?",[$reportId,$incidentId]);
@@ -1460,7 +1465,7 @@ if [[ -n "${TEST_BASE_URL:-}" ]]; then
       db()->commit();
       $synced=$finish($requests["sync"],200);
       unset($requests["sync"]);
-      assert($synced["incidentsUpdated"]===2 && $synced["incidentsCreated"]===0);
+      assert($synced["incidentsUpdated"]===1 && $synced["incidentsCreated"]===0 && $synced["incidentsUnchanged"]===1 && $synced["incidentsWithDifferences"]===0);
       assert((int)query("SELECT COUNT(*) FROM report_crew WHERE report_id=? AND member_id=?",[$created["id"],$memberId])->fetchColumn()===1);
       query("DELETE FROM reports WHERE id=? AND incident_id=?",[$created["id"],$unrelatedIncidentId]);
     } finally {
@@ -1474,10 +1479,14 @@ if [[ -n "${TEST_BASE_URL:-}" ]]; then
   '
 fi
 
-# Fehlerhafte DIVERA-Antworten brechen den Abgleich ab, ohne bestehende Stammdaten zu verändern.
+# Fehlerhafte Stammdaten rollen auch eine zuvor wirklich geänderte, noch nicht historisierte Alarmquelle zurück.
 before_failed_sync=$(consolidation_data 'Unverändert' "$imported_incident_id")
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
-  --execute="UPDATE units SET divera_access_key='malformed' WHERE id=1"
+  --execute="UPDATE units SET divera_access_key='malformed' WHERE id=1;
+    UPDATE incidents SET title='Vor fehlerhaftem Abgleich' WHERE organization_id=1 AND divera_id='alarm-2'"
+before_failed_alarm=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT CONCAT(title,'|',revision,'|',report_data_frozen) FROM incidents WHERE organization_id=1 AND divera_id='alarm-2'")
+test "${before_failed_alarm##*|}" = 0
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
   "$base_url/api/units/1/divera/sync")" = 502
@@ -1485,10 +1494,12 @@ test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-characte
   einsatzberichte --execute="SELECT CONCAT((SELECT COUNT(*) FROM vehicles WHERE unit_id=1),'|',(SELECT COUNT(*) FROM member_units WHERE unit_id=1))")" = '2|4'
 # Auch die bereits vor den Stammdaten ausgeführten Importe und Revisionserhöhungen werden bei einem Abgleichfehler zurückgerollt.
 test "$(consolidation_data 'Unverändert' "$imported_incident_id")" = "$before_failed_sync"
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT CONCAT(title,'|',revision,'|',report_data_frozen) FROM incidents WHERE organization_id=1 AND divera_id='alarm-2'")" = "$before_failed_alarm"
 
 # Nicht mehr gelieferte Mitglieder werden inaktiv, bleiben in historischen Berichten und sind nicht neu auswählbar.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
-  --execute="INSERT IGNORE INTO report_crew(report_id,member_id) SELECT $report_id_int,id FROM members WHERE organization_id=1 AND divera_id='m2';
+  --execute="INSERT IGNORE INTO report_crew(report_id,member_id,member_name) SELECT $report_id_int,id,name FROM members WHERE organization_id=1 AND divera_id='m2';
     UPDATE units SET divera_access_key='reduced' WHERE id=1"
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
@@ -1548,6 +1559,176 @@ if [[ -z "${TEST_BASE_URL:-}" ]]; then
     --execute="DELETE FROM password_resets WHERE user_id=$admin_user_id"
   rm -f reset-messages.log
 fi
+
+# Historische Quellen und Namen bleiben ab dem ersten Bericht stabil; verworfene Abweichungen werden ohne fremde Inhaltskopien gemeldet.
+historical_ids=$(FORCE_COOKIE="$session_cookie=$force_token" COMMAND_COOKIE="$session_cookie=$session_token" \
+  LEADER_COOKIE="$session_cookie=$leader_token" OTHER_COOKIE="$session_cookie=$other_force_token" \
+  SECOND_UNIT_ID="$second_unit_id" API_BASE_URL="$base_url" php -r '
+  require "support.php";
+  $call=function(string $path, string $method="GET", ?array $payload=null, ?string $cookie=null, int $expected=200): array {
+    $context=stream_context_create(["ssl"=>["verify_peer"=>false,"verify_peer_name"=>false],
+      "http"=>["method"=>$method,"timeout"=>20,"ignore_errors"=>true,
+        "header"=>"Content-Type: application/json\r\nCookie: ".($cookie ?? getenv("FORCE_COOKIE"))."\r\n",
+        "content"=>$payload===null ? "" : json_encode($payload,JSON_THROW_ON_ERROR)]]);
+    $stream=fopen(getenv("API_BASE_URL").$path,"r",false,$context);
+    if(!$stream) throw new RuntimeException("Testanfrage konnte nicht geöffnet werden");
+    $body=stream_get_contents($stream);
+    $status=(int)explode(" ",stream_get_meta_data($stream)["wrapper_data"][0])[1];
+    fclose($stream);
+    assert($status===$expected,"$method $path: erwartet $expected, erhalten $status: $body");
+    return json_decode($body,true,512,JSON_THROW_ON_ERROR);
+  };
+  $command=getenv("COMMAND_COOKIE");
+  $leader=getenv("LEADER_COOKIE");
+  $setKey=fn($key,$unit=1)=>$call("/api/units/$unit/divera","PUT",["accessKey"=>$key],$command);
+  $import=fn($unit=1)=>$call("/api/units/$unit/divera/import","POST",["id"=>"historical-89"],$command,201);
+  $state=fn($id)=>[
+    "incident"=>one("SELECT * FROM incidents WHERE id=? AND organization_id=1",[$id]),
+    "assignments"=>query("SELECT * FROM incident_units WHERE incident_id=? ORDER BY unit_id",[$id])->fetchAll(),
+    "reports"=>query("SELECT * FROM reports WHERE incident_id=? ORDER BY id",[$id])->fetchAll(),
+    "crew"=>query("SELECT rc.* FROM report_crew rc JOIN reports r ON r.id=rc.report_id WHERE r.incident_id=? ORDER BY rc.report_id,rc.member_id",[$id])->fetchAll(),
+    "additional"=>query("SELECT av.* FROM report_additional_vehicles av JOIN reports r ON r.id=av.report_id WHERE r.incident_id=? ORDER BY av.report_id,av.vehicle",[$id])->fetchAll(),
+    "history"=>query("SELECT rt.* FROM report_transitions rt JOIN reports r ON r.id=rt.report_id WHERE r.incident_id=? ORDER BY rt.id",[$id])->fetchAll()
+  ];
+  $readReport=fn($id)=>$call("/api/incidents/$id/reports")[0];
+  $aggregate=function($id) use($call,$command): array {
+    $matches=array_values(array_filter($call("/api/incidents","GET",null,$command),fn($row)=>$row["id"]===$id));
+    assert(count($matches)===1);
+    return ["revision"=>$matches[0]["revision"],"text"=>"Historischer Gesamtbericht 89",
+      "reportVersions"=>array_map(fn($row)=>["id"=>$row["id"],"revision"=>$row["revision"]],$call("/api/incidents/$id/reports","GET",null,$command))];
+  };
+  $warn=function(array $result, int $id): void {
+    assert(str_contains($result["warning"],"Einsatz #$id:"));
+    assert(str_contains($result["warning"],"Einsatzdaten") && str_contains($result["warning"],"nicht übernommen"));
+    assert(!str_contains(json_encode($result,JSON_THROW_ON_ERROR),"Quellpatient"));
+    assert(!str_contains(json_encode($result,JSON_THROW_ON_ERROR),"Quellmelder"));
+  };
+
+  // Vor dem ersten Bericht werden echte Quellen-/Fahrzeugänderungen genau einmal übernommen.
+  $setKey("historical-before");
+  $id=$import()["id"];
+  $before=$state($id);
+  assert((int)$before["incident"]["report_data_frozen"]===0);
+  $setKey("historical-updated");
+  assert(!isset($import()["warning"]));
+  $updated=$state($id);
+  assert((int)$updated["incident"]["revision"]===(int)$before["incident"]["revision"]+1);
+  assert($updated["incident"]["started_at"]==="2026-12-31T22:45:00.000Z" && $updated["incident"]["title"]==="Historischer Einsatz");
+  assert(count(json_decode($updated["assignments"][0]["vehicles"],true,512,JSON_THROW_ON_ERROR))===2);
+  assert(!isset($import()["warning"]) && $state($id)===$updated);
+  $call("/api/units/1/divera/members/sync","POST",[],$command);
+  $call("/api/units/1/divera/vehicles/sync","POST",[],$command);
+  $anna=(int)one("SELECT id FROM members WHERE organization_id=1 AND divera_id=?",["m1"])["id"];
+  $bernd=(int)one("SELECT id FROM members WHERE organization_id=1 AND divera_id=?",["m2"])["id"];
+  $payload=["unitId"=>1,"runningNumber"=>"89/Archiv","narrative"=>"Historischer Bericht 89",
+    "endedAt"=>"2027-01-01T02:00:00.000Z","incidentType"=>"Technische Hilfe","classification"=>[],
+    "additionalVehicles"=>["Reserve Historisch"],"crew"=>[["memberId"=>$anna,"vehicle"=>"HLF 20","role"=>"besatzung","name"=>"Manipuliert"]]];
+  $reportId=$call("/api/incidents/$id/reports","POST",$payload,null,201)["id"];
+  $frozen=$state($id);
+  assert((int)$frozen["incident"]["report_data_frozen"]===1 && (int)$frozen["reports"][0]["report_year"]===2026);
+  assert($frozen["reports"][0]["status"]==="author_draft" && $frozen["reports"][0]["personnel"]==="Anna Beispiel");
+
+  // Dieselbe Nummer ist im Folgejahr belegt; ein verworfener Jahreswechsel darf weder Alarmzeit noch Berichtsjahr verschieben.
+  $next=$call("/api/incidents","POST",["title"=>"Jahresnummernvergleich","startedAt"=>"2026-12-31T23:30:00.000Z","unitIds"=>[1]],$command,201)["id"];
+  $nextPayload=$payload;
+  $nextPayload["crew"]=$nextPayload["additionalVehicles"]=[];
+  $call("/api/incidents/$next/reports","POST",$nextPayload,null,201);
+  assert($readReport($next)["report_year"]===2027);
+  $setKey("historical-after");
+  $warning=$import();
+  $warn($warning,$id);
+  assert(str_contains($warning["warning"],"Fahrzeugliste") && $state($id)===$frozen);
+  $payload["revision"]=$readReport($id)["revision"];
+  $call("/api/reports/$reportId","PUT",$payload);
+  assert($readReport($id)["report_year"]===2026 && $readReport($id)["alarmed_at"]==="2026-12-31T22:45:00.000Z");
+
+  // Konto-/Stammdatenänderungen ändern weder historischen Autor noch bestehende Besatzung, Zusammenfassungen oder Übergangsakteure.
+  $force=one("SELECT id,name,email,role FROM users WHERE organization_id=1 AND email=?",["fuehrungskraft@example.test"]);
+  $call("/api/users/".$force["id"],"PUT",["name"=>"Führungskraft Heute","email"=>$force["email"],"role"=>$force["role"],"unitIds"=>[1]],$command);
+  $setKey("historical-renamed");
+  $namesBefore=$state($id);
+  $call("/api/units/1/divera/members/sync","POST",[],$command);
+  $call("/api/units/1/divera/vehicles/sync","POST",[],$command);
+  assert($state($id)===$namesBefore);
+  $resources=$call("/api/units/1/resources");
+  assert(in_array("Anna Jetzt",array_column($resources["members"],"name"),true));
+  $report=$readReport($id);
+  assert($report["author_name"]===$force["name"] && $report["personnel"]==="Anna Beispiel");
+  assert($report["history"][0]["actor_name"]===$force["name"]);
+  $otherIncidents=$call("/api/incidents","GET",null,getenv("OTHER_COOKIE"));
+  $other=array_values(array_filter($otherIncidents,fn($row)=>$row["id"]===$id))[0];
+  $assignment=json_decode($other["assignments"],true,512,JSON_THROW_ON_ERROR)[0];
+  assert($assignment["reportAuthorName"]===$force["name"]);
+
+  // Beibehaltene Personen behalten ihre Namen; neu aufgenommene Personen erhalten den aktuellen serverseitigen Namen.
+  $payload["revision"]=$report["revision"];
+  $payload["crew"][]=["memberId"=>$bernd,"vehicle"=>"","role"=>"besatzung","name"=>"Manipuliert"];
+  $call("/api/reports/$reportId","PUT",$payload);
+  $report=$readReport($id);
+  assert($report["personnel"]==="Anna Beispiel, Bernd Jetzt");
+  assert(array_column(json_decode($report["crew"],true,512,JSON_THROW_ON_ERROR),"name")===["Anna Beispiel","Bernd Jetzt"]);
+  query("UPDATE members SET name=? WHERE id=? AND organization_id=1",["Bernd Später",$bernd]);
+  $payload["revision"]=$report["revision"];
+  $call("/api/reports/$reportId","PUT",$payload);
+  assert($readReport($id)["personnel"]==="Anna Beispiel, Bernd Jetzt");
+  $crew=$payload["crew"];
+  $payload["crew"]=[$crew[0]];
+  $payload["revision"]=$readReport($id)["revision"];
+  $call("/api/reports/$reportId","PUT",$payload);
+  $payload["crew"]=$crew;
+  $payload["revision"]=$readReport($id)["revision"];
+  $call("/api/reports/$reportId","PUT",$payload);
+  assert($readReport($id)["personnel"]==="Anna Beispiel, Bernd Später");
+  $call("/api/reports/$reportId/submit-to-unit","POST",["revision"=>$readReport($id)["revision"]]);
+  $call("/api/reports/$reportId/submit-to-command","POST",["revision"=>$readReport($id)["revision"]],$leader);
+  $call("/api/incidents/$id/consolidation","PUT",$aggregate($id),$command);
+  $completed=$state($id);
+  assert($completed["incident"]["consolidated_at"]!==null);
+  assert($completed["history"][0]["actor_name"]===$force["name"] && $completed["history"][1]["actor_name"]==="Führungskraft Heute");
+
+  // Identische oder nur umsortierte Fahrzeugquellen bewahren Abschlüsse und alle Revisionen auch beim vollständigen Abgleich.
+  $setKey("historical-reordered");
+  assert(!isset($import()["warning"]) && $state($id)===$completed);
+  $synced=$call("/api/units/1/divera/sync","POST",[],$command);
+  assert($synced["incidentsUpdated"]===0 && $synced["incidentsUnchanged"]===1 && $synced["incidentsWithDifferences"]===0);
+  assert(!isset($synced["warning"]) && $state($id)===$completed);
+  $statistics=$call("/api/statistics?from=2026-12-31&to=2026-12-31","GET",null,$leader);
+  assert(in_array("Anna Beispiel",array_column($statistics["members"],"name"),true));
+  assert(in_array("Bernd Später",array_column($statistics["members"],"name"),true));
+
+  // Abweichender Vollimport eines abgeschlossenen Einsatzes meldet nur Kategorien und erhält auch Besatzung, Zusatzfahrzeuge und Übergänge.
+  $setKey("historical-after");
+  $loaded=$aggregate($id);
+  $synced=$call("/api/units/1/divera/sync","POST",[],$command);
+  $warn($synced,$id);
+  assert($synced["incidentsUpdated"]===0 && $synced["incidentsUnchanged"]===1 && $synced["incidentsWithDifferences"]===1);
+  assert($state($id)===$completed);
+  $call("/api/incidents/$id/consolidation","PUT",$loaded,$command);
+  $completed=$state($id);
+
+  // Eine neue Einheit erhält ihren eigenen Snapshot trotz Abweichung; nur der Gesamtstand wird ungültig, bestehende Berichte bleiben gleich.
+  $loaded=$aggregate($id);
+  $second=(int)getenv("SECOND_UNIT_ID");
+  $setKey("historical-after",$second);
+  $warn($import($second),$id);
+  $assigned=$state($id);
+  assert((int)$assigned["incident"]["revision"]===(int)$completed["incident"]["revision"]+1);
+  assert($assigned["incident"]["consolidated_at"]===null && $assigned["incident"]["consolidated_text"]===$completed["incident"]["consolidated_text"]);
+  foreach(["reports","crew","additional","history"] as $part) assert($assigned[$part]===$completed[$part]);
+  assert(count($assigned["assignments"])===2 && $assigned["assignments"][0]===$completed["assignments"][0]);
+  assert(array_column(json_decode($assigned["assignments"][1]["vehicles"],true,512,JSON_THROW_ON_ERROR),"id")===["v2"]);
+  $call("/api/incidents/$id/consolidation","PUT",$loaded,$command,409);
+  $nextPayload["unitId"]=$second;
+  $secondReport=$call("/api/incidents/$id/reports","POST",$nextPayload,$command,201)["id"];
+  $secondStored=one("SELECT alarmed_at,report_year FROM reports WHERE id=?",[$secondReport]);
+  assert((int)$secondStored["report_year"]===2026 && $secondStored["alarmed_at"]==="2026-12-31T22:45:00.000Z");
+  $call("/api/incidents/$id/consolidation","PUT",$aggregate($id),$command);
+  echo "$id|$reportId";
+')
+IFS='|' read -r historical_incident_id historical_report_id <<< "$historical_ids"
+# Einzel- und Gesamt-PDFs verwenden historische Autor-/Besatzungs-/Fahrzeugnamen und niemals verworfene DIVERA-Inhalte.
+assert_pdf "$session_token" "/api/reports/$historical_report_id/pdf" 'Historischer Bericht 89|Führungskraft Test|Anna Beispiel|Bernd Später|HLF 20|Reserve Historisch' 'Quellpatient'
+assert_pdf "$session_token" "/api/incidents/$historical_incident_id/consolidation/pdf" 'Historischer Gesamtbericht 89|Historischer Einsatz|Anna Beispiel|Bernd Später|Reserve Historisch' 'Quellpatient'
 
 # Passwort-Wiederherstellung verrät keine Konten und begrenzt neue Token anhand der UTC-Anforderungszeit.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
