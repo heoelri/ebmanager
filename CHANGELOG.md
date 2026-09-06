@@ -18,6 +18,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Changed
 
+- Führungskräfte starten unter „Einsätze“ mit „Bericht erforderlich“. Bisher gespeichertes „Alle Status“ wird einmalig auf diesen Standard umgestellt; andere gespeicherte Filter und eine danach ausdrücklich gewählte Anzeige aller Status bleiben erhalten. Für Einheits- und Wehrführung ändert sich die Voreinstellung nicht.
 - Einheitszuordnungen, Fahrzeug-Snapshots und Besatzungen werden als native JSON-Listen geliefert; Kontakt-, Einsatzleitungs- und Klassifikationsangaben als native Objekte. Der Browser verarbeitet diese Werte ohne eine zweite JSON-Dekodierung und meldet falsche Antworttypen sichtbar, statt daraus leere Bearbeitungsformulare zu erzeugen (#92).
 - „Einsatz anlegen“ ist auf der Einsatzübersicht standardmäßig eingeklappt und weist auf die ausschließliche Nutzung für nicht über DIVERA alarmierte Einsätze hin.
 - Die Box „DIVERA Import“ auf der Einsatzübersicht ist standardmäßig eingeklappt.

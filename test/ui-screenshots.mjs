@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import assert from 'node:assert/strict';
 import {chromium} from 'playwright';
 
 const baseUrl = process.env.SCREENSHOT_BASE_URL || 'https://localhost:8443';
@@ -35,10 +36,41 @@ async function captureView(page, prefix, name, view, heading, ready) {
 
 async function captureIncident(page, prefix) {
   await page.goto(`${baseUrl}/?view=home`, {waitUntil: 'networkidle'});
+  await page.getByLabel('Status filtern').selectOption('');
   await page.getByRole('button', {name: 'Öffnen'}).first().click();
   await page.waitForURL(/incident=\d+/);
   await page.getByRole('button', {name: '← Zurück'}).waitFor();
   await page.screenshot({path: `${output}/${prefix}-einsatzdetail.png`, fullPage: true});
+}
+
+async function checkIncidentFilter(page, prefix) {
+  const filter = page.getByLabel('Status filtern');
+  if (prefix !== '10-fuehrungskraft') {
+    assert.equal(await filter.inputValue(), '');
+    return;
+  }
+  assert.equal(await filter.inputValue(), 'report_required');
+  const response = await page.request.get(`${baseUrl}/api/me`);
+  assert(response.ok());
+  const user = await response.json();
+  const key = `incidentStatusFilter:${user.id}:fuehrungskraft`;
+  for (const {previous, expected} of [
+    {previous: '', expected: 'report_required'},
+    {previous: 'submitted', expected: 'submitted'}
+  ]) {
+    await page.evaluate(({key, previous}) => {
+      localStorage.removeItem(`${key}:v2`);
+      localStorage.setItem(key, previous);
+    }, {key, previous});
+    await page.reload({waitUntil: 'networkidle'});
+    assert.equal(await filter.inputValue(), expected);
+    assert.equal(await page.locator(`[data-incident-status]:not([hidden]):not([data-incident-status="${expected}"])`).count(), 0);
+  }
+  await filter.selectOption('');
+  await page.reload({waitUntil: 'networkidle'});
+  assert.equal(await filter.inputValue(), '');
+  assert.equal(await page.locator('[data-incident-status][hidden]').count(), 0);
+  await filter.selectOption('report_required');
 }
 
 try {
@@ -84,6 +116,7 @@ try {
 
   for (const role of roles) {
     const {context, page} = await login(role.email);
+    await checkIncidentFilter(page, role.prefix);
     for (const [name, view, heading, ready] of role.views) {
       await captureView(page, role.prefix, name, view, heading, ready);
     }
