@@ -1169,20 +1169,22 @@ try {
         $data = input();
         $email = emailAddress($data['email'] ?? null);
         mailSettings();
-        $user = one('SELECT id,name,email FROM users WHERE email=?', [$email]);
-        if ($user) {
-            $recent = one('SELECT id FROM password_resets WHERE user_id=? AND requested_at>UTC_TIMESTAMP()-INTERVAL 5 MINUTE', [$user['id']]);
-            if (!$recent) {
-                $token = bin2hex(random_bytes(32));
-                transaction(function () use ($user, $token) {
-                    query('DELETE FROM password_resets WHERE expires_at<=UTC_TIMESTAMP() OR user_id=?', [$user['id']]);
-                    query('INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 30 MINUTE)', [$user['id'], hash('sha256', $token)]);
-                });
-                if (!sendPasswordEmail($user, $token)) {
-                    query('DELETE FROM password_resets WHERE user_id=?', [$user['id']]);
-                    error_log('Passwort-Wiederherstellungs-E-Mail konnte nicht versendet werden');
-                }
-            }
+        $request = transaction(function () use ($email) {
+            $reference = one('SELECT id FROM users WHERE email=?', [$email]);
+            if (!$reference) return null;
+            // Lock the primary row first, not the email index, and recheck after waiting.
+            $user = one('SELECT id,name,email,email=? AS requested_email_matches FROM users WHERE id=? FOR UPDATE', [$email, $reference['id']]);
+            if (!$user || !$user['requested_email_matches']) return null;
+            $recent = one('SELECT id FROM password_resets WHERE user_id=? AND requested_at>UTC_TIMESTAMP()-INTERVAL 5 MINUTE FOR UPDATE', [$user['id']]);
+            if ($recent) return null;
+            $token = bin2hex(random_bytes(32));
+            query('DELETE FROM password_resets WHERE user_id=?', [$user['id']]);
+            query('INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 30 MINUTE)', [$user['id'], hash('sha256', $token)]);
+            return compact('user', 'token');
+        });
+        if ($request && !sendPasswordEmail($request['user'], $request['token'])) {
+            query('DELETE FROM password_resets WHERE user_id=? AND token_hash=?', [$request['user']['id'], hash('sha256', $request['token'])]);
+            error_log('Passwort-Wiederherstellungs-E-Mail konnte nicht versendet werden');
         }
         // The response never reveals whether the address belongs to an account.
         respond(202, ['ok' => true]);
@@ -1207,7 +1209,12 @@ try {
         $password = required($data['password'] ?? null, 'Passwort', 200);
         if (textLength($password) < 10) throw new ApiError(400, 'Passwort muss mindestens 10 Zeichen haben');
         transaction(function () use ($token, $password) {
-            $reset = one('SELECT user_id FROM password_resets WHERE token_hash=? AND expires_at>UTC_TIMESTAMP() FOR UPDATE', [hash('sha256', $token)]);
+            $tokenHash = hash('sha256', $token);
+            $reference = one('SELECT user_id FROM password_resets WHERE token_hash=?', [$tokenHash]);
+            if (!$reference) throw new ApiError(400, 'Wiederherstellungslink ist ungültig oder abgelaufen');
+            // Account changes and token use always lock the user before the token.
+            query('SELECT id FROM users WHERE id=? FOR UPDATE', [$reference['user_id']]);
+            $reset = one('SELECT user_id FROM password_resets WHERE token_hash=? AND user_id=? AND expires_at>UTC_TIMESTAMP() FOR UPDATE', [$tokenHash, $reference['user_id']]);
             if (!$reset) throw new ApiError(400, 'Wiederherstellungslink ist ungültig oder abgelaufen');
             query('UPDATE users SET password_hash=? WHERE id=?', [password_hash($password, PASSWORD_DEFAULT), $reset['user_id']]);
             query('DELETE FROM sessions WHERE user_id=?', [$reset['user_id']]);
@@ -1448,16 +1455,18 @@ try {
         $unitIds = membershipIds($data, $user['organization_id']);
         $password = (string)($data['password'] ?? '');
         if ($password && textLength($password) < 10) throw new ApiError(400, 'Passwort muss mindestens 10 Zeichen haben');
-        transaction(function () use ($data, $password, $unitIds, $existing) {
+        $email = emailAddress($data['email'] ?? null);
+        transaction(function () use ($data, $password, $email, $unitIds, $existing) {
             query('SELECT id FROM organizations WHERE id=? FOR UPDATE', [$existing['organization_id']]);
-            $current = one('SELECT role FROM users WHERE id=? AND organization_id=?', [$existing['id'], $existing['organization_id']]);
-            if ($current && $current['role'] === 'wehrleitung' && $data['role'] !== 'wehrleitung'
+            $current = one('SELECT role,email FROM users WHERE id=? AND organization_id=? FOR UPDATE', [$existing['id'], $existing['organization_id']]);
+            if (!$current) throw new ApiError(404, 'Benutzer nicht gefunden');
+            if ($current['role'] === 'wehrleitung' && $data['role'] !== 'wehrleitung'
                 && !one("SELECT id FROM users WHERE organization_id=? AND role='wehrleitung' AND id<>? LIMIT 1", [$existing['organization_id'], $existing['id']])) {
                 throw new ApiError(409, 'Mindestens eine Wehrführung ist erforderlich');
             }
             $sql = 'UPDATE users SET unit_id=?,name=?,email=?,role=?';
             $params = [$unitIds[0] ?? null, required($data['name'] ?? null, 'Name', 200),
-                emailAddress($data['email'] ?? null), $data['role']];
+                $email, $data['role']];
             if ($password) {
                 $sql .= ',password_hash=?';
                 $params[] = password_hash($password, PASSWORD_DEFAULT);
@@ -1466,6 +1475,7 @@ try {
             query("$sql WHERE id=?", $params);
             replaceMemberships((int)$existing['id'], $unitIds);
             if ($password) query('DELETE FROM sessions WHERE user_id=?', [$existing['id']]);
+            if ($password || $email !== $current['email']) query('DELETE FROM password_resets WHERE user_id=?', [$existing['id']]);
         });
         respond(200, ['ok' => true]);
     }
@@ -1475,8 +1485,11 @@ try {
             ? 'i.organization_id=?'
             : 'i.organization_id=? AND EXISTS(SELECT 1 FROM incident_units x JOIN user_units uu ON uu.unit_id=x.unit_id WHERE x.incident_id=i.id AND uu.user_id=?)';
         $params = $user['role'] === 'wehrleitung' ? [$user['organization_id']] : [$user['organization_id'], $user['id']];
+        $consolidatedText = $user['role'] === 'wehrleitung' ? ',i.consolidated_text' : '';
         $rows = query(
-            "SELECT i.* FROM incidents i WHERE $where ORDER BY i.started_at DESC",
+            "SELECT i.id,i.organization_id,i.divera_id,i.foreign_id,i.divera_date,i.title,i.started_at,
+             i.message,i.address,i.lat,i.lng,i.remark,i.patient,i.caller,i.consolidated_at$consolidatedText
+             FROM incidents i WHERE $where ORDER BY i.started_at DESC",
             $params
         )->fetchAll();
         $assignments = [];

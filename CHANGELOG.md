@@ -22,7 +22,14 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 - Fremde Alarmfahrzeuge zeigen bei eindeutigem, bereits synchronisiertem Fahrzeugstamm einer anderen Einheit derselben Wehr Name und Typ statt nur der DIVERA-ID; fehlende oder mehrdeutige Zuordnungen bleiben bei der ID.
 - Sichtbare Datums- und Uhrzeitangaben der Browser-Oberfläche verwenden durchgängig das Gebietsschema und das 12-/24-Stunden-Schema des Nutzers; native Datumsfelder behalten die Browserdarstellung.
 
+### Fixed
+
+- Administrative Passwort- und E-Mail-Änderungen widerrufen ausstehende Einladungs- und Wiederherstellungslinks atomar. Tokenanforderungen und Bestätigungen werden mit Kontoänderungen über dieselbe Sperrreihenfolge koordiniert; fehlgeschlagene Mailversuche löschen keine zwischenzeitlich neu ausgestellten Links (#99).
+- Die Einsatzlisten-API liefert konsolidierte Berichtstexte einschließlich zurückbehaltener Arbeitsstände ausschließlich an die Wehrführung. Führungskräfte und Einheitsführungen erhalten weiterhin ihre zulässigen Einsatz- und Statusdaten (#100).
+
 ### Breaking Changes
+
+Die API-Antwort von `GET /api/incidents` enthält für `fuehrungskraft` und `einheitsleitung` kein `consolidated_text` mehr. Der native Browserclient benötigt keine Anpassung. Die Sicherheitskorrekturen für #99 und #100 erfordern keine zusätzliche Migration.
 
 1. Bestehende Installationen auf Basis von `2026-09-03` müssen vor dem neuen Anwendungscode `migrations/003-report-additional-vehicles.sql` genau einmal importieren.
 2. Danach muss `003-report-additional-vehicles.sql` in `schema_migrations` vorhanden sein. Neue Installationen verwenden weiterhin ausschließlich das aktuelle `schema.sql`.

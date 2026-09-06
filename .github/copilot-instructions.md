@@ -43,7 +43,7 @@
 - Eine Organisation muss immer mindestens eine `wehrleitung` behalten.
 - Neue Benutzer erhalten kein Startpasswort, sondern einen sieben Tage gültigen Einmallink zur Aktivierung; die Einladung nennt den Ablaufzeitpunkt in `Europe/Berlin`. Vergessene Passwörter bleiben 30 Minuten gültig, verwenden denselben gehashten Tokenmechanismus und sind pro Benutzer fünf Minuten gesperrt.
 - Die Wehrleitung kann fremde Benutzerzugänge zurücksetzen und eine neue siebentägige Einladung senden. Erst nach erfolgreicher Mailannahme werden Passwort, Sitzungen und frühere Einmallinks ungültig; der eigene Zugang ist ausgeschlossen.
-- Eine Passwortänderung widerruft alle Sitzungen des Benutzers.
+- Eine Passwortänderung widerruft alle Sitzungen des Benutzers. Änderungen an Passwort oder E-Mail-Adresse widerrufen außerdem alle ausstehenden Einladungs- und Wiederherstellungslinks; Tokenausstellung, Bestätigung und Kontoänderungen sperren zuerst den Benutzer und danach seine Token.
 - Erfolgreiche Anmeldungen werden mit Benutzer und UTC-Zeitpunkt in `login_history` gespeichert. Nur die Wehrleitung sieht den neuesten Eintrag je Benutzer. Speichere keine IP-Adressen, Browserdaten oder fehlgeschlagenen Anmeldungen.
 
 ## Sitzungen, Requests und E-Mail
@@ -61,7 +61,7 @@
 ## Einsätze und Berichte
 
 - Ein Einsatz kann mehreren Einheiten zugeordnet sein. `(incident_id, unit_id)` ist eindeutig; jede beteiligte Einheit schreibt genau einen Bericht.
-- Die Wehrleitung konsolidiert Einzelberichte in `incidents.consolidated_text`.
+- Die Wehrleitung konsolidiert Einzelberichte in `incidents.consolidated_text`. Nur sie erhält diesen Text über die API, auch nach einer Rückgabe als erhaltenen Arbeitsstand.
 - Eine manuelle laufende Nummer ist je Einheit und lokalem Kalenderjahr eindeutig.
 - Einheitsberichte enthalten Geschädigte und Schädiger mit optionalem Namen, Telefon und Adresse, die optionale Gesamteinsatzleitung sowie die Einsatzleitung der eigenen Einheit mit Dienstgrad und Name.
 - Alarmierungszeit und Einsatzende sind erforderlich; Ausrücke- und Eintreffzeit dürfen bei abgebrochenen Einsätzen fehlen. Alle vorhandenen Zeitpunkte müssen chronologisch sein. Die Alarmierungszeit stammt aus dem Einsatz und ist im Bericht unveränderlich; die Dauer wird berechnet.

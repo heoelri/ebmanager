@@ -1,5 +1,47 @@
 # Security Review
 
+## Einmallinks und konsolidierte Texte vom 6. September 2026
+
+Der erneute Vollreview bestätigte zwei vorbestehende Schwachstellen hoher
+Schwere: Alte Einladungs-/Wiederherstellungslinks überlebten administrative
+Passwort- oder E-Mail-Änderungen (#99), und die Einsatzliste gab
+`consolidated_text` auch an niedrigere Rollen aus (#100).
+
+Die Benutzerbearbeitung widerruft ausstehende Einmallinks nun zusammen mit
+der Passwort-/E-Mail-Änderung in derselben Transaktion. Passwortänderungen
+widerrufen weiterhin alle Sitzungen; reine Profiländerungen erhalten
+gültige Links. Tokenausstellung, Bestätigung, Neueinladung und
+Benutzerbearbeitung sperren zuerst den Benutzer und anschließend seine
+Token. Eine Bestätigung prüft den Token nach dieser Sperre erneut; eine
+Anforderung sperrt anhand der zuvor ermittelten Benutzer-ID den
+Primärdatensatz und vergleicht die aktuelle Zieladresse erneut mit der
+angefragten Adresse. Eine Sperre über den E-Mail-Sekundärindex wird
+vermieden, damit parallele Adressänderungen keinen umgekehrten
+Index-Sperrpfad erzeugen. Ein nachträglich
+fehlgeschlagener Mailversuch entfernt nur seinen eigenen Token-Hash.
+Die Neueinladung behält ihr Rollback bei fehlgeschlagener Mailannahme.
+
+Die Einsatzliste verwendet eine explizite Spaltenprojektion.
+`consolidated_text` wird ausschließlich für `wehrleitung` abgefragt.
+Dies gilt sowohl für abgeschlossene Gesamtberichte als auch für nach einer
+Rückgabe erhaltene Arbeitsstände; Status und zulässige Einheitsdaten bleiben
+für frühere Rollen verfügbar. Die bestehenden PDF- und
+Einzelberichtsberechtigungen bleiben unverändert.
+
+Die fokussierten Regressionen in `test/smoke.sh` umfassen Passwort-only-,
+E-Mail-only-, kombinierte und reine Profiländerungen, Kontext und Bestätigung
+alter Links, auf einer MySQL-Benutzersperre wartende Anforderungen und
+Bestätigungen sowie die Sicht beider niedrigeren Rollen auf abgeschlossene
+und invalidierte Mehr-Einheiten-Gesamtberichte. Für diese Korrekturen werden
+keine weiteren personenbezogenen Daten, Geheimnisprotokolle oder
+Abhängigkeiten eingeführt.
+
+Die vorhandene HTTP-/MySQL-Suite einschließlich SMTP-Szenarien und die
+Apache-/HTTPS-Suite wurden in getrennten, frisch erstellten lokalen
+Compose-Umgebungen erfolgreich ausgeführt. Die MySQL-Szenarien beobachten
+die tatsächliche Sperrwartephase vor der parallelen Kontoänderung; sie
+prüfen auch die erneute Adress-/Tokenprüfung nach deren Commit.
+
 ## Einheitsstatistik vom 3. September 2026
 
 `GET /api/statistics` ist ausschließlich für `einheitsleitung` freigegeben

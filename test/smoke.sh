@@ -35,6 +35,28 @@ assert_pdf() {
   '
   rm -f "$body" "$headers"
 }
+# Nur die Wehrführung erhält den Gesamttext; frühere Rollen behalten lediglich zulässige Einsatz- und Statusdaten.
+assert_consolidated_visibility() {
+  local incident_id=$1
+  for restricted_token in "$force_token" "$leader_token"; do
+    curl --insecure --silent --fail --cookie "$session_cookie=$restricted_token" "$base_url/api/incidents" |
+      INCIDENT_ID="$incident_id" php -r '
+        $raw=stream_get_contents(STDIN);
+        $items=json_decode($raw,true,512,JSON_THROW_ON_ERROR);
+        foreach($items as $item) assert(!array_key_exists("consolidated_text",$item));
+        assert(!str_contains($raw,"Nicht freigegebene Angaben der anderen Einheit"));
+        $incident=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")))[0];
+        assert(array_key_exists("consolidated_at",$incident));
+        assert(isset($incident["reportStatus"]));
+      '
+  done
+  curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
+    INCIDENT_ID="$incident_id" php -r '
+      $items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+      $incident=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")))[0];
+      assert($incident["consolidated_text"]==="Konsolidiert: Nicht freigegebene Angaben der anderen Einheit");
+    '
+}
 if mysql --help 2>&1 | grep -- '--ssl-mode' >/dev/null; then
   mysql_tls_args=(--ssl-mode=DISABLED)
 elif mysql --help 2>&1 | grep -- '--skip-ssl' >/dev/null; then
@@ -314,6 +336,89 @@ admin_user_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
   "$base_url/api/users/$admin_user_id/invitation")" = 409
+
+# Profiländerungen erhalten Einmallinks; Passwort- und E-Mail-Änderungen widerrufen sie, Passwortänderungen zusätzlich die Sitzungen.
+credential_user_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
+  --execute="INSERT INTO users(organization_id,unit_id,name,email,password_hash,role) SELECT organization_id,1,'Zugangsprüfung','credential@example.test',password_hash,'fuehrungskraft' FROM users WHERE id=$admin_user_id; SET @id=LAST_INSERT_ID(); INSERT INTO user_units(user_id,unit_id) VALUES(@id,1); SELECT @id")
+credential_token=$(php -r 'echo bin2hex(random_bytes(32));')
+credential_hash=$(php -r "echo hash('sha256','$credential_token');")
+credential_session_hash=$(php -r "echo hash('sha256','credential-session');")
+for change in profile password email both; do
+  MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+    --execute="UPDATE users SET email='credential@example.test' WHERE id=$credential_user_id;
+      DELETE FROM password_resets WHERE user_id=$credential_user_id;
+      DELETE FROM sessions WHERE user_id=$credential_user_id;
+      INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES($credential_user_id,'$credential_hash',UTC_TIMESTAMP()+INTERVAL 7 DAY);
+      INSERT INTO sessions(token,user_id,expires_at) VALUES('$credential_session_hash',$credential_user_id,UTC_TIMESTAMP()+INTERVAL 1 HOUR)"
+  credential_email='credential@example.test'
+  credential_password=''
+  expected_sessions=1
+  case "$change" in
+    password) credential_password='ersetztes-geheimes-passwort'; expected_sessions=0 ;;
+    email) credential_email='credential-new@example.test' ;;
+    both) credential_email='credential-new@example.test'; credential_password='erneuertes-geheimes-passwort'; expected_sessions=0 ;;
+  esac
+  test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+    --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request PUT \
+    --data "{\"name\":\"Geändertes Profil\",\"email\":\"$credential_email\",\"password\":\"$credential_password\",\"role\":\"fuehrungskraft\",\"unitIds\":[1]}" \
+    "$base_url/api/users/$credential_user_id")" = 200
+  test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
+    --execute="SELECT COUNT(*) FROM sessions WHERE user_id=$credential_user_id")" = "$expected_sessions"
+  if [[ "$change" == profile ]]; then
+    test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+      --header 'Content-Type: application/json' --data "{\"token\":\"$credential_token\"}" \
+      "$base_url/api/password-reset/context")" = 200
+  else
+    for endpoint in context confirm; do
+      test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+        --header 'Content-Type: application/json' --data "{\"token\":\"$credential_token\",\"password\":\"nicht-erlaubtes-passwort\"}" \
+        "$base_url/api/password-reset/$endpoint")" = 400
+    done
+  fi
+done
+
+# Gleichzeitig gestartete Tokenanforderungen und Bestätigungen warten auf Kontoänderungen und verwenden danach keine veralteten Links oder Adressen.
+DB_DSN="mysql:host=$db_host;dbname=einsatzberichte;charset=utf8mb4" CREDENTIAL_USER_ID="$credential_user_id" CREDENTIAL_TOKEN="$credential_token" API_BASE_URL="$base_url" php -r '
+  require "support.php";
+  $id=(int)getenv("CREDENTIAL_USER_ID");
+  $token=getenv("CREDENTIAL_TOKEN");
+  foreach(["request","confirm"] as $action) {
+    query("UPDATE users SET email=? WHERE id=?",["credential@example.test",$id]);
+    query("DELETE FROM password_resets WHERE user_id=?",[$id]);
+    if($action==="confirm") query("INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 30 MINUTE)",[$id,hash("sha256",$token)]);
+    db()->beginTransaction();
+    query("SELECT id FROM users WHERE id=? FOR UPDATE",[$id]);
+    $payload=$action==="request" ? ["email"=>"credential@example.test"] : ["token"=>$token,"password"=>"nicht-erlaubtes-passwort"];
+    $process=proc_open(["curl","--insecure","--silent","--show-error","--max-time","15","--output","/dev/null","--write-out","%{http_code}","--header","Content-Type: application/json","--data",json_encode($payload),getenv("API_BASE_URL")."/api/password-reset/$action"],[0=>["pipe","r"],1=>["pipe","w"],2=>["pipe","w"]],$pipes);
+    if(!is_resource($process)) throw new RuntimeException("Parallele Anfrage konnte nicht gestartet werden");
+    fclose($pipes[0]);
+    try {
+      $waiting=null;
+      $deadline=microtime(true)+5;
+      while(microtime(true)<$deadline) {
+        $waiting=one("SELECT trx_query FROM information_schema.innodb_trx WHERE trx_state=? AND trx_mysql_thread_id<>CONNECTION_ID()",["LOCK WAIT"]);
+        if($waiting) break;
+        // Häufigeres Polling hält den InnoDB-Metadaten-Cache unverändert.
+        usleep(250000);
+      }
+      if(!$waiting || !str_starts_with($waiting["trx_query"] ?? "","SELECT")) throw new RuntimeException("Tokenzugriff sperrt nicht zuerst den Benutzer");
+      query("UPDATE users SET email=? WHERE id=?",["credential-new@example.test",$id]);
+      query("DELETE FROM password_resets WHERE user_id=?",[$id]);
+      db()->commit();
+      $status=stream_get_contents($pipes[1]);
+      $expected=$action==="request" ? "202" : "400";
+      if($status!==$expected) throw new RuntimeException("Unerwartete parallele Tokenantwort: $status");
+      if((int)query("SELECT COUNT(*) FROM password_resets WHERE user_id=?",[$id])->fetchColumn()!==0) throw new RuntimeException("Veralteter Token wurde erhalten");
+    } finally {
+      if(db()->inTransaction()) db()->rollBack();
+      fclose($pipes[1]);
+      fclose($pipes[2]);
+      proc_close($process);
+    }
+  }
+'
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DELETE FROM users WHERE id=$credential_user_id"
 
 if [[ -z "${TEST_BASE_URL:-}" ]]; then
   test "$invite_status" = 201
@@ -715,12 +820,15 @@ curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base
   INCIDENT_ID="$incident_id" php -r '$items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $incident=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")))[0]; assert($incident["reportStatus"]["key"]==="ready");'
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request PUT \
-  --data '{"text":"Konsolidiert"}' "$base_url/api/incidents/$incident_id/consolidation" >/dev/null
+  --data '{"text":"Konsolidiert: Nicht freigegebene Angaben der anderen Einheit"}' "$base_url/api/incidents/$incident_id/consolidation" >/dev/null
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE incidents SET consolidated_at='2026-08-24 09:00:00' WHERE id=$incident_id"
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
   INCIDENT_ID="$incident_id" php -r '$items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $incident=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")))[0]; assert($incident["reportStatus"]["key"]==="completed");'
 assert_pdf "$session_token" "/api/incidents/$incident_id/consolidation/pdf" 'Abgeschlossener Gesamtbericht|Konsolidiert|Admin|Rolle: Wehrführung|Manipuliert|24.08.2026 11:00 Uhr'
+
+# Ein abgeschlossener Mehr-Einheiten-Gesamttext bleibt für Führungskraft und Einheitsführung unsichtbar.
+assert_consolidated_visibility "$incident_id"
 
 # Eine Rückgabe durch die Wehrführung invalidiert die Konsolidierung bis zur erneuten Übergabe.
 curl --insecure --silent --fail \
@@ -732,6 +840,10 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' -
 test "$(incident_status "$leader_token" "$incident_id")" = review_required
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT CONCAT(status,'|',consolidated_at IS NULL,'|',(SELECT COUNT(*) FROM report_transitions WHERE report_id=$report_id_int)) FROM reports JOIN incidents ON incidents.id=reports.incident_id WHERE reports.id=$report_id_int")" = 'unit_review|1|6'
+# Auch der nach einer Rückgabe zurückbehaltene Gesamttext ist ausschließlich für die Wehrführung sichtbar.
+assert_consolidated_visibility "$incident_id"
+
+# Solange der zurückgegebene Bericht noch nicht erneut freigegeben wurde, bleibt die Konsolidierung gesperrt.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request PUT \
   --data '{"text":"Zu früh"}' "$base_url/api/incidents/$incident_id/consolidation")" = 409
