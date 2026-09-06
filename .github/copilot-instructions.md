@@ -21,6 +21,7 @@
 - `.htaccess` erzwingt HTTPS, schützt nicht öffentliche Dateien, leitet `/api/*` an `api.php` weiter und liefert `public/index.html` aus.
 - Root- und Unterverzeichnis-Deployment funktionieren ohne separate Pfadkonfiguration.
 - API-Fehler haben die Form `{ "error": "..." }`. Eingaben werden an der API-Grenze validiert; Fehler werden weder verschluckt noch als Erfolg dargestellt.
+- `docs/API.md` dokumentiert den API-Vertrag. Strukturierte Antworten enthalten native JSON-Listen und -Objekte statt JSON-Strings innerhalb von JSON. Objekt, Liste und optionale Leerwerte werden ausdrücklich unterschieden; lokale IDs werden ohne verlustbehaftete Typumwandlung validiert. Änderungen am Vertrag werden gemeinsam mit dem Browser umgesetzt und als Breaking Changes dokumentiert.
 - API-Listen und abgeleitete Zusammenfassungen haben eine explizite stabile Sortierung. Verlasse dich bei MySQL-Aggregaten nicht auf eine implizite Reihenfolge; sortiere die Eingabezeilen oder das Ergebnis.
 - `GET /api/bootstrap` meldet fehlende Konfiguration, Datenbankfehler und unvollständige Schemata ohne Zugangsdaten mit HTTP 503.
 

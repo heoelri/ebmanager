@@ -59,6 +59,13 @@ aus, ist aber nie die maßgebliche Berechtigungsgrenze.
 Schreibende Anfragen müssen JSON verwenden. Ein vorhandener `Origin`-Header
 muss exakt der HTTPS-Origin der Anwendung entsprechen.
 
+Der [API-Vertrag](API.md) unterscheidet Objekte, Listen, Skalare und optionale
+Leerwerte an der Eingabegrenze. Strukturierte Antworten enthalten native
+JSON-Werte; der Browser dekodiert nur die gesamte HTTP-Antwort und weist
+falsche Strukturtypen sichtbar zurück. Eingabefehler liefern HTTP 400,
+bekannte fachliche Eindeutigkeits- oder Revisionskonflikte HTTP 409.
+Unerwartete Datenbankfehler werden nicht als Benutzerkonflikte ausgegeben.
+
 ## Einsatz- und Berichtsfluss
 
 1. Ein Einsatz wird manuell angelegt oder anhand seiner ID aus DIVERA importiert.

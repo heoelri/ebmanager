@@ -4,6 +4,7 @@
 |---|---|
 | [Projektübersicht](../README.md) | Zweck, Funktionen, Rollen, lokale Entwicklung und Dokumentationseinstieg |
 | [Architektur](ARCHITEKTUR.md) | Komponenten, Anfragefluss, Berechtigungen und Integrationen |
+| [API-Referenz](API.md) | Endpunkte, Rollen, Eingabe- und Antworttypen, optionale Werte und Fehlercodes |
 | [Deployment auf Webspace](WEBSPACE-DEPLOYMENT.md) | Erstinstallation, Konfiguration, SFTP-Deployment, Updates, Rollback und Fehlerbehebung |
 | [Datenmodell](../DATENMODELL.md) | Tabellen, Beziehungen, JSON-Strukturen und Konsistenzregeln |
 | [Security Review](../SECURITY-REVIEW.md) | Geprüfte Angriffsflächen, behobene Befunde und Betriebsanforderungen |

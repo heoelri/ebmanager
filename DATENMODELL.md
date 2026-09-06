@@ -22,6 +22,28 @@ keine lokale Produktivkonfiguration.
 
 ## Überblick
 
+### API-Darstellung
+
+Das Speicherschema bleibt bei der Vereinheitlichung des API-Vertrags (#92)
+unverändert. MySQL-JSON-Spalten und abgeleitete Zuordnungen werden am
+API-Ausgang nicht zusätzlich als JSON-Text verpackt:
+
+| Antwortfeld | JSON-Typ |
+|---|---|
+| Benutzer: `unit_ids` | Liste numerischer Einheits-IDs |
+| Einsatz: `assignments` | Liste von Zuordnungsobjekten |
+| Zuordnung: `vehicles` | Liste der vorhandenen Fahrzeug-Strings oder Fahrzeugobjekte |
+| Bericht: `crew` | Liste von Besatzungsobjekten |
+| Bericht: `damaged_party`, `damaging_party`, `incident_command`, `classification` | Objekt |
+
+Leere Listen werden als `[]`, leere Objekte als `{}` ausgegeben.
+Die bereits strukturierten Felder `history` und `additionalVehicles` bleiben
+Listen. Feldnamen und rollenabhängige Sichtbarkeit ändern sich nicht.
+Die vollständigen Eingabe-, Leerwert-, Zeit- und Fehlerkonventionen stehen in
+der [API-Referenz](docs/API.md).
+
+### Beziehungen
+
 ```mermaid
 erDiagram
     organizations ||--o{ units : besitzt

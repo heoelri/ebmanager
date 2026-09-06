@@ -6,6 +6,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Added
 
+- Eine kompakte [API-Referenz](docs/API.md) beschreibt Endpunkte, Rollen, Eingaben, native Antworttypen, optionale Werte, UTC-Zeitformate und Konfliktvorbedingungen (#92).
 - Einheitsführungen erhalten einen eigenen Bereich „Statistik“ mit Zeitraumfilter, Fahrzeug- und Mitgliederhäufigkeiten, zeitlichen Verteilungen sowie der durchschnittlichen Besatzungsstärke ihrer Einheit.
 - Bearbeitbare Einheitsberichte können zusätzliche Fahrzeuge aus dem aktuellen Stamm der eigenen Einheit aufnehmen. Die Fahrzeuge stehen als Besatzungsziele bereit, bleiben von DIVERA-Neuimporten unberührt und erscheinen in Ansichten sowie PDF-Exporten.
 - Die Ressourcenansicht hebt die weiterhin gespeicherte Auswahl „Inaktive Mitglieder anzeigen“ bei der Einheitsauswahl hervor; Mitglieder, eigene Fahrzeuge und Fahrzeuge anderer Einheiten sind standardmäßig geöffnet und nativ einklappbar.
@@ -17,6 +18,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Changed
 
+- Einheitszuordnungen, Fahrzeug-Snapshots und Besatzungen werden als native JSON-Listen geliefert; Kontakt-, Einsatzleitungs- und Klassifikationsangaben als native Objekte. Der Browser verarbeitet diese Werte ohne eine zweite JSON-Dekodierung und meldet falsche Antworttypen sichtbar, statt daraus leere Bearbeitungsformulare zu erzeugen (#92).
 - „Einsatz anlegen“ ist auf der Einsatzübersicht standardmäßig eingeklappt und weist auf die ausschließliche Nutzung für nicht über DIVERA alarmierte Einsätze hin.
 - Die Box „DIVERA Import“ auf der Einsatzübersicht ist standardmäßig eingeklappt.
 - Fremde Alarmfahrzeuge zeigen bei eindeutigem, bereits synchronisiertem Fahrzeugstamm einer anderen Einheit derselben Wehr Name und Typ statt nur der DIVERA-ID; fehlende oder mehrdeutige Zuordnungen bleiben bei der ID.
@@ -24,6 +26,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Fixed
 
+- Fehlerhafte Text-, ID-, Kontakt-, Klassifikations- und Listenformen werden ausdrücklich abgewiesen statt als Leerwerte oder andere IDs übernommen. Fachliche Eindeutigkeitskonflikte erhalten passende Meldungen; Listen und Zusammenfassungen besitzen stabile Tie-Breaker (#92).
 - Die Revisionshelfer der API-Regressionen verlangen vor der Payload-Erzeugung genau einen passenden Bericht beziehungsweise Einsatz; fehlende und doppelte Treffer brechen ausdrücklich ab.
 - Revisionskonflikte benennen kontextneutral den „geladenen Stand“, sodass der Hinweis zu Einheitsberichten ebenso wie zu Einsatz-/Gesamtstandsrevisionen passt; HTTP 409 und der Erhalt offener Eingaben bleiben unverändert. `public/app.js` ist für GitHub ausdrücklich als handgepflegter, nicht generierter Quelltext markiert.
 - Der Parallelitätstest zu #86 identifiziert Sperreigentümer über InnoDB-Transaktions- und Sperr-IDs statt über die Thread-Zuordnung impliziter Insertsperren. Er berücksichtigt gemeinsame Duplikatprüfsperren auf noch nicht bereinigten alten Indexeinträgen und meldet bei Fehlern ausschließlich Metadaten der betroffenen Testtransaktion.
@@ -36,6 +39,18 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 - Die Einsatzlisten-API liefert konsolidierte Berichtstexte einschließlich zurückbehaltener Arbeitsstände ausschließlich an die Wehrführung. Führungskräfte und Einheitsführungen erhalten weiterhin ihre zulässigen Einsatz- und Statusdaten (#100).
 
 ### Breaking Changes
+
+Für #92 ändern sich die Typen von `users.unit_ids`, `incidents.assignments`,
+`assignments[].vehicles`, `reports.crew`, `reports.damaged_party`,
+`reports.damaging_party`, `reports.incident_command` und
+`reports.classification`: Sie sind echte JSON-Listen beziehungsweise -Objekte,
+keine darin eingebetteten JSON-Strings. API-Clients müssen diese Werte direkt
+verwenden. Die strengere Eingabevalidierung lehnt zuvor still umgewandelte
+fehlerhafte Formen mit HTTP 400 ab; die zulässigen Leerwerte stehen in der
+[API-Referenz](docs/API.md). Es ist keine zusätzliche Datenbankmigration nötig.
+PHP und Browser dürfen nur gemeinsam aktualisiert beziehungsweise
+zurückgesetzt werden. Die verbindlichen manuellen Schritte stehen unter
+[Deployment: API-Vertrag umstellen](docs/WEBSPACE-DEPLOYMENT.md#json-antworttypen-und-eingabevalidierung-umstellen-92).
 
 Die API-Antwort von `GET /api/incidents` enthält für `fuehrungskraft` und `einheitsleitung` kein `consolidated_text` mehr. Der native Browserclient benötigt keine Anpassung. Die Sicherheitskorrekturen für #99 und #100 erfordern keine zusätzliche Migration.
 
