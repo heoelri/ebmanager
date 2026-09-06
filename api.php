@@ -37,7 +37,7 @@ function databaseConfigurationError(): ?string
         )->fetchColumn();
         if ((int)$nameColumns !== 3) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
     } catch (PDOException $error) {
-        error_log((string)$error);
+        error_log('Datenbankprüfung fehlgeschlagen: SQLSTATE=' . $error->getCode() . ' code=' . (int)($error->errorInfo[1] ?? 0));
         return 'Datenbankverbindung fehlgeschlagen. Prüfen Sie DSN, Benutzername, Passwort und Erreichbarkeit.';
     }
     return null;
@@ -73,7 +73,7 @@ function sendWorkflowNotification(string $event, int $incidentId, array $unitIds
         if (!$incident) throw new RuntimeException('Einsatz nicht gefunden');
         $placeholders = implode(',', array_fill(0, count($unitIds), '?'));
         $unitNames = query(
-            "SELECT name FROM units WHERE organization_id=? AND id IN ($placeholders) ORDER BY name",
+            "SELECT name FROM units WHERE organization_id=? AND id IN ($placeholders) ORDER BY name,id",
             array_merge([$actor['organization_id']], $unitIds)
         )->fetchAll(PDO::FETCH_COLUMN);
         $eventDetails = $events[$event];
@@ -84,7 +84,7 @@ function sendWorkflowNotification(string $event, int $incidentId, array $unitIds
             )->fetchAll();
         } elseif ($eventDetails['role'] === 'einheitsleitung') {
             $recipients = query(
-                "SELECT u.id,u.name,u.email,GROUP_CONCAT(DISTINCT un.name ORDER BY un.name SEPARATOR ', ') unit_names
+                "SELECT u.id,u.name,u.email,GROUP_CONCAT(DISTINCT un.name ORDER BY un.name,un.id SEPARATOR ', ') unit_names
                  FROM users u JOIN user_units uu ON uu.user_id=u.id JOIN units un ON un.id=uu.unit_id
                  WHERE u.organization_id=? AND u.role='einheitsleitung' AND u.id<>? AND uu.unit_id IN ($placeholders)
                  GROUP BY u.id,u.name,u.email ORDER BY u.id",
@@ -152,6 +152,7 @@ function isoDate(mixed $value): string
 function requestDate(mixed $value, string $name): DateTimeImmutable
 {
     $text = required($value, $name, 100);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{1,3}Z$/D', $text)) throw new ApiError(400, "$name ist ungültig");
     $date = DateTimeImmutable::createFromFormat('!Y-m-d\TH:i:s.v\Z', $text, new DateTimeZone('UTC'));
     $errors = DateTimeImmutable::getLastErrors();
     if (!$date || ($errors && ($errors['warning_count'] || $errors['error_count']))) throw new ApiError(400, "$name ist ungültig");
@@ -181,7 +182,7 @@ function report(int $id, int $organizationId): ?array
 function currentUser(): ?array
 {
     $token = $_COOKIE[sessionCookieName()] ?? '';
-    if (!preg_match('/^[a-f0-9]{64}$/', $token)) return null;
+    if (!is_string($token) || !preg_match('/^[a-f0-9]{64}$/', $token)) return null;
     $user = one(
         'SELECT u.*,o.name organization_name FROM sessions s
          JOIN users u ON u.id=s.user_id JOIN organizations o ON o.id=u.organization_id
@@ -189,8 +190,9 @@ function currentUser(): ?array
         [hash('sha256', $token)]
     );
     if (!$user) return null;
-    $user['unitIds'] = array_map('intval', query('SELECT unit_id FROM user_units WHERE user_id=?', [$user['id']])->fetchAll(PDO::FETCH_COLUMN));
+    $user['unitIds'] = array_map('intval', query('SELECT unit_id FROM user_units WHERE user_id=? ORDER BY unit_id', [$user['id']])->fetchAll(PDO::FETCH_COLUMN));
     foreach (['id', 'organization_id', 'unit_id'] as $key) if ($user[$key] !== null) $user[$key] = (int)$user[$key];
+    assertResponseIntegers($user);
     return $user;
 }
 
@@ -209,8 +211,9 @@ function assertOwnUnit(array $user, int $unitId): void
 
 function membershipIds(array $data, int $organizationId): array
 {
-    $source = is_array($data['unitIds'] ?? null) ? $data['unitIds'] : (isset($data['unitId']) ? [$data['unitId']] : []);
-    $ids = array_values(array_unique(array_map('intval', $source)));
+    if (isset($data['unitId'])) positiveId($data['unitId'], 'Einheits-ID');
+    $source = $data['unitIds'] ?? (isset($data['unitId']) ? [$data['unitId']] : []);
+    $ids = idList($source, 'Einheits-IDs');
     $role = $data['role'] ?? '';
     if ($role === 'wehrleitung') return [];
     if ($role === 'einheitsleitung' && count($ids) !== 1) throw new ApiError(400, 'Für die Einheitsführung ist genau eine Einheit erforderlich');
@@ -229,21 +232,31 @@ function unitMembers(int $unitId, int $organizationId, bool $activeOnly = true):
 {
     $active = $activeOnly ? ' AND mu.active=1' : '';
     $rows = query(
-        "SELECT m.id,m.name,m.divera_id,mu.active,
-         COALESCE(GROUP_CONCAT(DISTINCT COALESCE(NULLIF(q.shortname,''),q.name) ORDER BY q.name SEPARATOR ', '),'') qualifications
+        "SELECT m.id,m.name,m.divera_id,mu.active
          FROM members m JOIN member_units mu ON mu.member_id=m.id
-         LEFT JOIN member_qualifications mq ON mq.member_id=m.id
-         LEFT JOIN qualifications q ON q.id=mq.qualification_id AND q.unit_id=mu.unit_id
-         WHERE mu.unit_id=? AND m.organization_id=?$active GROUP BY m.id,m.name,m.divera_id,mu.active ORDER BY m.name",
+         WHERE mu.unit_id=? AND m.organization_id=?$active ORDER BY m.name,m.id",
         [$unitId, $organizationId]
     )->fetchAll();
-    foreach ($rows as &$row) { $row['id'] = (int)$row['id']; $row['active'] = (int)$row['active']; }
+    $qualifications = [];
+    foreach (query(
+        "SELECT mq.member_id,COALESCE(NULLIF(q.shortname,''),q.name) label
+         FROM member_qualifications mq JOIN qualifications q ON q.id=mq.qualification_id
+         JOIN members m ON m.id=mq.member_id JOIN member_units mu ON mu.member_id=m.id AND mu.unit_id=q.unit_id
+         WHERE q.unit_id=? AND m.organization_id=?$active ORDER BY mq.member_id,q.name,q.id",
+        [$unitId, $organizationId]
+    )->fetchAll() as $qualification) $qualifications[(int)$qualification['member_id']][] = $qualification['label'];
+    foreach ($rows as &$row) {
+        $row['id'] = (int)$row['id'];
+        $row['active'] = (int)$row['active'];
+        $row['qualifications'] = implode(', ', array_unique($qualifications[$row['id']] ?? []));
+    }
     return $rows;
 }
 
 function statisticsDate(mixed $value, string $name, DateTimeZone $timezone): DateTimeImmutable
 {
     $text = required($value, $name, 10);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/D', $text)) throw new ApiError(400, "$name ist ungültig");
     $date = DateTimeImmutable::createFromFormat('!Y-m-d', $text, $timezone);
     $errors = DateTimeImmutable::getLastErrors();
     if (!$date || $date->format('Y-m-d') !== $text || ($errors && ($errors['warning_count'] || $errors['error_count']))) {
@@ -263,7 +276,7 @@ function statisticsPeriods(DateTimeImmutable $date): array
     return [$weekend ? 'weekend' : 'workday', $day ? 'day' : 'night'];
 }
 
-function unitStatistics(array $user, string $fromValue, string $toValue): array
+function unitStatistics(array $user, mixed $fromValue, mixed $toValue): array
 {
     assertRole($user, 'einheitsleitung');
     if (count($user['unitIds']) !== 1) throw new ApiError(403, 'Keine eindeutige Einheit zugeordnet');
@@ -336,7 +349,7 @@ function unitStatistics(array $user, string $fromValue, string $toValue): array
             $crewCount++;
         }
         foreach (query(
-            "SELECT vehicle FROM report_additional_vehicles WHERE report_id IN ($placeholders) ORDER BY vehicle",
+            "SELECT vehicle FROM report_additional_vehicles WHERE report_id IN ($placeholders) ORDER BY vehicle,report_id",
             $reportIds
         )->fetchAll(PDO::FETCH_COLUMN) as $vehicle) {
             $additionalVehicles[$vehicle] = ($additionalVehicles[$vehicle] ?? 0) + 1;
@@ -439,7 +452,7 @@ function visibleIncidentReports(int $incidentId, array $user): array
          JOIN incidents i ON i.id=r.incident_id
          JOIN users u ON u.id=r.author_id AND u.organization_id=i.organization_id
          JOIN units un ON un.id=r.unit_id AND un.organization_id=i.organization_id
-         WHERE r.incident_id=? AND i.organization_id=?$where ORDER BY r.created_at",
+         WHERE r.incident_id=? AND i.organization_id=?$where ORDER BY r.created_at,r.id",
         $params
     )->fetchAll();
     $crew = [];
@@ -470,14 +483,20 @@ function visibleIncidentReports(int $incidentId, array $user): array
         }
         foreach (query(
             "SELECT report_id,vehicle FROM report_additional_vehicles
-             WHERE report_id IN ($placeholders) ORDER BY vehicle",
+             WHERE report_id IN ($placeholders) ORDER BY vehicle,report_id",
             $ids
         )->fetchAll() as $vehicle) {
             $additionalVehicles[(int)$vehicle['report_id']][] = $vehicle['vehicle'];
         }
     }
     foreach ($rows as &$row) {
-        $row['crew'] = json_encode($crew[(int)$row['id']] ?? [], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        $row['crew'] = $crew[(int)$row['id']] ?? [];
+        foreach (['damaged_party', 'damaging_party', 'incident_command', 'classification'] as $key) {
+            $row[$key] = storedJson($row[$key], true);
+        }
+        foreach (['created_at', 'updated_at', 'released_at'] as $key) {
+            if ($row[$key] !== null) $row[$key] = utcString(new DateTimeImmutable($row[$key], new DateTimeZone('UTC')));
+        }
         $row['history'] = $history[(int)$row['id']] ?? [];
         $row['additionalVehicles'] = $additionalVehicles[(int)$row['id']] ?? [];
         $row['editable'] = canEditReport($row, $user);
@@ -502,6 +521,7 @@ function exportDateTime(mixed $value): string
 function exportJson(mixed $value): array
 {
     if (is_array($value)) return $value;
+    if ($value instanceof stdClass) return get_object_vars($value);
     return json_decode((string)($value ?: '{}'), true, 512, JSON_THROW_ON_ERROR);
 }
 
@@ -519,7 +539,7 @@ function incidentExportLines(array $incident, array $user): array
     if ($user['role'] !== 'wehrleitung') $params[] = $user['id'];
     $assignments = query(
         "SELECT u.name,iu.vehicles FROM incident_units iu JOIN units u ON u.id=iu.unit_id AND u.organization_id=?
-         WHERE iu.incident_id=?$where ORDER BY u.name",
+         WHERE iu.incident_id=?$where ORDER BY u.name,u.id",
         $params
     )->fetchAll();
     $lines = [];
@@ -680,17 +700,18 @@ function transitionReport(int $reportId, string $action, array $user, string $co
 
 function vehicleSnapshots(mixed $value): array
 {
-    if (!is_array($value)) throw new ApiError(400, 'Fahrzeuge sind ungültig');
+    $value = listInput($value, 'Fahrzeuge');
     // Preserve labels and ownership as they were when the incident was imported.
     return array_map(function ($vehicle) {
         if (is_string($vehicle)) return required($vehicle, 'Fahrzeug', 200);
-        if (!is_array($vehicle)) throw new ApiError(400, 'Fahrzeug ist ungültig');
+        $vehicle = objectInput($vehicle, 'Fahrzeug');
+        if (array_key_exists('own', $vehicle) && !is_bool($vehicle['own'])) throw new ApiError(400, 'Fahrzeugzugehörigkeit muss ein Wahrheitswert sein');
         return [
             'id' => optional($vehicle['id'] ?? '', 'Fahrzeug-ID', 200),
             'name' => required($vehicle['name'] ?? '', 'Fahrzeugname', 200),
             'shortname' => optional($vehicle['shortname'] ?? '', 'Fahrzeugtyp', 100),
             'fullname' => optional($vehicle['fullname'] ?? '', 'Fahrzeugtyp', 200),
-            'own' => ($vehicle['own'] ?? true) !== false
+            'own' => $vehicle['own'] ?? true
         ];
     }, $value);
 }
@@ -709,20 +730,19 @@ function reportDetails(array $data, array $incident): array
         if ($chronological[$index] < $chronological[$index - 1]) throw new ApiError(400, 'Vorhandene Einsatzzeiten müssen chronologisch sein');
     }
     $classification = [];
-    $selected = is_array($data['classification'] ?? null) ? $data['classification'] : [];
+    $selected = objectInput($data['classification'] ?? new stdClass(), 'Aufgliederung');
     foreach (CLASSIFICATIONS as $group => $allowed) {
-        $values = isset($selected[$group]) && is_array($selected[$group])
-            ? array_values(array_unique(array_map('strval', $selected[$group]))) : [];
+        $values = listInput($selected[$group] ?? [], 'Aufgliederung');
         foreach ($values as $value) if (!in_array($value, $allowed, true)) throw new ApiError(400, 'Aufgliederung ist ungültig');
-        $classification[$group] = $values;
+        $classification[$group] = array_values(array_unique($values));
     }
     $structured = [];
     foreach ([
-        'damagedParty' => ['name' => 'Name der geschädigten Person', 'phone' => 'Telefon der geschädigten Person', 'address' => 'Adresse der geschädigten Person'],
-        'damagingParty' => ['name' => 'Name des Schädigers', 'phone' => 'Telefon des Schädigers', 'address' => 'Adresse des Schädigers'],
-        'incidentCommand' => ['rank' => 'Dienstgrad der Einsatzleitung', 'name' => 'Name der Einsatzleitung', 'additionalRank' => 'Weiterer Dienstgrad', 'additionalName' => 'Weitere Führungskraft']
-    ] as $group => $fields) {
-        $source = is_array($data[$group] ?? null) ? $data[$group] : [];
+        'damagedParty' => ['Geschädigte Person', ['name' => 'Name der geschädigten Person', 'phone' => 'Telefon der geschädigten Person', 'address' => 'Adresse der geschädigten Person']],
+        'damagingParty' => ['Schädiger', ['name' => 'Name des Schädigers', 'phone' => 'Telefon des Schädigers', 'address' => 'Adresse des Schädigers']],
+        'incidentCommand' => ['Einsatzleitung', ['rank' => 'Dienstgrad der Einsatzleitung', 'name' => 'Name der Einsatzleitung', 'additionalRank' => 'Weiterer Dienstgrad', 'additionalName' => 'Weitere Führungskraft']]
+    ] as $group => [$groupLabel, $fields]) {
+        $source = objectInput($data[$group] ?? new stdClass(), $groupLabel);
         foreach ($fields as $field => $label) $structured[$group][$field] = optional($source[$field] ?? null, $label, $field === 'address' ? 500 : 200);
     }
     return [
@@ -777,9 +797,9 @@ function additionalVehicleSelection(
         if (isset($current[$vehicle])) $assignable[] = $vehicle;
     }
     return [
-        'selected' => array_keys($selected),
+        'selected' => array_map('strval', array_keys($selected)),
         'assignable' => $assignable,
-        'removed' => array_values(array_diff(array_keys($existing), array_keys($selected), array_keys($base)))
+        'removed' => array_map('strval', array_values(array_diff(array_keys($existing), array_keys($selected), array_keys($base))))
     ];
 }
 
@@ -816,23 +836,23 @@ function replaceCrew(
     }
     $seen = $occupied = $rows = [];
     foreach ($crew as $item) {
-        if (!is_array($item)) throw new ApiError(400, 'Besatzung ist ungültig');
-        $memberId = (int)($item['memberId'] ?? 0);
-        $vehicle = trim((string)($item['vehicle'] ?? ''));
-        $role = (string)($item['role'] ?? 'besatzung');
+        $item = objectInput($item, 'Besatzungseintrag');
+        $memberId = positiveId($item['memberId'] ?? null, 'Mitglieds-ID');
+        $vehicle = optional($item['vehicle'] ?? null, 'Fahrzeug', 200);
+        $role = required($item['role'] ?? 'besatzung', 'Funktion', 30);
         $unchanged = isset($existingCrew[$memberId])
             && $existingCrew[$memberId]['vehicle'] === $vehicle
             && $existingCrew[$memberId]['role'] === $role;
-        if ($vehicle && in_array($vehicle, $removedAdditionalVehicles, true)) {
+        if ($vehicle !== '' && in_array($vehicle, $removedAdditionalVehicles, true)) {
             throw new ApiError(400, 'Das zusätzliche Fahrzeug ist noch einer Besatzung zugeordnet');
         }
         // Driver and unit leader are unique per vehicle; crew members are not.
-        $slot = $vehicle && $role !== 'besatzung' ? "$vehicle:$role" : '';
+        $slot = $vehicle !== '' && $role !== 'besatzung' ? "$vehicle:$role" : '';
         if (!$memberId || isset($seen[$memberId]) || !isset($members[$memberId]) || (!(int)$members[$memberId]['active'] && !$unchanged)
-            || ($vehicle && !in_array($vehicle, $vehicles, true)
+            || ($vehicle !== '' && !in_array($vehicle, $vehicles, true)
                 && (!$unchanged || in_array($vehicle, $removedAdditionalVehicles, true)))
             || !in_array($role, ['maschinist', 'einheitsfuehrer', 'besatzung'], true)
-            || (!$vehicle && $role !== 'besatzung') || ($slot && isset($occupied[$slot]))) {
+            || ($vehicle === '' && $role !== 'besatzung') || ($slot && isset($occupied[$slot]))) {
             throw new ApiError(400, 'Besatzung ist ungültig');
         }
         $seen[$memberId] = true;
@@ -846,7 +866,7 @@ function replaceCrew(
         [$reportId, $row['memberId'], $row['name'], $row['vehicle'], $row['role']]
     );
     return [
-        'vehicles' => implode(', ', array_values(array_unique(array_filter(array_column($rows, 'vehicle'))))),
+        'vehicles' => implode(', ', array_values(array_unique(array_filter(array_column($rows, 'vehicle'), fn($vehicle) => $vehicle !== '')))),
         'personnel' => implode(', ', array_column($rows, 'name'))
     ];
 }
@@ -941,7 +961,7 @@ function diveraData(array $unit, bool $includeVehicles = true, ?array $cluster =
     }
     $vehicles = [];
     foreach ($ownVehicles as $id => $vehicle) $vehicles[] = [
-        'id' => $id, 'name' => $vehicle['name'] ?? $vehicle['shortname'] ?? $id,
+        'id' => (string)$id, 'name' => $vehicle['name'] ?? $vehicle['shortname'] ?? (string)$id,
         'shortname' => (string)($vehicle['shortname'] ?? ''), 'fullname' => (string)($vehicle['fullname'] ?? ''), 'own' => true
     ];
     $alarms = [];
@@ -1132,7 +1152,10 @@ function persistDiveraAlarm(array $alarm, int $unitId, array $user): array
             $changed = true;
         }
     }
-    $snapshot = vehicleSnapshots($alarm['vehicles'] ?? []);
+    $snapshot = vehicleSnapshots(array_map(
+        fn($vehicle) => is_array($vehicle) ? (object)$vehicle : $vehicle,
+        $alarm['vehicles'] ?? []
+    ));
     $vehicles = json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
     $assignment = query(
         'INSERT IGNORE INTO incident_units(incident_id,unit_id,vehicles) VALUES(?,?,?)',
@@ -1141,7 +1164,7 @@ function persistDiveraAlarm(array $alarm, int $unitId, array $user): array
     $newAssignment = $assignment->rowCount() === 1;
     if (!$newAssignment) {
         $existing = one('SELECT vehicles FROM incident_units WHERE incident_id=? AND unit_id=? FOR UPDATE', [$incidentId, $unitId]);
-        $before = array_map('json_encode', vehicleSnapshots(json_decode($existing['vehicles'], true, 512, JSON_THROW_ON_ERROR)));
+        $before = array_map('json_encode', vehicleSnapshots(storedJson($existing['vehicles'])));
         $after = array_map('json_encode', $snapshot);
         sort($before, SORT_STRING);
         sort($after, SORT_STRING);
@@ -1177,6 +1200,10 @@ try {
     $public = in_array($path, ['/api/bootstrap', '/api/setup', '/api/login', '/api/password-reset/context', '/api/password-reset/request', '/api/password-reset/confirm'], true);
     $user = $public ? null : currentUser();
     if (!$public && !$user) respond(401, ['error' => 'Bitte anmelden']);
+    if (!in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)) input();
+    if (preg_match('#^/api/(?:units|users|incidents|reports)/([^/]+)(?:/|$)#', $path, $identifier)) {
+        positiveId($identifier[1]);
+    }
 
     if ($method === 'GET' && $path === '/api/bootstrap') {
         $databaseError = databaseConfigurationError();
@@ -1189,8 +1216,8 @@ try {
         $data = input();
         $setupToken = (string)(config()['setup_token'] ?? '');
         if (strlen($setupToken) < 32) throw new ApiError(503, 'SETUP_TOKEN ist nicht sicher konfiguriert');
-        if (!hash_equals($setupToken, (string)($data['setupToken'] ?? ''))) throw new ApiError(403, 'Einrichtungstoken ist ungültig');
-        $password = required($data['password'] ?? null, 'Passwort', 200);
+        if (!hash_equals($setupToken, optional($data['setupToken'] ?? null, 'Einrichtungstoken', 1000))) throw new ApiError(403, 'Einrichtungstoken ist ungültig');
+        $password = passwordInput($data['password'] ?? null);
         if (textLength($password) < 10) throw new ApiError(400, 'Passwort muss mindestens 10 Zeichen haben');
         $email = emailAddress($data['email'] ?? null);
         transaction(function () use ($data, $email, $password) {
@@ -1209,7 +1236,7 @@ try {
     if ($method === 'POST' && $path === '/api/login') {
         $data = input();
         $email = required($data['email'] ?? null, 'E-Mail', 320);
-        $password = (string)($data['password'] ?? '');
+        $password = passwordInput($data['password'] ?? '', true);
         $token = bin2hex(random_bytes(32));
         $cookieName = sessionCookieName();
         transaction(function () use ($email, $password, $token, $cookieName) {
@@ -1221,7 +1248,7 @@ try {
                 query('UPDATE users SET password_hash=? WHERE id=?', [password_hash($password, PASSWORD_DEFAULT), $login['id']]);
             }
             query('DELETE FROM sessions WHERE expires_at<=UTC_TIMESTAMP()');
-            if (preg_match('/^[a-f0-9]{64}$/', $_COOKIE[$cookieName] ?? '')) query('DELETE FROM sessions WHERE token=?', [hash('sha256', $_COOKIE[$cookieName])]);
+            if (is_string($_COOKIE[$cookieName] ?? '') && preg_match('/^[a-f0-9]{64}$/', $_COOKIE[$cookieName] ?? '')) query('DELETE FROM sessions WHERE token=?', [hash('sha256', $_COOKIE[$cookieName])]);
             query('INSERT INTO sessions(token,user_id,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 12 HOUR)', [hash('sha256', $token), $login['id']]);
             query('INSERT INTO login_history(user_id,logged_in_at) VALUES(?,UTC_TIMESTAMP())', [$login['id']]);
         });
@@ -1261,7 +1288,7 @@ try {
 
     if ($method === 'POST' && $path === '/api/password-reset/context') {
         $data = input();
-        $token = (string)($data['token'] ?? '');
+        $token = optional($data['token'] ?? null, 'Wiederherstellungslink', 64);
         if (!preg_match('/^[a-f0-9]{64}$/', $token)) throw new ApiError(400, 'Wiederherstellungslink ist ungültig oder abgelaufen');
         $reset = one(
             'SELECT u.email FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE pr.token_hash=? AND pr.expires_at>UTC_TIMESTAMP()',
@@ -1273,9 +1300,9 @@ try {
 
     if ($method === 'POST' && $path === '/api/password-reset/confirm') {
         $data = input();
-        $token = (string)($data['token'] ?? '');
+        $token = optional($data['token'] ?? null, 'Wiederherstellungslink', 64);
         if (!preg_match('/^[a-f0-9]{64}$/', $token)) throw new ApiError(400, 'Wiederherstellungslink ist ungültig oder abgelaufen');
-        $password = required($data['password'] ?? null, 'Passwort', 200);
+        $password = passwordInput($data['password'] ?? null);
         if (textLength($password) < 10) throw new ApiError(400, 'Passwort muss mindestens 10 Zeichen haben');
         transaction(function () use ($token, $password) {
             $tokenHash = hash('sha256', $token);
@@ -1345,7 +1372,7 @@ try {
             $email['error'] = $error->getMessage();
         }
         $systemUnits = query(
-            'SELECT id,name,(divera_access_key IS NOT NULL) diveraConfigured FROM units WHERE organization_id=? ORDER BY name',
+            'SELECT id,name,(divera_access_key IS NOT NULL) diveraConfigured FROM units WHERE organization_id=? ORDER BY name,id',
             [$user['organization_id']]
         )->fetchAll();
         foreach ($systemUnits as &$unit) {
@@ -1354,8 +1381,8 @@ try {
         }
         $systemUsers = query(
             "SELECT u.id,u.name,u.email,u.role,
-             COALESCE((SELECT GROUP_CONCAT(un.name ORDER BY un.name SEPARATOR ', ') FROM user_units uu JOIN units un ON un.id=uu.unit_id WHERE uu.user_id=u.id),'') units
-             FROM users u WHERE u.organization_id=? ORDER BY u.name",
+             COALESCE((SELECT GROUP_CONCAT(un.name ORDER BY un.name,un.id SEPARATOR ', ') FROM user_units uu JOIN units un ON un.id=uu.unit_id WHERE uu.user_id=u.id),'') units
+             FROM users u WHERE u.organization_id=? ORDER BY u.name,u.id",
             [$user['organization_id']]
         )->fetchAll();
         foreach ($systemUsers as &$systemUser) $systemUser['id'] = (int)$systemUser['id'];
@@ -1382,7 +1409,7 @@ try {
             "SELECT u.id,u.name,(u.divera_access_key IS NOT NULL) divera_configured,
              DATE_FORMAT(MAX(di.imported_at),'%Y-%m-%dT%H:%i:%s.000Z') last_divera_import_at
              FROM units u LEFT JOIN divera_imports di ON di.unit_id=u.id
-             WHERE $where GROUP BY u.id,u.name,u.divera_access_key ORDER BY u.name",
+             WHERE $where GROUP BY u.id,u.name,u.divera_access_key ORDER BY u.name,u.id",
             $params
         )->fetchAll();
         foreach ($rows as &$row) { $row['id'] = (int)$row['id']; $row['divera_configured'] = (int)$row['divera_configured']; }
@@ -1408,7 +1435,7 @@ try {
         assertOwnUnit($user, $unitId);
         if (!unit($unitId, $user['organization_id'])) throw new ApiError(404, 'Einheit nicht gefunden');
         $vehicles = query(
-            'SELECT id,divera_id,name,shortname,fullname FROM vehicles WHERE unit_id=? ORDER BY name',
+            'SELECT id,divera_id,name,shortname,fullname FROM vehicles WHERE unit_id=? ORDER BY name,id',
             [$unitId]
         )->fetchAll();
         foreach ($vehicles as &$vehicle) $vehicle['id'] = (int)$vehicle['id'];
@@ -1420,8 +1447,8 @@ try {
         $today = new DateTimeImmutable('today', $timezone);
         respond(200, unitStatistics(
             $user,
-            (string)($_GET['from'] ?? $today->format('Y-01-01')),
-            (string)($_GET['to'] ?? $today->format('Y-m-d'))
+            $_GET['from'] ?? $today->format('Y-01-01'),
+            $_GET['to'] ?? $today->format('Y-m-d')
         ));
     }
 
@@ -1430,8 +1457,8 @@ try {
         $rows = query(
             "SELECT u.id,u.name,u.email,u.role,
              COALESCE((SELECT JSON_ARRAYAGG(uu.unit_id) FROM user_units uu WHERE uu.user_id=u.id),JSON_ARRAY()) unit_ids,
-             COALESCE((SELECT GROUP_CONCAT(un.name ORDER BY un.name SEPARATOR ', ') FROM user_units uu JOIN units un ON un.id=uu.unit_id WHERE uu.user_id=u.id),'') unit_names
-             FROM users u WHERE u.organization_id=? ORDER BY u.name",
+             COALESCE((SELECT GROUP_CONCAT(un.name ORDER BY un.name,un.id SEPARATOR ', ') FROM user_units uu JOIN units un ON un.id=uu.unit_id WHERE uu.user_id=u.id),'') unit_names
+             FROM users u WHERE u.organization_id=? ORDER BY u.name,u.id",
             [$user['organization_id']]
         )->fetchAll();
         $history = query(
@@ -1444,6 +1471,8 @@ try {
         foreach ($history as $login) $historyByUser[(int)$login['user_id']][] = $login['logged_in_at'];
         foreach ($rows as &$row) {
             $row['id'] = (int)$row['id'];
+            $row['unit_ids'] = array_map('intval', storedJson($row['unit_ids']));
+            sort($row['unit_ids'], SORT_REGULAR);
             $row['loginHistory'] = $historyByUser[$row['id']] ?? [];
         }
         respond(200, $rows);
@@ -1522,8 +1551,8 @@ try {
         $data = input();
         if (!in_array($data['role'] ?? null, ROLES, true)) throw new ApiError(400, 'Rolle ist ungültig');
         $unitIds = membershipIds($data, $user['organization_id']);
-        $password = (string)($data['password'] ?? '');
-        if ($password && textLength($password) < 10) throw new ApiError(400, 'Passwort muss mindestens 10 Zeichen haben');
+        $password = passwordInput($data['password'] ?? '', true);
+        if ($password !== '' && textLength($password) < 10) throw new ApiError(400, 'Passwort muss mindestens 10 Zeichen haben');
         $email = emailAddress($data['email'] ?? null);
         transaction(function () use ($data, $password, $email, $unitIds, $existing) {
             query('SELECT id FROM organizations WHERE id=? FOR UPDATE', [$existing['organization_id']]);
@@ -1558,7 +1587,7 @@ try {
         $rows = query(
             "SELECT i.id,i.organization_id,i.divera_id,i.foreign_id,i.divera_date,i.title,i.started_at,
              i.message,i.address,i.lat,i.lng,i.remark,i.patient,i.caller,i.consolidated_at$consolidatedText
-             FROM incidents i WHERE $where ORDER BY i.started_at DESC",
+             FROM incidents i WHERE $where ORDER BY i.started_at DESC,i.id DESC",
             $params
         )->fetchAll();
         $assignments = [];
@@ -1580,6 +1609,7 @@ try {
             unset($assignment['incident_id']);
             $assignment['unitId'] = (int)$assignment['unitId'];
             $assignment['hasReport'] = (int)$assignment['hasReport'];
+            $assignment['vehicles'] = storedJson($assignment['vehicles']);
             if ($assignment['reportAuthorId'] !== null) $assignment['reportAuthorId'] = (int)$assignment['reportAuthorId'];
             $assignments[$incidentId][] = $assignment;
         }
@@ -1633,7 +1663,8 @@ try {
                 unset($assignment['unitName'], $assignment['reportStatus'], $assignment['reportAuthorId']);
             }
             unset($assignment);
-            $row['assignments'] = json_encode($relevant, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+            $row['assignments'] = $relevant;
+            if ($row['consolidated_at'] !== null) $row['consolidated_at'] = utcString(new DateTimeImmutable($row['consolidated_at'], new DateTimeZone('UTC')));
             foreach (['id', 'organization_id', 'divera_date'] as $key) if ($row[$key] !== null) $row[$key] = (int)$row[$key];
             if (isset($row['revision'])) $row['revision'] = (int)$row['revision'];
             foreach (['lat', 'lng'] as $key) if ($row[$key] !== null) $row[$key] = (float)$row[$key];
@@ -1644,8 +1675,7 @@ try {
 
     if ($method === 'POST' && $path === '/api/incidents') {
         $data = input();
-        $source = is_array($data['unitIds'] ?? null) ? $data['unitIds'] : [];
-        $unitIds = array_values(array_unique(array_map('intval', $source)));
+        $unitIds = idList($data['unitIds'] ?? [], 'Einheits-IDs');
         if (!$unitIds) throw new ApiError(400, 'Mindestens eine gültige Einheit ist erforderlich');
         foreach ($unitIds as $unitId) {
             if (!$unitId || !unit($unitId, $user['organization_id'])) throw new ApiError(400, 'Mindestens eine gültige Einheit ist erforderlich');
@@ -1717,7 +1747,7 @@ try {
         $foundIncident = incident($incidentId, $user['organization_id']);
         if (!$foundIncident) throw new ApiError(404, 'Einsatz nicht gefunden');
         $data = input();
-        $unitId = (int)($data['unitId'] ?? 0);
+        $unitId = positiveId($data['unitId'] ?? null, 'Einheits-ID');
         assertOwnUnit($user, $unitId);
         if (!one('SELECT incident_id FROM incident_units WHERE incident_id=? AND unit_id=?', [$incidentId, $unitId])) throw new ApiError(400, 'Einheit wurde nicht alarmiert');
         if (one('SELECT id FROM reports WHERE incident_id=? AND unit_id=?', [$incidentId, $unitId])) throw new ApiError(409, 'Für diese Einheit existiert bereits ein Einsatzbericht');
@@ -1799,7 +1829,7 @@ try {
 
     if ($method === 'POST' && preg_match('#^/api/reports/(\d+)/(submit-to-unit|return-to-author|submit-to-command|return-to-unit)$#', $path, $match)) {
         $data = input();
-        $result = transitionReport((int)$match[1], $match[2], $user, (string)($data['comment'] ?? ''), $data['revision'] ?? null);
+        $result = transitionReport((int)$match[1], $match[2], $user, optional($data['comment'] ?? null, 'Kommentar', 2000), $data['revision'] ?? null);
         respond(200, array_filter($result, fn($value) => $value !== null));
     }
 
@@ -1822,11 +1852,13 @@ try {
             if (!is_array($expected) || !array_is_list($expected)) throw new ApiError(400, 'Die geladenen Berichtsrevisionen sind erforderlich.');
             $versions = [];
             foreach ($expected as $version) {
-                if (!is_array($version) || !is_int($version['id'] ?? null) || $version['id'] < 1 || isset($versions[$version['id']])
+                $version = objectInput($version, 'Berichtsrevision');
+                $id = positiveId($version['id'] ?? null, 'Berichts-ID');
+                if (isset($versions[$id])
                     || !is_int($version['revision'] ?? null) || $version['revision'] < 1 || $version['revision'] > 4294967295) {
                     throw new ApiError(400, 'Die geladenen Berichtsrevisionen sind ungültig.');
                 }
-                $versions[$version['id']] = $version['revision'];
+                $versions[$id] = $version['revision'];
             }
             $actual = [];
             foreach ($reports as $report) $actual[(int)$report['id']] = (int)$report['revision'];
@@ -1857,7 +1889,9 @@ try {
         assertOwnUnit($user, $unitId);
         $foundUnit = unit($unitId, $user['organization_id']);
         if (!$foundUnit || !$foundUnit['divera_access_key']) throw new ApiError(400, 'DIVERA ist nicht konfiguriert');
-        respond(200, diveraData($foundUnit, ($_GET['summary'] ?? '') !== '1'));
+        $summary = $_GET['summary'] ?? '0';
+        if (!in_array($summary, ['0', '1'], true)) throw new ApiError(400, 'Zusammenfassungsoption ist ungültig');
+        respond(200, diveraData($foundUnit, $summary !== '1'));
     }
 
     if ($method === 'POST' && preg_match('#^/api/units/(\d+)/divera/members/sync$#', $path, $match)) {
@@ -1947,10 +1981,9 @@ try {
 } catch (ApiError $error) {
     respond($error->status, ['error' => $error->getMessage()]);
 } catch (PDOException $error) {
-    error_log((string)$error);
-    $duplicate = (int)($error->errorInfo[1] ?? 0) === 1062;
-    respond($duplicate ? 409 : 500, ['error' => $duplicate ? 'Datensatz existiert bereits' : 'Interner Fehler']);
+    error_log('Datenbankfehler: SQLSTATE=' . $error->getCode() . ' code=' . (int)($error->errorInfo[1] ?? 0));
+    respond(500, ['error' => 'Interner Fehler']);
 } catch (Throwable $error) {
-    error_log((string)$error);
+    error_log('Interner Fehler: ' . $error::class);
     respond(500, ['error' => 'Interner Fehler']);
 }

@@ -6,6 +6,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Added
 
+- Eine kompakte [API-Referenz](docs/API.md) beschreibt Endpunkte, Rollen, Eingaben, native Antworttypen, optionale Werte, UTC-Zeitformate und Konfliktvorbedingungen (#92).
 - Einheitsführungen erhalten einen eigenen Bereich „Statistik“ mit Zeitraumfilter, Fahrzeug- und Mitgliederhäufigkeiten, zeitlichen Verteilungen sowie der durchschnittlichen Besatzungsstärke ihrer Einheit.
 - Bearbeitbare Einheitsberichte können zusätzliche Fahrzeuge aus dem aktuellen Stamm der eigenen Einheit aufnehmen. Die Fahrzeuge stehen als Besatzungsziele bereit, bleiben von DIVERA-Neuimporten unberührt und erscheinen in Ansichten sowie PDF-Exporten.
 - Die Ressourcenansicht hebt die weiterhin gespeicherte Auswahl „Inaktive Mitglieder anzeigen“ bei der Einheitsauswahl hervor; Mitglieder, eigene Fahrzeuge und Fahrzeuge anderer Einheiten sind standardmäßig geöffnet und nativ einklappbar.
@@ -17,6 +18,11 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Changed
 
+- Einsatzdaten und bereits vorhandene Einheits-Fahrzeuglisten bleiben ab dem ersten Einheitsbericht historisch erhalten, auch für andere alarmierte Einheiten ohne eigenen Bericht. Abweichende DIVERA-Importe warnen sichtbar, statt Alarmzeit, Berichtsjahr, laufende Nummer oder Freigaben still zu verändern (#89).
+- Autor- und Besatzungsnamen werden als Berichtsdaten gespeichert. Konto-/Stammdatenänderungen ändern bestehende Berichte, PDFs, Personalübersichten und Prüfverläufe nicht; neu aufgenommene Personen erhalten den aktuellen Namen. Die Mitgliederstatistik zählt weiterhin je Person und zeigt den letzten historischen Namen im ausgewerteten Einsatzzeitraum (#89).
+- Identische oder historisch verworfene Importe erhalten alle fachlichen Revisionen und Abschlüsse. Neue Einheitszuordnungen bleiben möglich und widerrufen nur den Gesamtstand. Der Vollabgleich unterscheidet neu, tatsächlich aktualisiert und unverändert sowie Einsätze mit verworfenen Abweichungen; Import- und Mailwarnungen werden gemeinsam angezeigt (#89).
+- Führungskräfte starten unter „Einsätze“ mit „Bericht erforderlich“. Bisher gespeichertes „Alle Status“ wird einmalig auf diesen Standard umgestellt; andere gespeicherte Filter und eine danach ausdrücklich gewählte Anzeige aller Status bleiben erhalten. Für Einheits- und Wehrführung ändert sich die Voreinstellung nicht.
+- Einheitszuordnungen, Fahrzeug-Snapshots und Besatzungen werden als native JSON-Listen geliefert; Kontakt-, Einsatzleitungs- und Klassifikationsangaben als native Objekte. Der Browser verarbeitet diese Werte ohne eine zweite JSON-Dekodierung und meldet falsche Antworttypen sichtbar, statt daraus leere Bearbeitungsformulare zu erzeugen (#92).
 - „Einsatz anlegen“ ist auf der Einsatzübersicht standardmäßig eingeklappt und weist auf die ausschließliche Nutzung für nicht über DIVERA alarmierte Einsätze hin.
 - Die Box „DIVERA Import“ auf der Einsatzübersicht ist standardmäßig eingeklappt.
 - Fremde Alarmfahrzeuge zeigen bei eindeutigem, bereits synchronisiertem Fahrzeugstamm einer anderen Einheit derselben Wehr Name und Typ statt nur der DIVERA-ID; fehlende oder mehrdeutige Zuordnungen bleiben bei der ID.
@@ -24,6 +30,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Fixed
 
+- Fehlerhafte Text-, ID-, Kontakt-, Klassifikations- und Listenformen werden ausdrücklich abgewiesen statt als Leerwerte oder andere IDs übernommen. Objektfehler benennen den betroffenen Berichtsbereich; fachliche Eindeutigkeitskonflikte erhalten passende Meldungen. Listen und Zusammenfassungen besitzen stabile Tie-Breaker; auch der Demo-Seed-Check verarbeitet native Zuordnungslisten (#92).
 - Die Revisionshelfer der API-Regressionen verlangen vor der Payload-Erzeugung genau einen passenden Bericht beziehungsweise Einsatz; fehlende und doppelte Treffer brechen ausdrücklich ab.
 - Revisionskonflikte benennen kontextneutral den „geladenen Stand“, sodass der Hinweis zu Einheitsberichten ebenso wie zu Einsatz-/Gesamtstandsrevisionen passt; HTTP 409 und der Erhalt offener Eingaben bleiben unverändert. `public/app.js` ist für GitHub ausdrücklich als handgepflegter, nicht generierter Quelltext markiert.
 - Der Parallelitätstest zu #86 identifiziert Sperreigentümer über InnoDB-Transaktions- und Sperr-IDs statt über die Thread-Zuordnung impliziter Insertsperren. Er berücksichtigt gemeinsame Duplikatprüfsperren auf noch nicht bereinigten alten Indexeinträgen und meldet bei Fehlern ausschließlich Metadaten der betroffenen Testtransaktion.
@@ -37,21 +44,51 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Breaking Changes
 
+**#89 benötigt Migration 005 und eine neue ausdrückliche Betreiberbestätigung
+vor einem Merge nach `main`; frühere Freigaben für 004/#92 gelten nicht dafür.**
+Bestehende Namen werden nur aus dem heutigen mandanteneigenen Bestand
+übernommen; bereits verlorene Namensstände sind nicht rekonstruierbar.
+`personnel` wird aus der strukturierten Besatzung neu aufgebaut; Bestandsberichte
+und Einsätze mit Berichten erhalten einmalig eine höhere Revision.
+Die beiden Namensspalten sind anschließend `NOT NULL` ohne Default:
+Alter Anwendungscode kann keine Berichte/Besatzungen mehr anlegen.
+Verbindliche Reihenfolge: unabhängige Schreibsperre und Sicherung, Migration
+005 einschließlich Prüfung und Ledger-Vermerk, Betreiberbestätigung,
+gemeinsamer PHP-/Browserwechsel, Funktionsprüfung, Freigabe.
+Die ausführlichen manuellen Schritte, Grenzen und der schemaabhängige Rollback
+stehen ausschließlich unter
+[Deployment: Historische Berichtsdaten](docs/WEBSPACE-DEPLOYMENT.md#historische-berichtsdaten-einführen-89).
+Die Bedeutung von `incidentsUpdated` ändert sich von „bereits vorhanden“ zu
+„fachlich geändert“; unveränderte Einsätze stehen in `incidentsUnchanged`.
+
+Für #92 ändern sich die Typen von `users.unit_ids`, `incidents.assignments`,
+`assignments[].vehicles`, `reports.crew`, `reports.damaged_party`,
+`reports.damaging_party`, `reports.incident_command` und
+`reports.classification`: Sie sind echte JSON-Listen beziehungsweise -Objekte,
+keine darin eingebetteten JSON-Strings. API-Clients müssen diese Werte direkt
+verwenden. Die strengere Eingabevalidierung lehnt zuvor still umgewandelte
+fehlerhafte Formen mit HTTP 400 ab; die zulässigen Leerwerte stehen in der
+[API-Referenz](docs/API.md). Es ist keine zusätzliche Datenbankmigration nötig.
+PHP und Browser dürfen nur gemeinsam aktualisiert beziehungsweise
+zurückgesetzt werden. Die verbindlichen manuellen Schritte stehen unter
+[Deployment: API-Vertrag umstellen](docs/WEBSPACE-DEPLOYMENT.md#json-antworttypen-und-eingabevalidierung-umstellen-92).
+
 Die API-Antwort von `GET /api/incidents` enthält für `fuehrungskraft` und `einheitsleitung` kein `consolidated_text` mehr. Der native Browserclient benötigt keine Anpassung. Die Sicherheitskorrekturen für #99 und #100 erfordern keine zusätzliche Migration.
 
-1. Bestehende Installationen auf Basis von `2026-09-03` müssen vor dem neuen Anwendungscode `migrations/003-report-additional-vehicles.sql` genau einmal importieren.
-2. Danach muss `003-report-additional-vehicles.sql` in `schema_migrations` vorhanden sein.
-3. Für #86 anschließend `migrations/004-report-revisions.sql` genau einmal importieren und den erfolgreichen Import in `schema_migrations` vermerken. Die Migration ergänzt `incidents.revision` und `reports.revision` mit Startwert 1, ohne fachliche Daten zu löschen.
-4. Erst danach den neuen PHP- und Browsercode zusammen deployen; bei automatischem Deployment muss die Migration **vor dem Merge nach `main`** abgeschlossen sein. Alte Browseransichten vor dem Neuladen sichern. Neue Installationen verwenden ausschließlich das aktuelle `schema.sql`.
+Bestandsinstallationen benötigen die Migrationen 003, 004 und anschließend
+005 in dieser Reihenfolge vor dem neuen Code. Neue Installationen verwenden
+ausschließlich das aktuelle `schema.sql`. Die kanonische
+[Deploymentanleitung](docs/WEBSPACE-DEPLOYMENT.md#10-bestehende-installation-aktualisieren)
+beschreibt die jeweiligen manuellen Schritte.
 
 `PUT /api/reports/{id}` und alle Berichtsübergaben/-rückgaben verlangen jetzt die
 geladene ganzzahlige `revision`. `PUT /api/incidents/{id}/consolidation` verlangt
 die geladene Einsatz-`revision` sowie `reportVersions: [{id, revision}, …]` aller
 Quellberichte. Fehlende/ungültige Vorbedingungen liefern HTTP 400, veraltete
 Vorbedingungen HTTP 409; Rollen- und Mandantenprüfungen bleiben bestehen.
-Ein Neuimport erhöht konservativ auch bei identischen Quelldaten die Revisionen
-des bestehenden Einsatzes und seiner Berichte. Es gibt keine automatische
-Übernahme oder Wiederholung veralteter Eingaben.
+Seit #89 erhöht ein Neuimport nur bei einer tatsächlich übernommenen Änderung
+oder neuen Einheit die Einsatzrevision, nicht die vorhandenen Berichtsrevisionen.
+Es gibt keine automatische Übernahme oder Wiederholung veralteter Eingaben.
 
 Die verbindliche Reihenfolge einschließlich Wartungsfenster, SQL-Vermerk,
 Prüfung und Rollback steht in

@@ -88,6 +88,22 @@ assert.match(javascript, /document\.addEventListener\('click'/);
 
 const apiSource = html.match(/async function api[^\n]+/)?.[0];
 assert(apiSource, 'API-Helfer fehlt');
+const apiTypesSource = ['apiArray', 'apiObject'].map(name => {
+  const source = javascript.match(new RegExp(`function ${name}[^\\n]+`))?.[0];
+  assert(source, `${name} fehlt`);
+  return source;
+}).join('\n');
+const {apiArray, apiObject} = new Function(`${apiTypesSource}; return {apiArray, apiObject};`)();
+// Native Antworttypen bleiben erhalten; doppelt kodierte oder falsch typisierte Werte dürfen keine leeren Formulare erzeugen.
+assert.deepEqual(apiArray([]), []);
+assert.deepEqual(apiArray([{unitId: 7, vehicles: []}]), [{unitId: 7, vehicles: []}]);
+assert.deepEqual(apiObject({name: 'Person'}), {name: 'Person'});
+for (const invalid of ['[]', '{}', null, true, 7]) {
+  assert.throws(() => apiArray(invalid), /Ungültige Serverantwort: Liste erwartet/);
+  assert.throws(() => apiObject(invalid), /Ungültige Serverantwort: Objekt erwartet/);
+}
+assert.throws(() => apiArray({}), /Liste erwartet/);
+assert.throws(() => apiObject([]), /Objekt erwartet/);
 const apiFor = response => new Function('fetch', `let pendingWarning='';${apiSource}; return api;`)(async () => response);
 await assert.rejects(
   apiFor(new Response('{"error":"Anmeldung erforderlich"}', {status: 401}))('/api/me'),
@@ -117,12 +133,12 @@ const editReportSource = html.match(/async function editReport[^\n]+/)?.[0];
 const returnReportSource = html.match(/function returnReport[^\n]+/)?.[0];
 assert(editReportSource && returnReportSource, 'Berichtsdialoge fehlen');
 for (const operation of ['edit', 'return']) {
-  const report = {id: 7, incident_id: 8, unit_id: 1, revision: 3, crew: '[]', narrative: 'Geladen'};
+  const report = {id: 7, incident_id: 8, unit_id: 1, revision: 3, crew: [], narrative: 'Geladen'};
   let handler;
   const dialog = {innerHTML: '', open: false, showModal() {this.open = true;}, close() {assert.fail('Konflikt darf Dialog nicht schließen');}};
   const form = {};
   const options = {
-    currentReports: [report], currentIncident: {}, currentAssignments: [], dialog,
+    currentReports: [report], currentIncident: {}, currentAssignments: [], dialog, apiArray,
     document: {querySelector: selector => selector === '#dialogTitle' ? {focus() {}} : form},
     esc: value => value, reportDetailsFields: () => '', restoreDialogFocus() {},
     bindForm: (selector, callback) => {handler = callback;},
@@ -246,7 +262,7 @@ assert.equal(incidentFilterOptions([{reportStatus: {key: 'toString'}}]), '<optio
 
 const filterSource = html.match(/function filterIncidents[^\n]+/)?.[0];
 assert(filterSource, 'filterIncidents fehlt');
-const filterPreferenceSource = html.match(/function incidentFilterPreference[^\n]+/)?.[0];
+const filterPreferenceSource = html.match(/function incidentFilterPreference[\s\S]*?(?=\nfunction filterIncidents)/)?.[0];
 assert(filterPreferenceSource, 'incidentFilterPreference fehlt');
 const cards = [
   {dataset: {incidentStatus: 'report_required'}, hidden: false},
@@ -276,6 +292,44 @@ const blockedPreference = new Function('localStorage', 'me', `${filterPreference
 );
 assert.equal(blockedPreference(), '');
 assert.equal(blockedPreference('submitted'), 'submitted');
+// Nur Führungskräfte erhalten den neuen Standard; alte Alle-Auswahl wird einmalig übernommen, andere und spätere Auswahlen bleiben erhalten.
+{
+const storage = new Map();
+const preferenceFor = (id, role, localStorage = {
+  getItem: key => storage.get(key) ?? null,
+  setItem: (key, value) => storage.set(key, value)
+}) => new Function('localStorage', 'me', `${filterPreferenceSource}; return incidentFilterPreference;`)(localStorage, {id, role});
+const forcePreference = preferenceFor(42, 'fuehrungskraft');
+const legacyKey = 'incidentStatusFilter:42:fuehrungskraft';
+assert.equal(forcePreference(), 'report_required');
+storage.set(legacyKey, '');
+assert.equal(forcePreference(), 'report_required');
+forcePreference(forcePreference());
+assert.equal(storage.get(`${legacyKey}:v2`), 'report_required');
+assert.equal(forcePreference(''), '');
+assert.equal(forcePreference(), '');
+assert.equal(storage.get(legacyKey), '');
+assert.equal(forcePreference('submitted'), 'submitted');
+assert.equal(forcePreference(), 'submitted');
+storage.set('incidentStatusFilter:43:fuehrungskraft', 'report_exists');
+assert.equal(preferenceFor(43, 'fuehrungskraft')(), 'report_exists');
+for (const role of ['einheitsleitung', 'wehrleitung']) {
+  const preference = preferenceFor(42, role);
+  assert.equal(preference(), '');
+  preference('submitted');
+  assert.equal(preference(), 'submitted');
+  assert.equal(storage.has(`incidentStatusFilter:42:${role}:v2`), false);
+}
+const unavailable = {
+  getItem() {throw Error('blocked');},
+  setItem() {throw Error('blocked');}
+};
+const blockedForcePreference = preferenceFor(42, 'fuehrungskraft', unavailable);
+assert.equal(blockedForcePreference(), 'report_required');
+assert.equal(blockedForcePreference(''), '');
+assert.equal(blockedForcePreference('submitted'), 'submitted');
+assert.match(incidentFilterOptions([{reportStatus: {key: 'submitted'}}], 'report_required'), /value="report_required">Bericht erforderlich/);
+}
 assert.match(html, /<label>Status filtern<select id="incidentStatusFilter"/);
 assert.match(html, /const selectedStatus=incidentFilterPreference\(\)/);
 assert.match(html, /incidentFilterOptions\(incidents,selectedStatus\)/);
@@ -285,7 +339,7 @@ const reportFieldsSource = html.match(/function contactFields[\s\S]*?(?=\nfuncti
 assert(reportFieldsSource, 'Berichtsdetails fehlen');
 const {reportDetailsFields} = new Function(
   'esc', 'ranks', 'localDateTime', 'incidentTypes', 'reportClassifications', 'classificationLabels',
-  `${reportFieldsSource}; return {reportDetailsFields};`
+  `${apiTypesSource}; ${reportFieldsSource}; return {reportDetailsFields};`
 )(
   value => String(value ?? ''),
   {BM: 'Brandmeister', BI: 'Brandinspektor'},
@@ -300,10 +354,10 @@ const reportFields = reportDetailsFields('edit', {
   started_at: '2026-08-22T18:00'
 }, {
   running_number: '7/2026',
-  damaged_party: '{"name":"Max","phone":"","address":""}',
-  damaging_party: '{}',
-  incident_command: '{"rank":"BI","name":"A","additionalRank":"BM","additionalName":"B"}',
-  classification: '{"site":["Wohngebäude"],"cause":[],"technical":[]}'
+  damaged_party: {name: 'Max', phone: '', address: ''},
+  damaging_party: {},
+  incident_command: {rank: 'BI', name: 'A', additionalRank: 'BM', additionalName: 'B'},
+  classification: {site: ['Wohngebäude'], cause: [], technical: []}
 });
 assert.match(reportFields, /DIVERA-Einsatznummer<input value="E-42" readonly>/);
 assert.doesNotMatch(reportFields, /DIVERA-Einsatznummer<input name=/);
@@ -315,6 +369,24 @@ assert.match(reportFields, /name="additionalCommandRank">[\s\S]*?<option value="
 assert.match(reportFields, /name="additionalCommandName" value="B"/);
 assert.equal((reportFields.match(/class="form-section" open/g) ?? []).length, 3);
 assert.match(reportDetailsFields('new', {foreign_id: '', started_at: ''}), /DIVERA-Einsatznummer<input value="Nicht vorhanden" readonly>/);
+
+// Kontakt-, Leitungs- und Klassifikationsobjekte bleiben in Formular und Übersicht erhalten; alte JSON-Strings werden sichtbar abgelehnt.
+{
+const summarySource = ['contactSummary', 'commandSummary', 'classificationSummary']
+  .map(name => javascript.match(new RegExp(`function ${name}[^\\n]+`))?.[0]).join('\n');
+const summaries = new Function('esc', 'classificationLabels',
+  `${apiTypesSource}; ${summarySource}; return {contactSummary,commandSummary,classificationSummary};`
+)(value => String(value ?? '').replaceAll('<', '&lt;'), {site: 'Einsatzstelle'});
+assert.match(summaries.contactSummary('Geschädigt', {name: 'Max <Muster>', phone: '0123', address: 'Hauptstraße'}), /Max &lt;Muster> · 0123 · Hauptstraße/);
+assert.equal(summaries.contactSummary('Geschädigt', {}), '');
+assert.match(summaries.commandSummary({rank: 'BI', name: 'A', additionalRank: 'BM', additionalName: 'B'}), /Gesamteinsatzleitung: BI A.*Einsatzleitung der Einheit: BM B/);
+assert.equal(summaries.commandSummary({}), '');
+assert.match(summaries.classificationSummary({site: ['Wohngebäude'], cause: []}), /Einsatzstelle:.*Wohngebäude/);
+assert.equal(summaries.classificationSummary({}), '');
+for (const field of ['damaged_party', 'damaging_party', 'incident_command', 'classification']) {
+  assert.throws(() => reportDetailsFields('edit', {}, {[field]: '{}'}), /Objekt erwartet/);
+}
+}
 
 const durationSource = html.match(/function durationText[^\n]+/)?.[0];
 assert(durationSource, 'durationText fehlt');
@@ -380,14 +452,14 @@ const resourceOverviewSource = html.match(/function crewSummary[\s\S]*?(?=\nfunc
 assert(resourceOverviewSource, 'Konsolidierte Fahrzeug- und Besatzungsübersicht fehlt');
 const consolidatedResources = new Function(
   'esc',
-  `${resourceOverviewSource}; return consolidatedResources;`
+  `${apiTypesSource}; ${resourceOverviewSource}; return consolidatedResources;`
 )(value => String(value ?? '').replaceAll('<', '&lt;'));
 const resourceOverview = consolidatedResources([
-  {unitId: 2, vehicles: '[{"name":"LF 20"},{"name":"ELW <1>"}]'},
-  {unitId: 1, vehicles: '["MTF"]'}
+  {unitId: 2, vehicles: [{name: 'LF 20'}, {name: 'ELW <1>'}]},
+  {unitId: 1, vehicles: ['MTF']}
 ], [
-  {unit_id: 2, crew: '[{"name":"Mia","vehicle":"LF 20","role":"maschinist"},{"name":"Noah","vehicle":"","role":"besatzung"}]'},
-  {unit_id: 1, crew: '[]'}
+  {unit_id: 2, crew: [{name: 'Mia', vehicle: 'LF 20', role: 'maschinist'}, {name: 'Noah', vehicle: '', role: 'besatzung'}]},
+  {unit_id: 1, crew: []}
 ], [
   {id: 2, name: 'Löschzug Süd'},
   {id: 1, name: 'Löschgruppe Nord'}
@@ -397,6 +469,15 @@ assert(resourceOverview.indexOf('ELW &lt;1>') < resourceOverview.indexOf('LF 20'
 assert.match(resourceOverview, /MTF: Keine Besatzung/);
 assert.match(resourceOverview, /LF 20: Mia \(Maschinist\)/);
 assert.match(resourceOverview, /Ohne Fahrzeug: Noah \(Besatzung\)/);
+// Bei gleicher angezeigter Einheit entscheidet die ID; auch kollationsgleiche Fahrzeugnamen besitzen eine feste Reihenfolge.
+const tiedUnits = [{id: 2, name: 'Gleicher Name'}, {id: 1, name: 'Gleicher Name'}];
+const tiedAssignments = [{unitId: 2, vehicles: ['Zweites Fahrzeug']}, {unitId: 1, vehicles: ['Erstes Fahrzeug']}];
+const tiedOverview = consolidatedResources(tiedAssignments, [], tiedUnits);
+assert(tiedOverview.indexOf('Erstes Fahrzeug') < tiedOverview.indexOf('Zweites Fahrzeug'));
+assert.equal(tiedOverview, consolidatedResources([...tiedAssignments].reverse(), [], tiedUnits));
+const crewSummary = new Function('esc', `${apiTypesSource}; ${resourceOverviewSource}; return crewSummary;`)(value => value);
+assert.equal(crewSummary([], ['Ä', 'A\u0308']), crewSummary([], ['A\u0308', 'Ä']));
+assert.throws(() => crewSummary('[]'), /Liste erwartet/);
 assert.match(html, /<h3>Fahrzeuge und Besatzung<\/h3>\$\{consolidatedResources\(assignments,reports,units\)\}/);
 const authorNoticeSource = html.match(/function authorReportNotice[^\n]+/)?.[0];
 assert(authorNoticeSource, 'authorReportNotice fehlt');
@@ -462,6 +543,32 @@ const membershipFields = new Function('units', 'esc', `${membershipFieldsSource}
 assert.match(membershipFields('fuehrungskraft', [2]), /class="unit-picker".*<details><summary>Einheiten auswählen<\/summary>.*type="checkbox".*value="2" checked/s);
 assert.doesNotMatch(membershipFields('einheitsleitung'), /unit-picker|<details>/);
 assert.match(membershipFields('einheitsleitung'), /<legend>Einheit<\/legend>.*type="radio".*required/s);
+// Benutzerbearbeitung übernimmt native Einheits-IDs und sendet die gültigen Formularstrings ohne zweite JSON-Kodierung.
+{
+const editUserSource = javascript.match(/function editUser[^\n]+/)?.[0];
+assert(editUserSource, 'Benutzerbearbeitung fehlt');
+let saveUser;
+const requests = [];
+const currentUsers = [{id: 7, name: 'Test', email: 'test@example.test', role: 'fuehrungskraft', unit_ids: [2]}];
+const dialog = {innerHTML: '', showModal() {}, close() {}, querySelector: () => ({value: 'fuehrungskraft'})};
+const context = {
+  currentUsers, me: {id: 1}, dialog, apiArray, membershipFields,
+  esc: value => String(value ?? ''), roleLabels: {}, restoreDialogFocus() {}, bindUnitPickers() {}, admin() {},
+  document: {querySelector: () => ({focus() {}}), querySelectorAll: () => [{value: '2'}]},
+  bindForm: (_selector, handler) => {saveUser = handler;},
+  api: async (path, options) => {requests.push({path, method: options.method, data: JSON.parse(options.body)});}
+};
+const editUser = new Function(...Object.keys(context), `${editUserSource}; return editUser;`)(...Object.values(context));
+editUser(7, {});
+assert.match(dialog.innerHTML, /value="2" checked/);
+await saveUser({name: 'Test', email: 'test@example.test', role: 'fuehrungskraft'});
+assert.deepEqual(requests, [{path: '/api/users/7', method: 'PUT',
+  data: {name: 'Test', email: 'test@example.test', role: 'fuehrungskraft', unitIds: ['2']}}]);
+const markup = dialog.innerHTML;
+currentUsers[0].unit_ids = '[2]';
+assert.throws(() => editUser(7, {}), /Liste erwartet/);
+assert.equal(dialog.innerHTML, markup);
+}
 assert.match(html, /<ul class="user-list">\$\{users\.map/);
 assert.match(html, /\$\{esc\(roleLabels\[u\.role\]\|\|u\.role\)\}/);
 assert.match(html, />\$\{roleLabels\[r\]\}<\/option>/);
@@ -597,7 +704,7 @@ const crewResources = {members: [
 ], vehicles: []};
 const historicalCrew = [{memberId: 1, name: 'Anna Historisch', vehicle: '', role: 'besatzung'}];
 const crewRenderer = new Function('document', 'api', 'esc', 'bindCrewBoard', 'dragEnabled',
-  `${renderCrewSource};return renderCrew;`)({querySelector: () => crewRoot}, async () => crewResources, value => String(value ?? ''), () => {}, false);
+  `${apiTypesSource};${renderCrewSource};return renderCrew;`)({querySelector: () => crewRoot}, async () => crewResources, value => String(value ?? ''), () => {}, false);
 await crewRenderer('#crew', 1, [], historicalCrew);
 assert.match(crewRoot.innerHTML, /data-name="Anna Historisch"/);
 assert.match(crewRoot.innerHTML, /data-name="Bernd Aktuell"/);
@@ -625,6 +732,75 @@ assert.match(syncOutput.innerHTML, /role="alert"/);
 assert(syncOutput.innerHTML.includes(syncWarning));
 assert.equal(syncAnnouncer.textContent, syncWarning);
 assert.equal(syncHarness.warning(), '');
+
+// Eine während des Neuladens hinzugekommene andere Warnung wird nicht versehentlich als erledigt entfernt.
+const concurrentWarning = 'Benachrichtigungs-E-Mails konnten nicht versendet werden.';
+const concurrentSync = new Function('document', 'api', 'esc', 'announcer',
+  `let pendingWarning=${JSON.stringify(syncWarning)}; const load=async()=>{pendingWarning=${JSON.stringify(concurrentWarning)}};${syncSource};return {syncDivera,warning:()=>pendingWarning};`)(
+  {querySelector: selector => selector === '#pullUnit' ? {value: '1'} : syncOutput},
+  async () => ({members: 0, qualifications: 0, vehicles: 0, incidentsCreated: 0, incidentsUpdated: 0, incidentsUnchanged: 1, warning: syncWarning}),
+  value => value, syncAnnouncer);
+await concurrentSync.syncDivera('all');
+assert.equal(concurrentSync.warning(), concurrentWarning);
+
+// Ressourcen- und Besatzungsansicht verarbeiten native Fahrzeuglisten, ohne fremde Fahrzeuge als eigene Besatzungsziele anzubieten.
+{
+const root = {innerHTML: '', dataset: {}, isConnected: true, contains: () => false};
+const incidents = [{assignments: [
+  {unitId: 1, vehicles: [{id: 'own', name: 'LF 20', own: true}, {id: 'other', name: 'Fremdes Fahrzeug', own: false}]},
+  {unitId: 2, vehicles: [{id: 'hidden', name: 'Andere Einheitszuordnung', own: false}]}
+]}];
+const data = {members: [{id: 1, name: 'Mia', active: 1, qualifications: ''}], vehicles: [{name: 'Zusatzfahrzeug'}]};
+const document = {querySelector: () => root};
+const api = async () => data;
+const esc = value => String(value ?? '');
+const renderResources = new Function('document', 'api', 'incidents', 'inactiveMembersPreference', 'filterResourceMembers', 'esc',
+  `${apiTypesSource}; ${renderResourcesSource}; return renderResources;`
+)(document, api, incidents, () => false, () => {}, esc);
+await renderResources('1');
+for (const text of ['Mia', 'Zusatzfahrzeug']) assert(root.innerHTML.includes(text));
+assert.match(root.innerHTML, /Fremdes Fahrzeug/);
+assert.doesNotMatch(root.innerHTML, /Andere Einheitszuordnung/);
+const renderCrew = new Function('document', 'api', 'dragEnabled', 'bindCrewBoard', 'esc',
+  `${apiTypesSource}; ${renderCrewSource}; return renderCrew;`
+)(document, api, false, () => {}, esc);
+assert.equal(await renderCrew('#crew', '1', incidents[0].assignments,
+  [{memberId: 1, name: 'Mia', vehicle: 'LF 20', role: 'maschinist'}]), true);
+for (const text of ['LF 20', 'Mia', 'Zusatzfahrzeug']) assert(root.innerHTML.includes(text));
+assert.doesNotMatch(root.innerHTML, /Fremdes Fahrzeug|Andere Einheitszuordnung/);
+const markup = root.innerHTML;
+incidents[0].assignments[0].vehicles = '[]';
+await assert.rejects(renderResources('1'), /Liste erwartet/);
+assert.equal(root.innerHTML, markup);
+await assert.rejects(renderCrew('#crew', '1', incidents[0].assignments), /Liste erwartet/);
+assert.equal(root.innerHTML, markup);
+}
+
+// Der Importabgleich liest native Zuordnungen und ordnet gleichzeitige Alarme deterministisch nach Alarm- und Einheits-ID.
+{
+const importedSource = javascript.match(/function importedForUnit[^\n]+/)?.[0];
+const pendingSource = javascript.match(/async function checkPendingDivera[\s\S]*?(?=\nasync function importPendingDivera)/)?.[0];
+assert(importedSource && pendingSource, 'DIVERA-Abgleich fehlt');
+const summary = {textContent: ''}, content = {innerHTML: ''};
+const out = {isConnected: true, hidden: true, querySelector: selector => selector === 'summary' ? summary : content, querySelectorAll: () => []};
+const context = {
+  document: {querySelector: () => out}, me: {role: 'wehrleitung'},
+  units: [{id: 2, name: 'Zwei', divera_configured: 1}, {id: 1, name: 'Eins', divera_configured: 1}],
+  incidents: [{divera_id: 'old', started_at: '2026-09-01T12:00:00Z', assignments: [{unitId: 1, vehicles: []}]}],
+  api: async () => ({alarms: ['b', 'a'].map(id => ({id, title: id, address: '', startedAt: '2026-09-02T12:00:00Z'}))}),
+  esc: value => String(value ?? ''), formatDateTime: value => value
+};
+const result = new Function(...Object.keys(context),
+  `let pendingDivera=[]; ${apiTypesSource}; ${importedSource}; ${pendingSource};
+   return {importedForUnit,checkPendingDivera,items:()=>pendingDivera};`
+)(...Object.values(context));
+assert.equal(result.importedForUnit('old', '1'), true);
+assert.equal(result.importedForUnit('old', '2'), false);
+assert.equal(result.importedForUnit('unknown', '1'), false);
+await result.checkPendingDivera();
+assert.deepEqual(result.items().map(({alarm, unit}) => [alarm.id, unit.id]), [['a', 1], ['a', 2], ['b', 1], ['b', 2]]);
+assert.equal(summary.textContent, 'DIVERA Import – 4 neue Einsätze');
+}
 
 const navigationSource = html.match(/function viewAllowed[\s\S]*?(?=\nasync function start)/)?.[0];
 assert(navigationSource, 'Deep-Link-Navigation fehlt');
