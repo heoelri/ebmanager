@@ -113,6 +113,8 @@ parse_str(parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY) ?: '', $query);
 $accessKey = $query['accesskey'] ?? '';
 $reduced = $accessKey === 'reduced';
 $malformed = $accessKey === 'malformed';
+$historical = str_starts_with($accessKey, 'historical-');
+$renamed = $accessKey === 'historical-renamed';
 $demoUnit = $demoUnits[$accessKey] ?? null;
 $method = $_SERVER['REQUEST_METHOD'] ?? '';
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
@@ -144,7 +146,7 @@ if ($path === '/api/v2/pull/all') {
         echo json_encode(['data' => ['cluster' => demoCluster($demoUnit)]], JSON_UNESCAPED_UNICODE);
         return;
     }
-    echo json_encode(['data' => ['cluster' => [
+    $cluster = [
         'vehicle' => $reduced
             ? ['v1' => ['id' => 'v1', 'name' => 'HLF 20', 'shortname' => 'HLF', 'fullname' => 'Hilfeleistungslöschfahrzeug']]
             : [
@@ -160,16 +162,40 @@ if ($path === '/api/v2/pull/all') {
         'consumer' => $reduced
             ? ['m1' => ['id' => 'm1', 'stdformat_name' => 'Anna Beispiel', 'qualifications' => ['q1']]]
             : [
-                'm1' => ['id' => 'm1', 'stdformat_name' => 'Anna Beispiel', 'qualifications' => ['q1']],
-                'm2' => ['id' => 'm2', 'stdformat_name' => 'Bernd Beispiel', 'qualifications' => ['q2']]
+                'm1' => ['id' => 'm1', 'stdformat_name' => $renamed ? 'Anna Jetzt' : 'Anna Beispiel', 'qualifications' => ['q1']],
+                'm2' => ['id' => 'm2', 'stdformat_name' => $renamed ? 'Bernd Jetzt' : 'Bernd Beispiel', 'qualifications' => ['q2']]
             ]
-    ]]], JSON_UNESCAPED_UNICODE);
+    ];
+    if ($historical) $cluster['vehicle']['v3'] = ['id' => 'v3', 'name' => 'Reserve Historisch', 'shortname' => 'Reserve', 'fullname' => 'Reservefahrzeug'];
+    if ($renamed) {
+        $cluster['vehicle']['v1']['name'] = 'HLF Heute';
+        $cluster['vehicle']['v3']['name'] = 'Reserve Heute';
+    }
+    echo json_encode(['data' => ['cluster' => $cluster]], JSON_UNESCAPED_UNICODE);
     return;
 }
 
 if ($path === '/api/v2/alarms') {
     if ($demoUnit) {
         echo json_encode(['data' => ['items' => demoAlarms($demoUnit['prefix'])]], JSON_UNESCAPED_UNICODE);
+        return;
+    }
+    if ($historical) {
+        $before = $accessKey === 'historical-before';
+        $after = $accessKey === 'historical-after';
+        $alarm = [
+            'id' => 'historical-89', 'foreign_id' => $after ? 'D-Geändert' : ($before ? 'D-Vorher' : 'D-Archiv'),
+            'date' => strtotime($after ? '2026-12-31 23:30 UTC' : ($before ? '2026-12-31 22:30 UTC' : '2026-12-31 22:45 UTC')),
+            'title' => $after ? 'Geändertes Stichwort' : ($before ? 'Vorbericht' : 'Historischer Einsatz'),
+            'text' => $after ? 'Geänderte Meldung' : 'Gesicherte Meldung',
+            'address' => $after ? 'Geänderter Ort' : 'Archivweg 89',
+            'lat' => $after ? null : 50.9, 'lng' => $after ? 9.1 : 8.0,
+            'remark' => $after ? 'Geänderte Bemerkung' : 'Gesicherte Bemerkung',
+            'patient' => $after ? 'Quellpatient geändert' : 'Gesicherter Patient',
+            'caller' => $after ? 'Quellmelder geändert' : 'Gesicherte Meldungsperson',
+            'vehicles' => $after ? ['v2'] : ($before ? ['v1'] : ($accessKey === 'historical-reordered' ? ['v2', 'v1'] : ['v1', 'v2']))
+        ];
+        echo json_encode(['data' => ['items' => [$alarm['id'] => $alarm]]], JSON_UNESCAPED_UNICODE);
         return;
     }
     echo json_encode(['data' => ['items' => [

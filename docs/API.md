@@ -117,7 +117,7 @@ Einheitsgrenzen. Antworten sind JSON, sofern nicht als PDF bezeichnet.
 | `POST /units/:id/divera/import` | A, erlaubte Einheit | opake DIVERA-`id` → 201 `{id}`, ggf. `warning`; Daten werden serverseitig nachgeladen |
 | `POST /units/:id/divera/members/sync` | W/E, erlaubte Einheit | `{}` → Zähler `members, qualifications, count` |
 | `POST /units/:id/divera/vehicles/sync` | W/E, erlaubte Einheit | `{}` → Zähler `vehicles, count` |
-| `POST /units/:id/divera/sync` | W/E, erlaubte Einheit | `{}` → Zähler `members, qualifications, vehicles, incidentsCreated, incidentsUpdated, assignmentsCreated`, ggf. `warning` |
+| `POST /units/:id/divera/sync` | W/E, erlaubte Einheit | `{}` → Zähler `members, qualifications, vehicles, incidentsCreated, incidentsUpdated, incidentsUnchanged, incidentsWithDifferences, assignmentsCreated`, ggf. `warning` |
 
 DIVERA-Aufrufe bleiben ausschließlich GET auf `/api/v2/alarms` und
 `/api/v2/pull/all`; die lokalen POST-Routen schreiben nur lokal.
@@ -128,6 +128,34 @@ Die Statistik liefert `range`, `unit`, `totals`, `alarmedVehicles`,
 `additionalVehicles`, `members`, `years`, `months`, `weekdays`,
 `workPeriods`, `dayPeriods` und `periods`; Summen-/Ranglisten enthalten
 Anzahlwerte, keine fremden Berichts- oder Personendetails.
+Mitglieder werden je Mitglieds-ID gezählt. Ihr Anzeigename stammt aus dem
+letzten ausgewerteten Einsatz (Alarmzeit, dann Berichts-ID), nicht aus dem
+aktuellen Stamm.
+
+### Historische DIVERA-Importe (#89)
+
+Ab dem ersten Einheitsbericht bleiben gemeinsame Einsatzdaten und alle
+bereits vorhandenen Einheits-Fahrzeuglisten unverändert; dies gilt auch für
+alarmierte Einheiten ohne Bericht. Eine neue Einheit erhält ihren eigenen
+ersten Snapshot, überschreibt aber keine gemeinsamen Daten. Vor dem ersten
+Bericht werden echte Änderungen weiterhin übernommen. Die Reihenfolge einer
+Fahrzeugliste allein gilt nicht als Änderung.
+
+- `incidentsCreated`: neu angelegte Einsätze.
+- `incidentsUpdated`: bestehende Einsätze mit tatsächlich übernommenen
+  Änderungen oder neuer Einheitszuordnung, nicht bloß erneut importierte.
+- `incidentsUnchanged`: fachlich unveränderte Einsätze, auch bei verworfenen
+  historischen Abweichungen.
+- `incidentsWithDifferences`: Einsätze mit verworfenen Abweichungen; zusätzlicher
+  Zähler, der sich mit `incidentsUpdated`/`incidentsUnchanged` überschneiden kann.
+- `assignmentsCreated`: neue Einheitszuordnungen.
+
+Einzelimport (weiter HTTP 201) und Vollabgleich liefern bei Abweichungen
+`warning` mit lokaler Einsatz-ID und den Kategorien `Einsatzdaten` und/oder
+`Fahrzeugliste`, niemals mit verworfenen Patienten-/Kontaktwerten oder Schlüsseln.
+Etwaige Mailwarnungen werden angehängt. Der Browser zeigt und kündigt sie
+unmittelbar an. Es entsteht kein persistenter Konflikt-/Korrekturworkflow.
+Jeder erfolgreiche Import darf weiterhin einen Importprotokolleintrag anlegen.
 
 Bei Benutzerzuordnungen hat eine explizite `unitIds`-Liste Vorrang vor dem
 kompatiblen Einzelwert `unitId`. Fehlend oder `null` verwendet diesen
@@ -159,6 +187,15 @@ Beide Listen werden bei fehlend/`null`/`[]` geleert. Kein Mitglied doppelt,
 Führungs-/Maschinistenfunktion höchstens einmal je Fahrzeug. Bestehende
 historische Zuordnungen dürfen unverändert erhalten bleiben; inaktive
 Mitglieder und nicht mehr aktuelle Fahrzeuge sind keine neuen Auswahlziele.
+`author_name` wird beim Erstellen serverseitig festgehalten; `crew[].name`
+stammt aus dem gespeicherten Besatzungssnapshot. Bestehende Personen behalten
+diesen auch beim Umverteilen. Nach gespeicherter Entfernung und späterer
+Neuaufnahme gilt der aktuelle Stammname. Clientseitige Namen werden ignoriert.
+`personnel`, `assignments[].reportAuthorName`, Ansichten und PDFs verwenden
+dieselben historischen Namen; `history[].actor_name` bleibt unabhängig davon
+der Name beim jeweiligen Übergang. Ressourcen liefern weiterhin aktuelle Namen.
+Bei migrierten Altberichten sind nur die zum Migrationszeitpunkt vorhandenen
+mandanteneigenen Namen rekonstruierbar; fehlende zulässige Quellen ergeben `""`.
 
 Antworten behalten die bestehenden Schlüsselnamen:
 
@@ -190,6 +227,12 @@ alle aktuellen Quellberichte mit deren geladenen Revisionen; jede alarmierte
 Einheit muss in `wehr_review` sein. Fehlende/falsch typisierte Vorbedingungen:
 400. Veraltete oder abweichende Stände: 409 ohne fachliche Änderungen.
 Kein automatisches Wiederholen einer kollidierten Mutation.
+Identische und historisch verworfene Importe verändern weder Revisionen noch
+Abschluss. Echte Änderungen vor dem ersten Bericht beziehungsweise neue
+Einheitszuordnungen erhöhen nur die Einsatzrevision und leeren
+`consolidated_at`; vorhandene Berichte bleiben unverändert. Neue Berichte,
+Bearbeitungen, Workflow und Konsolidierung behalten ihren bisherigen
+Revisionsschutz.
 
 Fehler haben ausschließlich die Form `{"error":"Deutsche Meldung"}`.
 Erfolgreich gespeicherte Vorgänge mit anschließendem Benachrichtigungsfehler

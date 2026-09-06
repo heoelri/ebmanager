@@ -318,7 +318,138 @@ Rollback auf den Stand unmittelbar vor #92: PHP- und Browserdateien gemeinsam
 im Wartungsfenster zurückspielen und Browser neu laden. Keine Tabellen oder
 Migrationsvermerke verändern; der Revisionsschutz aus #86 bleibt erhalten.
 
+### Historische Berichtsdaten einführen (#89)
+
+**Migration 005 braucht eine neue ausdrückliche Betreiberbestätigung.**
+Eine bereits erteilte Freigabe für Migration 004 oder #92 ist keine Freigabe
+für diesen Eingriff. Vor Bestätigung kein Merge nach `main`: Dessen
+SFTP-Deployment läuft nach grünen Tests automatisch.
+
+Die Migration ergänzt `reports.author_name`, `report_crew.member_name` und
+`incidents.report_data_frozen`. Altbestände erhalten nur die heute vorhandenen
+mandanteneigenen Namen, sonst leere Strings. Bereits verlorene historische
+Namensstände sind **nicht rekonstruierbar**. `reports.personnel` wird aus der
+strukturierten Besatzung in Mitglieds-ID-Reihenfolge neu berechnet; ein noch
+vorhandener älterer Freitext-Namensstand wird dabei ersetzt. Bestehende
+Berichtsrevisionen und die Einsatzrevisionen von Einsätzen mit Berichten
+steigen einmalig. Status, laufende Nummern, Berichtszeiten, Gesamttexte,
+Abschlusszeitpunkte und Prüfverlauf werden nicht umgeschrieben.
+
+1. Wartungsfenster und unabhängige Zugriffssperre beim Hoster einrichten,
+   die sämtliche Anwendungsschreibzugriffe während Migration **und**
+   Codewechsel verhindert. Sie muss außerhalb der ausgelieferten Dateien
+   liegen (z. B. vorgeschaltete Hoster-/Proxy-Sperre), denn der SFTP-Workflow
+   überschreibt `.htaccess`. Laufende Requests vollständig abwarten; Benutzer
+   müssen offene Eingaben vorher sichern. Datenbank inklusive Schema sowie
+   bisherige Anwendungsdateien und `config.local.php` sichern und die
+   Wiederherstellbarkeit prüfen.
+2. Migrationen 001–004 und ihre Ledger-Einträge prüfen. Vor dem Import die
+   abgeleitete Textlänge und verfügbare Revisionen kontrollieren. Diese Abfragen
+   dürfen keine Zeilen liefern (keine Namen oder Einsatzinhalte ausgeben):
+
+   ```sql
+   SELECT r.id,
+          SUM(OCTET_LENGTH(m.name))+2*(COUNT(*)-1) AS personnel_bytes
+   FROM reports r
+   JOIN incidents i ON i.id=r.incident_id
+   JOIN report_crew rc ON rc.report_id=r.id
+   JOIN members m ON m.id=rc.member_id AND m.organization_id=i.organization_id
+   GROUP BY r.id
+   HAVING personnel_bytes>65535;
+
+   SELECT id FROM reports WHERE revision=4294967295;
+   SELECT i.id FROM incidents i
+   WHERE i.revision=4294967295
+     AND EXISTS(SELECT 1 FROM reports r WHERE r.incident_id=i.id);
+   ```
+
+   Bei Treffern anhalten und fachlich/technisch klären; weder Namen abschneiden
+   noch Revisionen zurücksetzen. Quellnamen sind auf 200 Zeichen begrenzt.
+   Die Migration hebt `group_concat_max_len` für die Sitzung an und erzwingt
+   `STRICT_ALL_TABLES`, damit TEXT-Überläufe nicht still gekürzt werden.
+   Die betroffenen DML-Schritte laufen gemeinsam in einer Transaktion.
+3. `migrations/005-historical-report-snapshots.sql` mit einem DDL-berechtigten
+   Administrationskonto über die Datenbankverwaltung vollständig ausführen.
+   UTF-8/`utf8mb4` verwenden. Bei Fehlern **abbrechen**, nicht mit `--force`
+   oder „bei Fehler fortsetzen“ arbeiten. Ein noch offener Backfill muss in
+   derselben Verbindung mit `ROLLBACK` beendet beziehungsweise die Verbindung
+   geschlossen werden. Die Schreibsperre bleibt bestehen.
+4. Bei einem Teilfehler zuerst den tatsächlichen Spaltenstand prüfen:
+
+   ```sql
+   SELECT table_name,column_name,column_type,is_nullable,column_default
+   FROM information_schema.columns
+   WHERE table_schema=DATABASE()
+     AND ((table_name='reports' AND column_name='author_name')
+       OR (table_name='report_crew' AND column_name='member_name')
+       OR (table_name='incidents' AND column_name='report_data_frozen'))
+   ORDER BY table_name,column_name;
+   ```
+
+   MySQL-DDL committet implizit. Deshalb niemals die komplette Datei blind
+   erneut importieren: Nur fehlende der ersten drei `ADD COLUMN`-Anweisungen
+   nachholen. Bereits vorhandene Spalten nicht löschen oder leeren.
+   Nach Behebung der Ursache den Rest der Datei **ab
+   `SET @previous_sql_mode=...` einschließlich beider abschließender
+   `MODIFY COLUMN`-Anweisungen** erneut ausführen. Dieser Teil füllt nur
+   noch NULL-Namen, erhöht Berichtsrevisionen nur bei erstmaligem Backfill
+   und Einsatzrevisionen nur beim erstmaligen Setzen des Markers. Bereits
+   gesicherte Namen und Revisionen bleiben erhalten, auch nach einem Fehler
+   im letzten DDL-Schritt. Bei unerwarteten Spaltentypen nicht raten:
+   Sicherung wiederherstellen oder den Zustand gezielt prüfen lassen.
+5. Der Spaltencheck muss genau drei Zeilen mit `is_nullable='NO'` liefern.
+   Beide Namen sind `VARCHAR(200)` ohne Default, der Marker `TINYINT(1)`
+   mit Default 0. Zusätzlich müssen folgende Anzahlen jeweils 0 sein:
+
+   ```sql
+   SELECT COUNT(*) FROM reports WHERE author_name IS NULL;
+   SELECT COUNT(*) FROM report_crew WHERE member_name IS NULL;
+   SELECT COUNT(*) FROM incidents i WHERE report_data_frozen<>1
+     AND EXISTS(SELECT 1 FROM reports r WHERE r.incident_id=i.id);
+   ```
+
+   Erst nach fehlerfreiem vollständigem Abschluss einmalig vermerken:
+
+   ```sql
+   INSERT INTO schema_migrations(name,applied_at)
+   VALUES('005-historical-report-snapshots.sql',UTC_TIMESTAMP());
+   ```
+
+   Bei Wiederaufnahme einen bereits vorhandenen Eintrag nicht erneut anlegen;
+   bei einem verfrühten Eintrag den vollständigen Schemazustand trotzdem
+   prüfen. Lokal übernimmt `docker/migrate.sh` den Ledger-Vermerk nach Erfolg.
+   Einen fehlgeschlagenen automatischen Lauf erst nach der beschriebenen
+   manuellen Teil-DDL-Wiederaufnahme und dem Ledger-Eintrag wieder starten.
+6. Den erfolgreichen Migrations-/Sperrstand ausdrücklich für **005**
+   bestätigen. Erst danach Merge/Deployment freigeben beziehungsweise den
+   zugehörigen PHP- und Browsercode gemeinsam hochladen. Alter Code kann
+   wegen `NOT NULL` ohne Default keine Berichte oder Besatzungen mehr
+   anlegen; eine Mischversion niemals für Schreibzugriffe öffnen.
+7. Unter weiter aktiver öffentlicher Sperre über einen kontrollierten
+   Betreiberzugang `/api/bootstrap` (kein 503), Anmeldung, Bestandsbericht,
+   historische Namen und PDF prüfen. Mit einer autorisierten Testeinheit
+   identischen/abweichenden Reimport, erste Berichtsanlage und Bearbeitung
+   prüfen: Identisch bleibt fachlich unverändert; Abweichungen warnen ohne
+   Überschreiben; eine neue Einheit widerruft den Gesamtabschluss.
+   Browser vollständig neu laden lassen. Erst dann die Sperre aufheben.
+
+**Rollback von 005:** Schreibsperre wieder beziehungsweise weiterhin aktiv
+halten. Der sichere Rückweg ist die Wiederherstellung der vollständigen
+Datenbank-/Schemasicherung **von vor 005** zusammen mit dem dazugehörigen
+PHP- und Browserstand; anschließend Browser neu laden und prüfen.
+Die beiden zusätzlichen Pflichtspalten dürfen nicht unverändert bleiben,
+während nur alter PHP-Code zurückkopiert wird. Kein improvisierter Default
+für fehlende Namen und kein erneuter Import der Migration über den Bestand.
+Nach zwischenzeitlichen produktiven Schreibzugriffen würde die Sicherung
+diese neuen Daten verlieren: Verlust ausdrücklich bewerten/freigeben oder
+stattdessen unter Sperre eine vorwärtsgerichtete Korrektur wählen.
+Migrationsvermerke müssen zum wiederhergestellten Schema passen.
+
 ## 11. Rollback
+
+Für einen Stand mit Migration 005 gelten zwingend die oben beschriebenen
+releasebezogenen Schritte; bloßes Zurückkopieren älterer PHP-Dateien reicht
+wegen der zusätzlichen Pflichtspalten nicht aus.
 
 1. Vor jeder Aktualisierung eine Datenbanksicherung und eine Kopie der bisherigen Anwendungsdateien erstellen.
 2. Bei einem reinen Anwendungsfehler die vorherigen Versionen von `.htaccess`, `api.php`, `constants.php`, `support.php`, `public/index.html`, `public/app.js` und `public/styles.css` wiederherstellen.

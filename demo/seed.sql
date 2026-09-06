@@ -153,11 +153,11 @@ SELECT i.id,@sued,JSON_ARRAY(
 ) FROM incidents i WHERE i.organization_id=@org AND i.divera_id IN ('demo-003','demo-005','demo-009','demo-010','demo-013');
 
 INSERT INTO reports(
-  incident_id,unit_id,author_id,report_year,running_number,damaged_party,damaging_party,incident_command,narrative,
+  incident_id,unit_id,author_id,author_name,report_year,running_number,damaged_party,damaging_party,incident_command,narrative,
   vehicles,personnel,alarmed_at,departed_at,arrived_at,ended_at,incident_type,classification,status,created_at,released_at
 )
 SELECT
-  i.id,d.unit_id,d.author_id,YEAR(UTC_DATE()),d.running_number,JSON_OBJECT(),JSON_OBJECT(),
+  i.id,d.unit_id,d.author_id,(SELECT name FROM users WHERE id=d.author_id),YEAR(UTC_DATE()),d.running_number,JSON_OBJECT(),JSON_OBJECT(),
   JSON_OBJECT('rank','BI','name',d.command_name,'additionalRank','BM','additionalName',d.command_name),
   d.narrative,'','',i.started_at,
   DATE_FORMAT(STR_TO_DATE(i.started_at,'%Y-%m-%dT%H:%i:%s.000Z')+INTERVAL 8 MINUTE,'%Y-%m-%dT%H:%i:%s.000Z'),
@@ -188,8 +188,8 @@ JOIN (
 ) d ON d.incident_key=i.divera_id
 WHERE i.organization_id=@org;
 
-INSERT INTO report_crew(report_id,member_id,vehicle,role)
-SELECT r.id,c.member_id,
+INSERT INTO report_crew(report_id,member_id,member_name,vehicle,role)
+SELECT r.id,c.member_id,c.name,
   CASE
     WHEN r.unit_id=@mitte THEN IF(c.position<=2,'HLF 20','DLK 23')
     WHEN r.unit_id=@nord THEN IF(c.position<=2,'LF 10','MTF Nord')
@@ -199,10 +199,16 @@ SELECT r.id,c.member_id,
 FROM reports r
 JOIN incidents i ON i.id=r.incident_id
 JOIN (
-  SELECT mu.unit_id,m.id member_id,ROW_NUMBER() OVER(PARTITION BY mu.unit_id ORDER BY m.divera_id) position
+  SELECT mu.unit_id,m.id member_id,m.name,ROW_NUMBER() OVER(PARTITION BY mu.unit_id ORDER BY m.divera_id) position
   FROM members m JOIN member_units mu ON mu.member_id=m.id
   WHERE m.organization_id=@org
 ) c ON c.unit_id=r.unit_id AND c.position<=4
+WHERE i.organization_id=@org;
+
+UPDATE incidents i SET report_data_frozen=1
+WHERE i.organization_id=@org AND EXISTS(SELECT 1 FROM reports r WHERE r.incident_id=i.id);
+UPDATE reports r JOIN incidents i ON i.id=r.incident_id
+SET r.personnel=(SELECT GROUP_CONCAT(rc.member_name ORDER BY rc.member_id SEPARATOR ', ') FROM report_crew rc WHERE rc.report_id=r.id)
 WHERE i.organization_id=@org;
 
 INSERT INTO report_transitions(report_id,from_status,to_status,actor_id,actor_name,actor_role,comment,created_at)

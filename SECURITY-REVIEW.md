@@ -1,5 +1,67 @@
 # Security Review
 
+## Historische Berichtsdaten vom 6. September 2026 (#89)
+
+Der gezielte Integrationsreview umfasst Import-/Berichtstransaktionen,
+historische Namensquellen, API-/Browser-/PDF-Ausgaben und Migration 005.
+Er ist kein vollständiger Penetrationstest. Erfasst werden keine neuen
+Personendatentypen: Autor- und Mitgliedsnamen werden als mandantengebundene
+Berichtsdaten zeitpunktbezogen bewahrt, statt sie später aus dem Stamm zu
+ersetzen. Rollen, Einheiten, Autorensichtbarkeit und Gesamttext-Projektion
+bleiben bestehen. Autor-/Besatzungsnamen aus Clients werden nicht übernommen.
+Der Prüfverlauf behält seine unveränderlichen Akteursnamen.
+
+Nach Copilot-Review bleibt die bestehende mandantengleiche Autorenzuordnung
+ausdrücklich Voraussetzung der Berichtslesesicht. `reports_author_fk` und
+`author_id NOT NULL` verhindern regulär fehlende Autoren; der INNER JOIN
+schließt zusätzlich ungültige mandantenfremde Altzuordnungen aus. Ein leerer
+Namensbackfill hebt diese Grenze nicht auf. Die Regression umfasst Ausschluss
+aus Berichtsansicht und Einzel-PDF sowie unveränderte Sichtbarkeit nach
+Wiederherstellung der zulässigen Zuordnung. Nur der ungenutzte LEFT JOIN
+zur früheren Namensquelle in der Einsatzliste wurde entfernt.
+
+Berichtsanlage und DIVERA-Import sperren denselben Elterneinsatz. Der erste
+erfolgreich gespeicherte Bericht setzt den Freeze-Marker atomar; ein
+fehlgeschlagener Bericht friert nichts ein. Der Schutz umfasst bereits
+alarmierte Einheiten ohne eigenen Bericht und bleibt auch nach Rückgaben
+bestehen. Neue Zuordnungen erhöhen die Einsatzrevision und widerrufen den
+Gesamtabschluss, ohne vorhandene Berichte zu ändern. Identische/verworfene
+Importdaten entwerten dagegen keine geladenen Revisionen. Die echte
+Lost-Update-/ABA-/Quellberichtsprüfung und die exakte InnoDB-Sperridentifikation
+aus #86 bleiben erhalten; der Vollabgleich sperrt auch gleichzeitig neu
+angelegte Einsätze vor den Mitgliedern/Fahrzeugen.
+
+Warnungen enthalten ausschließlich die zulässige lokale Einsatz-ID und
+Feldkategorien, nicht verworfene Patienten-/Kontaktwerte oder Access-Keys.
+Mailwarnungen werden nicht verdrängt; es gibt keine persistente Konfliktakte,
+automatische Wiederholung oder externe Mutation. DIVERA bleibt GET-only.
+API-Antworten bleiben native Listen/Objekte nach #92; die rollenbezogene
+Filtermigration und der Standard „Bericht erforderlich“ aus #106 bleiben
+unverändert.
+
+Migration 005 verwendet nur Namen aus der Einsatzorganisation und niemals
+NULL oder fremde Namen als historische Quelle. Nicht rekonstruierbare alte
+Namensstände werden ausdrücklich dokumentiert; die abgeleitete
+Personalübersicht wird neu aufgebaut. Strict-Mode und angehobenes
+`group_concat_max_len` verhindern stille Textkürzung. Der transaktionale
+Backfill lässt sich nach Teil-DDL wiederaufnehmen, ohne gesicherte Namen
+oder Revisionen erneut zu ändern. Neue Namen sind NOT NULL ohne Default:
+Rollout erfordert eine vom SFTP-Upload unabhängige Schreibsperre; ein
+Code-only-Rollback ist nicht sicher. Migration 005 benötigt eine separate
+Betreiberbestätigung. Details:
+[kanonische Deploymentanleitung](docs/WEBSPACE-DEPLOYMENT.md#historische-berichtsdaten-einführen-89).
+
+Validiert wurden PHP-/JavaScript-/Shell-Syntax, native Browserregressionen,
+die Migrationssuite einschließlich UTF-8, Fremdmandanten, Überlauf-Rollback
+und Wiederaufnahme, der Demo-Seed-Check sowie vollständige HTTP-/SMTP-
+und Apache-/HTTPS-/MySQL-Suiten mit aktivierten PHP-Assertions. Alle
+Datenbanken lagen in eigenen frischen Dockerprojekten, nicht in normalen
+Entwicklungs- oder Produktionsvolumes. Die fünf Apache-Parallelitätsfälle
+prüfen weiterhin konkrete InnoDB-Transaktions-/Lock-IDs.
+Zusätzlich bestand der vorhandene Screenshot-Test mit Playwright 1.55.0 im
+isolierten Demo-Profil: 16 rollenabhängige Screenshots einschließlich der
+Browserprüfung des Filterstandards und seiner einmaligen Präferenzmigration.
+
 ## API-Vertrag und Eingabevalidierung vom 6. September 2026 (#92)
 
 Der gezielte Integrationsreview umfasst JSON-Eingaben, lokale IDs, optionale
@@ -74,7 +136,9 @@ den Einsatz und danach Berichte. Die Versionsprüfung erfolgt unter diesen
 Sperren vor Text-/Besatzungs-/Fahrzeugänderungen oder Historienschreibzugriffen.
 Die Konsolidierung prüft neben dem Gesamtstand die vollständige Menge der
 geladenen Quellberichts-IDs und -Revisionen. Rückgaben, erneute Übergaben,
-neue Berichte, zusätzliche Einheiten und Neuimporte widerrufen alte Stände.
+neue Berichte und zusätzliche Einheiten widerrufen alte Stände.
+Seit #89 gelten Neuimporte nur bei tatsächlich übernommenen Änderungen als
+neuer Einsatzstand; identische oder verworfene Historienabweichungen nicht.
 Konflikte rollen vollständig zurück und lösen keine Workflow-Mail aus.
 DIVERA bleibt ausschließlich per GET lesend angebunden.
 
@@ -274,8 +338,8 @@ Fahrzeugstamm und die Organisation der Berichtseinheit geprüft. Fahrzeuge
 anderer Einheiten oder Mandanten sind auch mit manipulierten Requests nicht
 zulässig. Historische Einträge dürfen nur unverändert erhalten oder entfernt
 werden; neue Besatzungszuordnungen zu nicht mehr vorhandenen Fahrzeugen werden
-abgelehnt. DIVERA-Neuimporte ändern ausschließlich den getrennten
-Einsatz-Snapshot und überschreiben diese Berichtsdaten nicht.
+abgelehnt. DIVERA-Neuimporte überschreiben diese Berichtsdaten nicht; seit
+#89 bleiben auch bestehende Einsatz-Snapshots ab dem ersten Bericht erhalten.
 
 DIVERA bleibt ausschließlich lesend angebunden. Einzel- und Gesamtimport verwenden nur `GET`; der Browser liefert beim Einzelimport lediglich die Alarm-ID, die serverseitig erneut verifiziert wird. Die optionale Basisadresse ist eine serverseitige Test- und lokale Demokonfiguration und wird nie aus Requests übernommen. Der Fake-DIVERA-Dienst protokolliert die Methoden und weist schreibende externe Aufrufe zurück. Externe Fehler nennen nur sichere Kategorien oder HTTP-Statuscodes; URL und Access-Key werden weder ausgegeben noch protokolliert.
 

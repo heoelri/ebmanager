@@ -196,9 +196,14 @@ ersten Umsetzung bewusst nicht persistiert.
 | `consolidated_text` | TEXT, NOT NULL | Gesamtbericht der Wehrleitung; API-Ausgabe ausschließlich an die Wehrleitung, auch bei einem erhaltenen Arbeitsstand |
 | `consolidated_at` | DATETIME, NULL | Zeitpunkt der Konsolidierung |
 | `revision` | INT UNSIGNED, NOT NULL, DEFAULT 1 | Monotoner Stand des Einsatzes einschließlich Gesamttext, Einheitenzuordnungen und Quellberichte; API-Ausgabe nur an die Wehrleitung |
+| `report_data_frozen` | TINYINT(1), NOT NULL, DEFAULT 0 | Ab der ersten erfolgreichen Berichtsanlage dauerhaft 1; schützt gemeinsame Einsatzdaten und bestehende Einheits-Fahrzeuglisten |
 
 Ein importierter Einsatz ist über `(organization_id, divera_id)` eindeutig.
-Ein erneuter Import aktualisiert ihn. Manuelle Einsätze haben keine
+Vor dem ersten Bericht übernimmt ein erneuter Import echte Änderungen. Danach
+bleiben `foreign_id`, `divera_date`, `title`, `started_at`, `message`, `address`,
+`lat`, `lng`, `remark`, `patient` und `caller` unverändert. Abweichungen werden
+mit Einsatz-ID und Kategorien gewarnt, nicht als weitere Inhaltskopien
+gespeichert. Manuelle Einsätze haben keine
 `divera_id`; ihr Zeitpunkt wird als vollständiger UTC-ISO-Zeitwert validiert
 und normalisiert. Beim Import sendet der Browser nur diese ID; alle kanonischen
 Einsatzfelder werden unmittelbar danach serverseitig erneut aus DIVERA
@@ -237,6 +242,10 @@ Kompatibilitätsgründen reine Fahrzeugnamen enthalten.
 
 Der Import-Snapshot wird nicht um manuell eingesetzte Fahrzeuge ergänzt.
 Diese liegen getrennt in `report_additional_vehicles`.
+Ab dem ersten Bericht des Einsatzes bleibt jeder bereits vorhandene Snapshot
+erhalten, auch bei Einheiten ohne eigenen Bericht. Eine später hinzukommende
+Einheit erhält ihren ersten Snapshot, ohne die gemeinsamen Daten oder frühere
+Snapshots zu überschreiben. Eine reine Umsortierung gilt nicht als Änderung.
 
 ### Abgeleitete Einheitsstatistiken
 
@@ -253,6 +262,10 @@ vorhandener Einheitsberichte; Einsätze ohne Bericht erhöhen diesen Nenner
 nicht. Vorhandene Berichte zählen unabhängig von ihrem aktuellen
 Workflowstatus. Inaktive Mitglieder bleiben über ihren Datensatz in `members`
 historisch auswertbar.
+Je Mitglieds-ID wird als Bezeichnung der gespeicherte `member_name` aus dem
+zeitlich letzten Einsatz im gewählten Zeitraum verwendet, bei gleicher
+Alarmzeit aus dem Bericht mit der höchsten ID. Mehrere historische Namen
+derselben Person erzeugen keine doppelten Personenstatistiken.
 
 Jahr, Monat, Wochentag, Tag/Nacht und Werktag/Wochenende werden aus
 `incidents.started_at` in `Europe/Berlin` berechnet. Die Grenzwerte liegen in
@@ -335,7 +348,7 @@ Die Tabelle enthält den aktuellen, einheitsspezifischen Fahrzeugstamm aus DIVER
 | `shortname` | VARCHAR(100), NOT NULL | Kurzbezeichnung |
 | `fullname` | VARCHAR(200), NOT NULL | Vollständige Typbezeichnung |
 
-Eindeutig ist `(unit_id, divera_id)`. Ein Stammdatenabgleich ersetzt den aktuellen Bestand der Einheit vollständig. Beim Import eines Einsatzes werden fremde Fahrzeug-IDs aus einem eindeutigen Fahrzeugstamm einer anderen Einheit derselben Organisation ergänzt; fehlende oder innerhalb der Organisation mehrdeutige IDs bleiben als ID sichtbar. Ein erneuter Einsatzimport aktualisiert den Snapshot, bestehende Snapshots ändern sich nicht allein durch einen Stammdatenabgleich.
+Eindeutig ist `(unit_id, divera_id)`. Ein Stammdatenabgleich ersetzt den aktuellen Bestand der Einheit vollständig. Beim Import eines Einsatzes werden fremde Fahrzeug-IDs aus einem eindeutigen Fahrzeugstamm einer anderen Einheit derselben Organisation ergänzt; fehlende oder innerhalb der Organisation mehrdeutige IDs bleiben als ID sichtbar. Ein erneuter Einsatzimport aktualisiert bestehende Snapshots nur vor dem ersten Bericht; ein reiner Stammdatenabgleich ändert sie nie.
 
 ### `reports`
 
@@ -345,6 +358,7 @@ Eindeutig ist `(unit_id, divera_id)`. Ein Stammdatenabgleich ersetzt den aktuell
 | `incident_id` | BIGINT UNSIGNED, FK | Zugehöriger Einsatz |
 | `unit_id` | BIGINT UNSIGNED, FK | Berichtende Einheit |
 | `author_id` | BIGINT UNSIGNED, FK | Erstellender Benutzer |
+| `author_name` | VARCHAR(200), NOT NULL, ohne Default | Name bei Berichtsanlage, unabhängig von späteren Kontoänderungen |
 | `report_year` | SMALLINT UNSIGNED, NULL | Kalenderjahr des Einsatzes in `Europe/Berlin`; bei Altbeständen leer |
 | `running_number` | VARCHAR(50), NULL | Manuell vergebene laufende Nummer der Einheit; bei Altbeständen leer |
 | `damaged_party` | JSON, NULL | Geschädigte Person mit Name, Telefon und Adresse |
@@ -363,7 +377,7 @@ Eindeutig ist `(unit_id, divera_id)`. Ein Stammdatenabgleich ersetzt den aktuell
 | `created_at` | DATETIME, NOT NULL | Erstellungszeit |
 | `updated_at` | DATETIME, NOT NULL | Letzte Änderung |
 | `released_at` | DATETIME, NULL | Freigabezeit |
-| `revision` | INT UNSIGNED, NOT NULL, DEFAULT 1 | Monotoner Stand des Berichts einschließlich Besatzung, Zusatzfahrzeuge, Workflow und importierter Einsatzdaten |
+| `revision` | INT UNSIGNED, NOT NULL, DEFAULT 1 | Monotoner Stand des Berichts einschließlich Besatzung, Zusatzfahrzeuge und Workflow |
 
 Eindeutig ist `(incident_id, unit_id)`: Jede Einheit schreibt pro Einsatz
 genau einen Bericht. Zusätzlich ist `(unit_id, report_year, running_number)`
@@ -388,18 +402,41 @@ ausschließlich deren dort festgelegte Werte:
 
 Die Spalten `vehicles` und `personnel` sind nur lesbare Zusammenfassungen aus
 `report_crew`; die strukturierte Zuordnung ist maßgeblich.
+`personnel` verwendet die gespeicherten `member_name`-Werte in aufsteigender
+Mitglieds-ID-Reihenfolge. Bestehende Besatzungsmitglieder behalten ihre Namen
+beim Bearbeiten/Umverteilen; erst eine nach gespeicherter Entfernung erneute
+Aufnahme verwendet den dann aktuellen Namen. Autorenname, Besatzungsnamen und
+Prüfverlauf sind voneinander unabhängige zeitpunktbezogene Angaben.
+
+Migration 005 übernimmt für Altbestände ausschließlich die heute vorhandenen
+Namen aus derselben Organisation, bei fehlender zulässiger Quelle `""` statt
+NULL oder eines fremden Namens. Frühere, bereits überschriebene Namen können
+nicht rekonstruiert werden. Ein leerer Snapshot repariert keine ungültige
+Autorenzuordnung: Berichte mit mandantenfremdem Autor bleiben in Berichtsansicht
+und Einzel-PDF ausgeschlossen. Die Migration ersetzt die bisherige abgeleitete
+Personalübersicht durch die strukturierte Besatzung, auch wenn dort noch
+ältere freie Namensstände standen. Sie erhöht jede Bestandsberichtsrevision
+und jede Einsatzrevision mit Berichten einmalig und setzt deren Freeze-Marker.
+Der Backfill ist transaktional und gegen Wiederaufnahme abgesichert; DDL
+bleibt nicht transaktional. `personnel` bleibt TEXT (höchstens 65.535 Bytes):
+Zu lange Zusammenfassungen führen zum Fehler, nicht zur stillen Kürzung.
+Die verbindlichen manuellen Schritte und Grenzen stehen unter
+[Deployment: Historische Berichtsdaten](docs/WEBSPACE-DEPLOYMENT.md#historische-berichtsdaten-einführen-89).
 
 #### Schutz vor veralteten Bearbeitungsständen
 
-Neue und migrierte Berichte beginnen bei Revision 1. Jede erfolgreiche
+Neue Berichte beginnen bei Revision 1; Migration 004 initialisiert alte
+Revisionen, Migration 005 erhöht Bestandsrevisionen einmalig. Jede erfolgreiche
 Bearbeitung oder Statusänderung erhöht `reports.revision` und
 `incidents.revision` in derselben Transaktion. Eine Berichtserstellung erhöht
 die Einsatzrevision. Jede erfolgreiche Konsolidierung erhöht die
 Einsatzrevision. Neuimporte eines bestehenden Einsatzes erhöhen dessen Revision
-und die Revisionen aller zugehörigen Berichte konservativ auch bei gleichen
-Quelldaten; dies umfasst Änderungen der Einsatzfelder, Alarmfahrzeuge und
-zusätzliche Einheitenzuordnungen. Fachliche Import-/Invalidierungsregeln bleiben
-ansonsten unverändert. Die Zähler werden nie aus Zeitstempeln oder Statusnamen
+nur bei echten Änderungen vor dem ersten Bericht oder neuen Zuordnungen; dann
+wird `consolidated_at` geleert und der bisherige Gesamttext erhalten.
+Berichtsrevisionen bleiben beim Import unverändert. Identische beziehungsweise
+historisch verworfene Änderungen erhalten auch Einsatzrevision und Abschluss.
+Das Importprotokoll darf trotzdem einen neuen Eintrag erhalten.
+Die Zähler werden nie aus Zeitstempeln oder Statusnamen
 abgeleitet und im laufenden Betrieb nicht zurückgesetzt.
 
 Berichtsspeicherung und sämtliche Übergaben/Rückgaben verlangen die zuvor über
@@ -453,6 +490,7 @@ Die erlaubten Richtungen sind `author_draft → unit_review`, `unit_review → a
 |---|---|---|
 | `report_id` | BIGINT UNSIGNED, FK, PK | Bericht |
 | `member_id` | BIGINT UNSIGNED, FK, PK | Eingesetztes Mitglied |
+| `member_name` | VARCHAR(200), NOT NULL, ohne Default | Name beim Aufnehmen in die Besatzung, unabhängig von späteren Stammdaten |
 | `vehicle` | VARCHAR(200), NOT NULL | Fahrzeugname; leer bedeutet „Ohne Fahrzeug“ |
 | `role` | ENUM, NOT NULL | `maschinist`, `einheitsfuehrer` oder `besatzung` |
 

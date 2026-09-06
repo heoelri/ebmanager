@@ -81,6 +81,7 @@ CREATE TABLE incidents (
   consolidated_text TEXT NOT NULL,
   consolidated_at DATETIME,
   revision INT UNSIGNED NOT NULL DEFAULT 1,
+  report_data_frozen TINYINT(1) NOT NULL DEFAULT 0,
   UNIQUE KEY incidents_org_divera (organization_id, divera_id),
   CONSTRAINT incidents_org_fk FOREIGN KEY (organization_id) REFERENCES organizations(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -158,6 +159,7 @@ CREATE TABLE reports (
   incident_id BIGINT UNSIGNED NOT NULL,
   unit_id BIGINT UNSIGNED NOT NULL,
   author_id BIGINT UNSIGNED NOT NULL,
+  author_name VARCHAR(200) NOT NULL,
   report_year SMALLINT UNSIGNED,
   running_number VARCHAR(50),
   damaged_party JSON,
@@ -203,6 +205,7 @@ CREATE TABLE report_crew (
   report_id BIGINT UNSIGNED NOT NULL,
   member_id BIGINT UNSIGNED NOT NULL,
   vehicle VARCHAR(200) NOT NULL DEFAULT '',
+  member_name VARCHAR(200) NOT NULL,
   role ENUM('maschinist','einheitsfuehrer','besatzung') NOT NULL DEFAULT 'besatzung',
   PRIMARY KEY (report_id, member_id),
   CONSTRAINT report_crew_report_fk FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE,
@@ -225,4 +228,5 @@ INSERT INTO schema_migrations(name,applied_at) VALUES
   ('001-report-workflow-and-vehicles.sql',UTC_TIMESTAMP()),
   ('002-inactive-unit-members.sql',UTC_TIMESTAMP()),
   ('003-report-additional-vehicles.sql',UTC_TIMESTAMP()),
-  ('004-report-revisions.sql',UTC_TIMESTAMP());
+  ('004-report-revisions.sql',UTC_TIMESTAMP()),
+  ('005-historical-report-snapshots.sql',UTC_TIMESTAMP());

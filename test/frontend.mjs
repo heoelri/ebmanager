@@ -697,6 +697,64 @@ assert(renderCrewSource, 'renderCrew fehlt');
 assert.match(renderCrewSource, /if\(!root\.isConnected\|\|/);
 assert.match(renderCrewSource, /if\(restoreFocus\)root\.querySelector\('h3'\)\.focus\(\)/);
 
+// Historische Besatzungsnamen überleben Stammdatenänderungen und erneutes Rendern; neue Personen zeigen aktuelle Namen.
+const crewRoot = {isConnected: true, dataset: {}, contains: () => false};
+const crewResources = {members: [
+  {id: 1, name: 'Anna Neu', active: 1}, {id: 2, name: 'Bernd Aktuell', active: 1}
+], vehicles: []};
+const historicalCrew = [{memberId: 1, name: 'Anna Historisch', vehicle: '', role: 'besatzung'}];
+const crewRenderer = new Function('document', 'api', 'esc', 'bindCrewBoard', 'dragEnabled',
+  `${apiTypesSource};${renderCrewSource};return renderCrew;`)({querySelector: () => crewRoot}, async () => crewResources, value => String(value ?? ''), () => {}, false);
+await crewRenderer('#crew', 1, [], historicalCrew);
+assert.match(crewRoot.innerHTML, /data-name="Anna Historisch"/);
+assert.match(crewRoot.innerHTML, /data-name="Bernd Aktuell"/);
+assert(!crewRoot.innerHTML.includes('Anna Neu'));
+crewResources.members[0].name = 'Anna Noch Neuer';
+await crewRenderer('#crew', 1, [], historicalCrew, ['Zusatzfahrzeug']);
+assert.match(crewRoot.innerHTML, /data-name="Anna Historisch"/);
+assert(!crewRoot.innerHTML.includes('Anna Noch Neuer'));
+assert.equal(crewResources.members[0].name, 'Anna Noch Neuer');
+
+// Die Namensauflösung bleibt linear, auch wenn historische Personen im aktuellen Stamm fehlen.
+let snapshotIdReads = 0;
+crewResources.members = Array.from({length: 400}, (_, index) => ({id: index + 1, name: `Aktuell ${index + 1}`, active: 1}));
+const manySelected = Array.from({length: 200}, (_, index) => ({
+  get memberId() { snapshotIdReads++; return index + 301; },
+  name: `Archiv ${index + 301}`, vehicle: '', role: 'besatzung'
+}));
+await crewRenderer('#crew', 1, [], manySelected);
+assert(snapshotIdReads <= 12 * (crewResources.members.length + manySelected.length),
+  `Historische Besatzung verursacht wiederholte Vollsuchen (${snapshotIdReads} ID-Zugriffe)`);
+assert.match(crewRoot.innerHTML, /data-name="Archiv 500"/);
+
+// Importwarnungen werden sofort in der DIVERA-Ansicht angekündigt und nicht erst bei späterer Navigation sichtbar.
+const syncSource = html.match(/async function syncDivera[^\n]+/)?.[0];
+assert(syncSource, 'DIVERA-Synchronisierung fehlt');
+const syncOutput = {};
+const syncAnnouncer = {};
+const syncWarning = 'Einsatz #42: Abweichende DIVERA-Daten wurden nicht übernommen.';
+const syncHarness = new Function('document', 'api', 'load', 'esc', 'announcer',
+  `let pendingWarning=${JSON.stringify(syncWarning)};${syncSource};return {syncDivera,warning:()=>pendingWarning};`)(
+  {querySelector: selector => selector === '#pullUnit' ? {value: '1'} : syncOutput},
+  async () => ({members: 2, qualifications: 2, vehicles: 2, incidentsCreated: 0, incidentsUpdated: 0, incidentsUnchanged: 2, warning: syncWarning}),
+  async () => {}, value => value, syncAnnouncer);
+await syncHarness.syncDivera('all');
+assert.match(syncOutput.innerHTML, /0 aktualisiert, 2 unverändert/);
+assert.match(syncOutput.innerHTML, /role="alert"/);
+assert(syncOutput.innerHTML.includes(syncWarning));
+assert.equal(syncAnnouncer.textContent, syncWarning);
+assert.equal(syncHarness.warning(), '');
+
+// Eine während des Neuladens hinzugekommene andere Warnung wird nicht versehentlich als erledigt entfernt.
+const concurrentWarning = 'Benachrichtigungs-E-Mails konnten nicht versendet werden.';
+const concurrentSync = new Function('document', 'api', 'esc', 'announcer',
+  `let pendingWarning=${JSON.stringify(syncWarning)}; const load=async()=>{pendingWarning=${JSON.stringify(concurrentWarning)}};${syncSource};return {syncDivera,warning:()=>pendingWarning};`)(
+  {querySelector: selector => selector === '#pullUnit' ? {value: '1'} : syncOutput},
+  async () => ({members: 0, qualifications: 0, vehicles: 0, incidentsCreated: 0, incidentsUpdated: 0, incidentsUnchanged: 1, warning: syncWarning}),
+  value => value, syncAnnouncer);
+await concurrentSync.syncDivera('all');
+assert.equal(concurrentSync.warning(), concurrentWarning);
+
 // Ressourcen- und Besatzungsansicht verarbeiten native Fahrzeuglisten, ohne fremde Fahrzeuge als eigene Besatzungsziele anzubieten.
 {
 const root = {innerHTML: '', dataset: {}, isConnected: true, contains: () => false};
