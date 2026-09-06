@@ -109,6 +109,7 @@
 ## Oberfläche und Barrierefreiheit
 
 - Hauptnavigation: Einsätze, Mitglieder & Fahrzeuge, rollenabhängig Statistik, Verwaltung, System und DIVERA sowie Abmelden.
+- Unter „Einsätze“ ist für Führungskräfte „Bericht erforderlich“ voreingestellt. Bisher gespeichertes „Alle Status“ wird einmalig umgestellt; andere gespeicherte Filter und eine spätere bewusste Auswahl von „Alle Status“ bleiben erhalten. Die Voreinstellung anderer Rollen bleibt unverändert.
 - „System“ ist nur für die Wehrleitung sichtbar und zeigt ausschließlich kuratierte, nicht geheime Zustandsdaten einschließlich der Build-ID. Gib niemals DSN, Kennwörter, Einrichtungstoken oder DIVERA-Schlüssel aus.
 - Die Oberfläche bleibt ohne Framework responsiv und mit Tastatur, Screenreader und Touch bedienbar.
 - Interaktive Ziele sind mindestens 44 Pixel groß, Tastaturfokus ist sichtbar und dynamische Fehler sowie Statusänderungen werden angekündigt.

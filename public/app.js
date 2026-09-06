@@ -46,7 +46,16 @@ async function logout(){await api('/api/logout',{method:'POST'});me=null;history
 const incidentStatusFilterLabels={report_required:'Bericht erforderlich',report_exists:'Einsatzbericht vorhanden',awaiting_report:'Bericht der Führungskraft ausstehend',review_required:'Prüfung erforderlich',submitted:'Bericht abgegeben',reports_pending:'Berichte ausstehend',ready:'Bereit zur Konsolidierung',completed:'Abgeschlossen'};
 function incidentStatus(incident){return `<p class="incident-status"><b>Status:</b> ${esc(incident.reportStatus.label)}</p>`}
 function incidentFilterOptions(items,selected=''){const keys=new Set(items.map(item=>item.reportStatus.key));if(Object.prototype.hasOwnProperty.call(incidentStatusFilterLabels,selected))keys.add(selected);return [...keys].map(key=>`<option value="${esc(key)}">${esc(Object.prototype.hasOwnProperty.call(incidentStatusFilterLabels,key)?incidentStatusFilterLabels[key]:key)}</option>`).join('')}
-function incidentFilterPreference(value){try{if(value===undefined)return localStorage.getItem(`incidentStatusFilter:${me.id}:${me.role}`)||'';localStorage.setItem(`incidentStatusFilter:${me.id}:${me.role}`,value)}catch{}return value??''}
+function incidentFilterPreference(value){
+  const key=`incidentStatusFilter:${me.id}:${me.role}`,defaultStatus=me.role==='fuehrungskraft'?'report_required':'';
+  // A new key distinguishes the old default from a later explicit selection of all statuses.
+  const preferenceKey=defaultStatus?`${key}:v2`:key;
+  try{
+    if(value===undefined)return localStorage.getItem(preferenceKey)??(defaultStatus?(localStorage.getItem(key)||defaultStatus):'');
+    localStorage.setItem(preferenceKey,value);
+  }catch{}
+  return value??defaultStatus;
+}
 function filterIncidents(status){incidentFilterPreference(status);let visible=0;document.querySelectorAll('[data-incident-status]').forEach(card=>{card.hidden=!!status&&card.dataset.incidentStatus!==status;if(!card.hidden)visible++});document.querySelector('#noFilteredIncidents').hidden=visible>0}
 function home(){const selectedStatus=incidentFilterPreference();app.innerHTML=`<h1>${esc(me.organization_name)}</h1><p class="muted">${esc(me.name)} · ${esc(roleLabels[me.role]||me.role)}</p>
   <details class="card resource-section"><summary>Einsatz anlegen</summary><div class="resource-section-content"><p class="muted">Nur für Einsätze verwenden, die nicht über DIVERA alarmiert wurden.</p><form id="incident" class="grid">

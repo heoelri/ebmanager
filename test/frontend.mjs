@@ -262,7 +262,7 @@ assert.equal(incidentFilterOptions([{reportStatus: {key: 'toString'}}]), '<optio
 
 const filterSource = html.match(/function filterIncidents[^\n]+/)?.[0];
 assert(filterSource, 'filterIncidents fehlt');
-const filterPreferenceSource = html.match(/function incidentFilterPreference[^\n]+/)?.[0];
+const filterPreferenceSource = html.match(/function incidentFilterPreference[\s\S]*?(?=\nfunction filterIncidents)/)?.[0];
 assert(filterPreferenceSource, 'incidentFilterPreference fehlt');
 const cards = [
   {dataset: {incidentStatus: 'report_required'}, hidden: false},
@@ -292,6 +292,44 @@ const blockedPreference = new Function('localStorage', 'me', `${filterPreference
 );
 assert.equal(blockedPreference(), '');
 assert.equal(blockedPreference('submitted'), 'submitted');
+// Nur Führungskräfte erhalten den neuen Standard; alte Alle-Auswahl wird einmalig übernommen, andere und spätere Auswahlen bleiben erhalten.
+{
+const storage = new Map();
+const preferenceFor = (id, role, localStorage = {
+  getItem: key => storage.get(key) ?? null,
+  setItem: (key, value) => storage.set(key, value)
+}) => new Function('localStorage', 'me', `${filterPreferenceSource}; return incidentFilterPreference;`)(localStorage, {id, role});
+const forcePreference = preferenceFor(42, 'fuehrungskraft');
+const legacyKey = 'incidentStatusFilter:42:fuehrungskraft';
+assert.equal(forcePreference(), 'report_required');
+storage.set(legacyKey, '');
+assert.equal(forcePreference(), 'report_required');
+forcePreference(forcePreference());
+assert.equal(storage.get(`${legacyKey}:v2`), 'report_required');
+assert.equal(forcePreference(''), '');
+assert.equal(forcePreference(), '');
+assert.equal(storage.get(legacyKey), '');
+assert.equal(forcePreference('submitted'), 'submitted');
+assert.equal(forcePreference(), 'submitted');
+storage.set('incidentStatusFilter:43:fuehrungskraft', 'report_exists');
+assert.equal(preferenceFor(43, 'fuehrungskraft')(), 'report_exists');
+for (const role of ['einheitsleitung', 'wehrleitung']) {
+  const preference = preferenceFor(42, role);
+  assert.equal(preference(), '');
+  preference('submitted');
+  assert.equal(preference(), 'submitted');
+  assert.equal(storage.has(`incidentStatusFilter:42:${role}:v2`), false);
+}
+const unavailable = {
+  getItem() {throw Error('blocked');},
+  setItem() {throw Error('blocked');}
+};
+const blockedForcePreference = preferenceFor(42, 'fuehrungskraft', unavailable);
+assert.equal(blockedForcePreference(), 'report_required');
+assert.equal(blockedForcePreference(''), '');
+assert.equal(blockedForcePreference('submitted'), 'submitted');
+assert.match(incidentFilterOptions([{reportStatus: {key: 'submitted'}}], 'report_required'), /value="report_required">Bericht erforderlich/);
+}
 assert.match(html, /<label>Status filtern<select id="incidentStatusFilter"/);
 assert.match(html, /const selectedStatus=incidentFilterPreference\(\)/);
 assert.match(html, /incidentFilterOptions\(incidents,selectedStatus\)/);
