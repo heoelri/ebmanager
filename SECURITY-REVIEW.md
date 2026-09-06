@@ -33,7 +33,7 @@ Deadlocks abgefangen, als Erfolg ausgegeben oder pauschal wiederholt.
 
 Die neue Apache-Regression startet echte parallele API-Anfragen mit Besatzung
 und kontrollierter MySQL-Mitgliedssperre. Sie verlangt anhand konkreter
-Verbindungs- und Datensatz-IDs die Warteketten auf `members.PRIMARY` und
+Transaktions-, Sperr- und Datensatz-IDs die Warteketten auf `members.PRIMARY` und
 `incidents.PRIMARY`. Startet das Speichern zuerst, gelingen Speicherung und
 Vollabgleich; startet der Vollabgleich zuerst, erhält der veraltete Editor
 HTTP 409. Beide Reihenfolgen werden zusätzlich mit einer neuen
@@ -45,6 +45,34 @@ Damit deckt der Test auch die Lücke einer bloßen Vorabfrage bestehender
 Einsatz-IDs ab. Die Regression läuft im vorhandenen Apache-/HTTPS-Test;
 der lokale einzelne PHP-Testserver
 kann keine zwei HTTP-Anfragen gleichzeitig bearbeiten.
+
+Die CI-Nachprüfung reproduzierte unter MySQL 8.4.11 eine unzuverlässige
+Metadatenannahme im Test, keinen erneuten Laufzeit-Deadlock: Bei der Umwandlung
+einer impliziten Insertsperre konnte `BLOCKING_THREAD_ID` auf den wartenden
+Thread zeigen, obwohl `BLOCKING_ENGINE_TRANSACTION_ID` weiterhin korrekt den
+Einfüger bezeichnete. Ein offener Lese-Snapshot hielt zudem einen alten
+Indexeintrag zurück; dann wartete der Upsert auf dessen gemeinsame
+Duplikatprüfsperre statt auf eine exklusive Sperre des neuen Indexeintrags.
+
+Der Test bestimmt die eigene Transaktion deshalb über eine explizite
+Tabellenabsichtssperre und verfolgt danach die exakten InnoDB-Transaktions-
+und Sperr-IDs beider Seiten der Wartebeziehung. Er verlangt weiterhin
+wartende Datensatzsperren auf gehaltenen Sperren der bekannten Transaktion
+und der richtigen Tabelle/Indizes. Beim parallelen Insert berührt diese
+Transaktion nur den ausdrücklich geprüften Test-Einsatzschlüssel; der Test
+vergleicht dessen gerenderte zusammengesetzte `LOCK_DATA` nicht mehr mit
+einem fest kodierten Text. Die unabhängige Besatzungserstellung muss weiterhin
+vor Freigabe der Insertsperre erfolgreich sein. Zeitlimits bleiben unverändert.
+Fehlerdiagnosen enthalten nur Sperrmetadaten dieser Transaktion in der isolierten
+Testdatenbank, keine SQL-Texte, Zugangsdaten oder Berichtsinhalt.
+Die unveränderten fünf Parallelitätsszenarien liefen mit dieser Korrektur sowohl
+normal als auch mit einem separat offengehaltenen Lese-Snapshot erfolgreich.
+Danach bestand die vollständige Apache-/HTTPS-Smoke-Suite erneut mit einem
+frischen isolierten MySQL-8.4.11-Volume; Shellsyntax und `git diff --check`
+waren ebenfalls erfolgreich. Die Sperr- und Fachlogik der Anwendung wurde
+hierfür nicht geändert. Eine zusätzliche Review-Korrektur formuliert den
+HTTP-409-Hinweis kontextneutral für den geladenen Stand; Statuscode,
+Versionsprüfung und Erhalt ungespeicherter Eingaben bleiben unverändert.
 
 Der Browser bewahrt Texte, Rückgabekommentare und Ressourcenauswahl bei HTTP 409
 im geöffneten Formular; er lädt nicht automatisch nach und versendet keinen

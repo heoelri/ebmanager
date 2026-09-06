@@ -674,8 +674,9 @@ EDITOR_ONE="$editor_one" SAVED_REPORT="$saved_report" php -r '
   assert($saved["additionalVehicles"]===["Zusatzfahrzeug"]);
   assert(json_decode($saved["crew"],true,512,JSON_THROW_ON_ERROR)[0]["memberId"]===100);
 '
-test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" \
-  --header 'Content-Type: application/json' --request PUT --data "$editor_two" "$base_url/api/reports/$report_id")" = 409
+# Eine veraltete Berichtsrevision meldet HTTP 409 mit einem kontextneutralen Hinweis auf den geladenen Stand.
+test "$(curl --insecure --silent --write-out '|%{http_code}' --cookie "$session_cookie=$force_token" \
+  --header 'Content-Type: application/json' --request PUT --data "$editor_two" "$base_url/api/reports/$report_id")" = '{"error":"Der geladene Stand wurde inzwischen geändert."}|409'
 test "$(curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$incident_id/reports")" = "$saved_report"
 
 # Eine wartende Bearbeitung sperrt zuerst den Einsatz und prüft die Revision erst nach dem konkurrierenden Commit erneut.
@@ -980,8 +981,9 @@ curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request PUT \
   --data "$(consolidation_data 'Konsolidiert: Nicht freigegebene Angaben der anderen Einheit')" "$base_url/api/incidents/$incident_id/consolidation" >/dev/null
 saved_consolidation=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents")
-test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" \
-  --header 'Content-Type: application/json' --request PUT --data "$stale_consolidation" "$base_url/api/incidents/$incident_id/consolidation")" = 409
+# Derselbe Konflikthinweis passt auch zu einer veralteten Einsatz-/Gesamtstandsrevision und erhält HTTP 409.
+test "$(curl --insecure --silent --write-out '|%{http_code}' --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' --request PUT --data "$stale_consolidation" "$base_url/api/incidents/$incident_id/consolidation")" = '{"error":"Der geladene Stand wurde inzwischen geändert."}|409'
 test "$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents")" = "$saved_consolidation"
 # Die Quellenrevisionen sind zusätzlich zur Gesamtstandsrevision verpflichtend.
 missing_sources=$(consolidation_data 'Ohne Quellen' | php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); unset($data["reportVersions"]); echo json_encode($data,JSON_THROW_ON_ERROR);')
@@ -1277,6 +1279,7 @@ test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-characte
 
 # Apache kann zwei API-Anfragen gleichzeitig bearbeiten; der lokale PHP-Einzelprozess kann dies nicht.
 # Gesamtabgleich und Berichte mit echter Besatzung warten in beiden Startreihenfolgen ohne Deadlock auf Einsatz-/Mitgliedssperren.
+# Die Zuordnung folgt InnoDB-Transaktions- und Sperr-IDs, nicht der Thread-/Schlüsseldarstellung impliziter Insertsperren.
 if [[ -n "${TEST_BASE_URL:-}" ]]; then
   REPORT_ID="$imported_report_id" INCIDENT_ID="$imported_incident_id" REPORT_PAYLOAD="$import_report_payload" \
     UNRELATED_INCIDENT_ID="$duplicate_incident_id" FORCE_COOKIE="$session_cookie=$force_token" \
@@ -1284,7 +1287,6 @@ if [[ -n "${TEST_BASE_URL:-}" ]]; then
     require "support.php";
     $memberId=(int)one("SELECT id FROM members WHERE organization_id=1 AND divera_id=?",["m1"])["id"];
     $creationIncidentId=(int)one("SELECT id FROM incidents WHERE organization_id=1 AND divera_id=?",["alarm-2"])["id"];
-    $blockerId=(int)query("SELECT CONNECTION_ID()")->fetchColumn();
     $start=function(string $path, array $payload, string $cookie, string $method): array {
       $process=proc_open(["curl","--insecure","--silent","--show-error","--max-time","20",
         "--write-out","\n%{http_code}","--cookie",$cookie,"--header","Content-Type: application/json",
@@ -1294,24 +1296,58 @@ if [[ -n "${TEST_BASE_URL:-}" ]]; then
       fclose($pipes[0]);
       return ["process"=>$process,"pipes"=>$pipes];
     };
-    $wait=function(int $blockingId, string $table, int|string $key, string $index="PRIMARY"): int {
+    // Explicit table intention locks reliably identify the owner, unlike converted implicit record locks.
+    $ownTransaction=function(): string {
+      $lock=one("SELECT l.ENGINE_TRANSACTION_ID AS transaction_id
+        FROM performance_schema.data_locks l JOIN performance_schema.threads t ON t.THREAD_ID=l.THREAD_ID
+        WHERE t.PROCESSLIST_ID=CONNECTION_ID() AND l.OBJECT_SCHEMA=DATABASE()
+          AND l.LOCK_TYPE=? AND l.LOCK_MODE=? AND l.LOCK_STATUS=? LIMIT 1",["TABLE","IX","GRANTED"]);
+      if(!$lock) throw new RuntimeException("Explizite Tabellensperre der Testtransaktion fehlt");
+      return (string)$lock["transaction_id"];
+    };
+    $lockWaits=function(string $blockingTransaction): array {
+      return query("SELECT w.REQUESTING_ENGINE_TRANSACTION_ID AS requesting_trx,w.BLOCKING_ENGINE_TRANSACTION_ID AS blocking_trx,
+        w.BLOCKING_THREAD_ID AS reported_blocking_thread,
+        l.ENGINE_LOCK_ID AS requested_lock,l.OBJECT_NAME AS requested_table,l.INDEX_NAME AS requested_index,
+        l.LOCK_TYPE AS requested_type,l.LOCK_STATUS AS requested_status,l.LOCK_MODE AS requested_mode,l.LOCK_DATA AS requested_key,
+        held.ENGINE_LOCK_ID AS held_lock,held.OBJECT_NAME AS held_table,held.INDEX_NAME AS held_index,
+        held.LOCK_TYPE AS held_type,held.LOCK_STATUS AS held_status,held.LOCK_MODE AS held_mode,held.LOCK_DATA AS held_key
+        FROM performance_schema.data_lock_waits w
+        JOIN performance_schema.data_locks l ON l.ENGINE=w.ENGINE AND l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+          AND l.ENGINE_TRANSACTION_ID=w.REQUESTING_ENGINE_TRANSACTION_ID
+        JOIN performance_schema.data_locks held ON held.ENGINE=w.ENGINE AND held.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+          AND held.ENGINE_TRANSACTION_ID=w.BLOCKING_ENGINE_TRANSACTION_ID
+        WHERE w.BLOCKING_ENGINE_TRANSACTION_ID=? AND l.OBJECT_SCHEMA=DATABASE() AND held.OBJECT_SCHEMA=DATABASE()",
+        [$blockingTransaction])->fetchAll();
+    };
+    $wait=function(string $blockingTransaction, string $table, int $rowId, bool $inserted=false) use ($lockWaits,$ownTransaction): string {
+      if($inserted) {
+        assert($blockingTransaction===$ownTransaction());
+        assert($table==="incidents" && (int)query("SELECT COUNT(*) FROM incidents WHERE id=? AND organization_id=1 AND divera_id=?",
+          [$rowId,"alarm-2"])->fetchColumn()===1);
+      }
       $deadline=microtime(true)+5;
+      $observed=[];
       while(microtime(true)<$deadline) {
-        $waiting=one("SELECT requester.PROCESSLIST_ID AS requesting_id,l.LOCK_DATA AS lock_key
-          FROM performance_schema.data_lock_waits w
-          JOIN performance_schema.data_locks l ON l.ENGINE=w.ENGINE AND l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
-          JOIN performance_schema.threads blocker ON blocker.THREAD_ID=w.BLOCKING_THREAD_ID
-          JOIN performance_schema.threads requester ON requester.THREAD_ID=w.REQUESTING_THREAD_ID
-          WHERE blocker.PROCESSLIST_ID=? AND l.OBJECT_SCHEMA=DATABASE()
-            AND l.OBJECT_NAME=? AND l.INDEX_NAME=?",
-          [$blockingId,$table,$index]);
-        if($waiting && ($waiting["lock_key"]===(string)$key
-          || ($index==="incidents_org_divera" && str_starts_with($waiting["lock_key"],"$key, ")))) {
-          return (int)$waiting["requesting_id"];
+        $observed=$lockWaits($blockingTransaction);
+        foreach($observed as $waiting) {
+          if($waiting["requested_table"]!==$table || $waiting["held_table"]!==$table
+            || $waiting["requested_index"]!==$waiting["held_index"]
+            || $waiting["requested_type"]!=="RECORD" || $waiting["held_type"]!=="RECORD"
+            || $waiting["requested_status"]!=="WAITING" || $waiting["held_status"]!=="GRANTED"
+            || !in_array($waiting["held_mode"],$inserted ? ["S","S,REC_NOT_GAP","X","X,REC_NOT_GAP"] : ["X","X,REC_NOT_GAP"],true)) continue;
+          // Only this incident key is inserted: duplicate checks may hold S on its delete-marked predecessor.
+          if($inserted
+            ? (in_array($waiting["held_index"],["PRIMARY","incidents_org_divera"],true)
+              && in_array($waiting["requested_mode"],["X","X,REC_NOT_GAP"],true))
+            : ($waiting["held_index"]==="PRIMARY" && $waiting["held_key"]===(string)$rowId)) {
+            return (string)$waiting["requesting_trx"];
+          }
         }
         usleep(50000);
       }
-      throw new RuntimeException("Erwartete Wartebeziehung auf $table.$index fehlt");
+      fwrite(STDERR,"Sperrdiagnose der Testtransaktion $blockingTransaction: ".json_encode($observed,JSON_THROW_ON_ERROR)."\n");
+      throw new RuntimeException("Erwartete Wartebeziehung auf $table für Testdatensatz $rowId fehlt");
     };
     $finish=function(array $request, int $expected): array {
       $output=stream_get_contents($request["pipes"][1]);
@@ -1343,14 +1379,15 @@ if [[ -n "${TEST_BASE_URL:-}" ]]; then
       $requests=[];
       db()->beginTransaction();
       query("SELECT id FROM members WHERE id=? FOR UPDATE",[$memberId]);
+      $blockingTransaction=$ownTransaction();
       try {
         $reportRequest=fn()=>$start($path,$payload,getenv("FORCE_COOKIE"),$action==="save" ? "PUT" : "POST");
         $syncRequest=fn()=>$start("/api/units/1/divera/sync",[],getenv("COMMAND_COOKIE"),"POST");
         $requests[$first]=$first==="report" ? $reportRequest() : $syncRequest();
-        $firstConnection=$wait($blockerId,"members",$memberId);
+        $firstTransaction=$wait($blockingTransaction,"members",$memberId);
         $second=$first==="report" ? "sync" : "report";
         $requests[$second]=$second==="report" ? $reportRequest() : $syncRequest();
-        $wait($firstConnection,"incidents",$incidentId);
+        $wait($firstTransaction,"incidents",$incidentId);
         db()->commit();
         $expected=$action==="create" ? 201 : ($first==="report" ? 200 : 409);
         $saved=$finish($requests["report"],$expected);
@@ -1384,10 +1421,11 @@ if [[ -n "${TEST_BASE_URL:-}" ]]; then
       VALUES(1,?,?,?,?,?,?,?,?)",["alarm-2","Paralleler Import","2026-08-22T19:00:00.000Z","","","","",""]);
     $createdIncidentId=(int)db()->lastInsertId();
     query("INSERT INTO incident_units(incident_id,unit_id,vehicles) VALUES(?,1,?)",[$createdIncidentId,"[]"]);
+    $blockingTransaction=$ownTransaction();
     $requests=[];
     try {
       $requests["sync"]=$start("/api/units/1/divera/sync",[],getenv("COMMAND_COOKIE"),"POST");
-      $wait($blockerId,"incidents","1, ".chr(39)."alarm-2".chr(39),"incidents_org_divera");
+      $wait($blockingTransaction,"incidents",$createdIncidentId,true);
       $payload["runningNumber"]="88/2026";
       $payload["narrative"]="Bericht während paralleler Alarmanlage";
       unset($payload["revision"]);
@@ -1395,7 +1433,7 @@ if [[ -n "${TEST_BASE_URL:-}" ]]; then
       $requests["report"]=$start("/api/incidents/$unrelatedIncidentId/reports",$payload,getenv("FORCE_COOKIE"),"POST");
       $created=$finish($requests["report"],201);
       unset($requests["report"]);
-      $wait($blockerId,"incidents","1, ".chr(39)."alarm-2".chr(39),"incidents_org_divera");
+      $wait($blockingTransaction,"incidents",$createdIncidentId,true);
       db()->commit();
       $synced=$finish($requests["sync"],200);
       unset($requests["sync"]);

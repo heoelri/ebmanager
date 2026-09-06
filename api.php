@@ -601,7 +601,7 @@ function assertRevision(mixed $expected, int $actual): void
     if (!is_int($expected) || $expected < 1 || $expected > 4294967295) {
         throw new ApiError(400, 'Eine gültige geladene Revision ist erforderlich. Bitte Ansicht neu laden.');
     }
-    if ($expected !== $actual) throw new ApiError(409, 'Der Bericht oder seine Einsatzdaten wurden inzwischen geändert.');
+    if ($expected !== $actual) throw new ApiError(409, 'Der geladene Stand wurde inzwischen geändert.');
 }
 
 function transitionReport(int $reportId, string $action, array $user, string $comment, mixed $revision): array
