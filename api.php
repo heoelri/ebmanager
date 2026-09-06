@@ -25,6 +25,11 @@ function databaseConfigurationError(): ?string
              AND column_name='active'"
         )->fetchColumn();
         if ((int)$memberUnitColumns !== 1) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
+        $revisionColumns = db()->query(
+            "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE()
+             AND table_name IN ('incidents','reports') AND column_name='revision'"
+        )->fetchColumn();
+        if ((int)$revisionColumns !== 2) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
     } catch (PDOException $error) {
         error_log((string)$error);
         return 'Datenbankverbindung fehlgeschlagen. Prüfen Sie DSN, Benutzername, Passwort und Erreichbarkeit.';
@@ -472,7 +477,7 @@ function visibleIncidentReports(int $incidentId, array $user): array
         $row['duration_minutes'] = $row['ended_at'] && $row['alarmed_at']
             ? (int)round((strtotime($row['ended_at']) - strtotime($row['alarmed_at'])) / 60)
             : null;
-        foreach (['id', 'incident_id', 'unit_id', 'author_id', 'report_year'] as $key) if ($row[$key] !== null) $row[$key] = (int)$row[$key];
+        foreach (['id', 'incident_id', 'unit_id', 'author_id', 'report_year', 'revision'] as $key) if ($row[$key] !== null) $row[$key] = (int)$row[$key];
     }
     return $rows;
 }
@@ -591,7 +596,15 @@ function reportReferenceForExport(int $reportId, array $user): ?array
     );
 }
 
-function transitionReport(int $reportId, string $action, array $user, string $comment): array
+function assertRevision(mixed $expected, int $actual): void
+{
+    if (!is_int($expected) || $expected < 1 || $expected > 4294967295) {
+        throw new ApiError(400, 'Eine gültige geladene Revision ist erforderlich. Bitte Ansicht neu laden.');
+    }
+    if ($expected !== $actual) throw new ApiError(409, 'Der Bericht oder seine Einsatzdaten wurden inzwischen geändert.');
+}
+
+function transitionReport(int $reportId, string $action, array $user, string $comment, mixed $revision): array
 {
     $rules = [
         'submit-to-unit' => ['author_draft', 'unit_review', 'fuehrungskraft', 'report_submitted_unit'],
@@ -626,6 +639,7 @@ function transitionReport(int $reportId, string $action, array $user, string $co
         } elseif ($user['role'] === 'einheitsleitung' && !in_array((int)$report['unit_id'], $user['unitIds'], true)) {
             throw new ApiError(403, 'Keine Berechtigung');
         }
+        assertRevision($revision, (int)$report['revision']);
         if ($action === 'return-to-author') {
             $assigned = query(
                 "SELECT COUNT(*) FROM users u JOIN user_units uu ON uu.user_id=u.id
@@ -636,13 +650,14 @@ function transitionReport(int $reportId, string $action, array $user, string $co
         }
 
         $released = $to === 'wehr_review' ? ',released_at=COALESCE(released_at,UTC_TIMESTAMP())' : '';
-        $updated = query("UPDATE reports SET status=?$released WHERE id=? AND status=?", [$to, $reportId, $from]);
+        $updated = query("UPDATE reports SET status=?,revision=revision+1$released WHERE id=? AND status=?", [$to, $reportId, $from]);
         if ($updated->rowCount() !== 1) throw new ApiError(409, 'Der Bericht wurde bereits geändert. Bitte Ansicht neu laden.');
         query(
             'INSERT INTO report_transitions(report_id,from_status,to_status,actor_id,actor_name,actor_role,comment,created_at) VALUES(?,?,?,?,?,?,?,UTC_TIMESTAMP())',
             [$reportId, $from, $to, $user['id'], $user['name'], $user['role'], $comment]
         );
-        if ($action === 'return-to-unit') query('UPDATE incidents SET consolidated_at=NULL WHERE id=?', [$report['incident_id']]);
+        $invalidate = $action === 'return-to-unit' ? ',consolidated_at=NULL' : '';
+        query("UPDATE incidents SET revision=revision+1$invalidate WHERE id=?", [$report['incident_id']]);
         $pdo->commit();
     } catch (Throwable $error) {
         if ($pdo->inTransaction()) $pdo->rollBack();
@@ -1077,7 +1092,7 @@ function persistDiveraAlarm(array $alarm, int $unitId, array $user): array
     $incidentId = (int)db()->lastInsertId();
     $newIncident = $saved->rowCount() === 1;
     if (!$newIncident) query(
-        'UPDATE incidents SET foreign_id=?,divera_date=?,title=?,started_at=?,message=?,address=?,lat=?,lng=?,remark=?,patient=?,caller=? WHERE id=?',
+        'UPDATE incidents SET foreign_id=?,divera_date=?,title=?,started_at=?,message=?,address=?,lat=?,lng=?,remark=?,patient=?,caller=?,revision=revision+1 WHERE id=?',
         [optional($alarm['foreignId'] ?? '', 'Einsatznummer', 200), finiteNumber($alarm['date'] ?? null, 'Alarmierungszeit'),
          required($alarm['title'] ?? null, 'Stichwort', 300), required($alarm['startedAt'] ?? null, 'Zeitpunkt', 100),
          optional($alarm['text'] ?? '', 'Meldung'), optional($alarm['address'] ?? '', 'Adresse', 500),
@@ -1096,6 +1111,8 @@ function persistDiveraAlarm(array $alarm, int $unitId, array $user): array
         'UPDATE incident_units SET vehicles=? WHERE incident_id=? AND unit_id=?',
         [$vehicles, $incidentId, $unitId]
     );
+    // The incident upsert holds the parent lock before any report lock.
+    if (!$newIncident) query('UPDATE reports SET revision=revision+1 WHERE incident_id=? ORDER BY id', [$incidentId]);
     query(
         'INSERT INTO divera_imports(unit_id,incident_id,imported_by,imported_at) VALUES(?,?,?,UTC_TIMESTAMP())',
         [$unitId, $incidentId, $user['id']]
@@ -1487,7 +1504,7 @@ try {
             ? 'i.organization_id=?'
             : 'i.organization_id=? AND EXISTS(SELECT 1 FROM incident_units x JOIN user_units uu ON uu.unit_id=x.unit_id WHERE x.incident_id=i.id AND uu.user_id=?)';
         $params = $user['role'] === 'wehrleitung' ? [$user['organization_id']] : [$user['organization_id'], $user['id']];
-        $consolidatedText = $user['role'] === 'wehrleitung' ? ',i.consolidated_text' : '';
+        $consolidatedText = $user['role'] === 'wehrleitung' ? ',i.consolidated_text,i.revision' : '';
         $rows = query(
             "SELECT i.id,i.organization_id,i.divera_id,i.foreign_id,i.divera_date,i.title,i.started_at,
              i.message,i.address,i.lat,i.lng,i.remark,i.patient,i.caller,i.consolidated_at$consolidatedText
@@ -1568,6 +1585,7 @@ try {
             unset($assignment);
             $row['assignments'] = json_encode($relevant, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
             foreach (['id', 'organization_id', 'divera_date'] as $key) if ($row[$key] !== null) $row[$key] = (int)$row[$key];
+            if (isset($row['revision'])) $row['revision'] = (int)$row['revision'];
             foreach (['lat', 'lng'] as $key) if ($row[$key] !== null) $row[$key] = (float)$row[$key];
         }
         unset($row);
@@ -1653,7 +1671,12 @@ try {
         assertOwnUnit($user, $unitId);
         if (!one('SELECT incident_id FROM incident_units WHERE incident_id=? AND unit_id=?', [$incidentId, $unitId])) throw new ApiError(400, 'Einheit wurde nicht alarmiert');
         if (one('SELECT id FROM reports WHERE incident_id=? AND unit_id=?', [$incidentId, $unitId])) throw new ApiError(409, 'Für diese Einheit existiert bereits ein Einsatzbericht');
-        $id = transaction(function () use ($data, $foundIncident, $incidentId, $unitId, $user) {
+        $id = transaction(function () use ($data, $incidentId, $unitId, $user) {
+            $foundIncident = one('SELECT * FROM incidents WHERE id=? AND organization_id=? FOR UPDATE', [$incidentId, $user['organization_id']]);
+            if (!$foundIncident) throw new ApiError(404, 'Einsatz nicht gefunden');
+            if (one('SELECT id FROM reports WHERE incident_id=? AND unit_id=? FOR UPDATE', [$incidentId, $unitId])) {
+                throw new ApiError(409, 'Für diese Einheit existiert bereits ein Einsatzbericht');
+            }
             $details = reportDetails($data, $foundIncident);
             $status = reportStatusForRole($user['role']);
             query(
@@ -1679,6 +1702,7 @@ try {
                 'INSERT INTO report_transitions(report_id,from_status,to_status,actor_id,actor_name,actor_role,created_at) VALUES(?,NULL,?,?,?,?,UTC_TIMESTAMP())',
                 [$id, $status, $user['id'], $user['name'], $user['role']]
             );
+            query('UPDATE incidents SET revision=revision+1,consolidated_at=NULL WHERE id=?', [$incidentId]);
             return $id;
         });
         respond(201, ['id' => $id]);
@@ -1687,12 +1711,19 @@ try {
     if ($method === 'PUT' && preg_match('#^/api/reports/(\d+)$#', $path, $match)) {
         $foundReport = report((int)$match[1], $user['organization_id']);
         if (!$foundReport) throw new ApiError(404, 'Bericht nicht gefunden');
-        if (!canEditReport($foundReport, $user)) throw new ApiError(403, 'Der Bericht kann nicht bearbeitet werden');
+        if (!canEditReport($foundReport, $user)
+            && ($user['role'] === 'wehrleitung' || !reportReferenceForExport((int)$foundReport['id'], $user))) {
+            throw new ApiError(403, 'Der Bericht kann nicht bearbeitet werden');
+        }
         $data = input();
         transaction(function () use ($data, $foundReport, $user) {
+            $foundIncident = one('SELECT * FROM incidents WHERE id=? AND organization_id=? FOR UPDATE', [$foundReport['incident_id'], $user['organization_id']]);
+            if (!$foundIncident) throw new ApiError(404, 'Einsatz nicht gefunden');
             $lockedReport = one('SELECT * FROM reports WHERE id=? FOR UPDATE', [$foundReport['id']]);
-            if (!$lockedReport || !canEditReport($lockedReport, $user)) throw new ApiError(409, 'Der Bericht wurde bereits geändert');
-            $foundIncident = incident((int)$lockedReport['incident_id'], $user['organization_id']);
+            if (!$lockedReport) throw new ApiError(409, 'Der Bericht wurde bereits geändert');
+            if (!canEditReport($lockedReport, $user) && !isset($data['revision'])) throw new ApiError(403, 'Der Bericht kann nicht bearbeitet werden');
+            assertRevision($data['revision'] ?? null, (int)$lockedReport['revision']);
+            if (!canEditReport($lockedReport, $user)) throw new ApiError(403, 'Der Bericht kann nicht bearbeitet werden');
             $details = reportDetails($data, $foundIncident);
             $vehicleSelection = additionalVehicleSelection(
                 (int)$lockedReport['id'], (int)$lockedReport['incident_id'], (int)$lockedReport['unit_id'],
@@ -1705,19 +1736,20 @@ try {
             );
             replaceAdditionalVehicles((int)$lockedReport['id'], $vehicleSelection['selected']);
             query(
-                'UPDATE reports SET report_year=?,running_number=?,damaged_party=?,damaging_party=?,incident_command=?,narrative=?,vehicles=?,personnel=?,alarmed_at=?,departed_at=?,arrived_at=?,ended_at=?,incident_type=?,classification=? WHERE id=?',
+                'UPDATE reports SET report_year=?,running_number=?,damaged_party=?,damaging_party=?,incident_command=?,narrative=?,vehicles=?,personnel=?,alarmed_at=?,departed_at=?,arrived_at=?,ended_at=?,incident_type=?,classification=?,revision=revision+1 WHERE id=?',
                 [$details['reportYear'], $details['runningNumber'], $details['damagedParty'], $details['damagingParty'], $details['incidentCommand'],
                  required($data['narrative'] ?? null, 'Bericht'), $summary['vehicles'], $summary['personnel'],
                  $details['alarmedAt'], $details['departedAt'], $details['arrivedAt'], $details['endedAt'],
                  $details['incidentType'], $details['classification'], $lockedReport['id']]
             );
+            query('UPDATE incidents SET revision=revision+1 WHERE id=?', [$lockedReport['incident_id']]);
         });
         respond(200, ['ok' => true]);
     }
 
     if ($method === 'POST' && preg_match('#^/api/reports/(\d+)/(submit-to-unit|return-to-author|submit-to-command|return-to-unit)$#', $path, $match)) {
         $data = input();
-        $result = transitionReport((int)$match[1], $match[2], $user, (string)($data['comment'] ?? ''));
+        $result = transitionReport((int)$match[1], $match[2], $user, (string)($data['comment'] ?? ''), $data['revision'] ?? null);
         respond(200, array_filter($result, fn($value) => $value !== null));
     }
 
@@ -1726,17 +1758,33 @@ try {
         $incidentId = (int)$match[1];
         $data = input();
         transaction(function () use ($incidentId, $data, $user) {
-            $foundIncident = one('SELECT id FROM incidents WHERE id=? AND organization_id=? FOR UPDATE', [$incidentId, $user['organization_id']]);
+            $foundIncident = one('SELECT id,revision FROM incidents WHERE id=? AND organization_id=? FOR UPDATE', [$incidentId, $user['organization_id']]);
             if (!$foundIncident) throw new ApiError(404, 'Einsatz nicht gefunden');
+            assertRevision($data['revision'] ?? null, (int)$foundIncident['revision']);
             $reports = query(
-                'SELECT iu.unit_id,r.status FROM incident_units iu LEFT JOIN reports r ON r.incident_id=iu.incident_id AND r.unit_id=iu.unit_id WHERE iu.incident_id=? FOR UPDATE',
+                'SELECT iu.unit_id,r.id,r.status,r.revision FROM incident_units iu LEFT JOIN reports r ON r.incident_id=iu.incident_id AND r.unit_id=iu.unit_id WHERE iu.incident_id=? ORDER BY iu.unit_id FOR UPDATE',
                 [$incidentId]
             )->fetchAll();
             if (!$reports || array_filter($reports, fn($report) => $report['status'] !== 'wehr_review')) {
                 throw new ApiError(409, 'Alle Einheitsberichte müssen bei der Wehrführung vorliegen.');
             }
+            $expected = $data['reportVersions'] ?? null;
+            if (!is_array($expected) || !array_is_list($expected)) throw new ApiError(400, 'Die geladenen Berichtsrevisionen sind erforderlich.');
+            $versions = [];
+            foreach ($expected as $version) {
+                if (!is_array($version) || !is_int($version['id'] ?? null) || $version['id'] < 1 || isset($versions[$version['id']])
+                    || !is_int($version['revision'] ?? null) || $version['revision'] < 1 || $version['revision'] > 4294967295) {
+                    throw new ApiError(400, 'Die geladenen Berichtsrevisionen sind ungültig.');
+                }
+                $versions[$version['id']] = $version['revision'];
+            }
+            $actual = [];
+            foreach ($reports as $report) $actual[(int)$report['id']] = (int)$report['revision'];
+            ksort($versions);
+            ksort($actual);
+            if ($versions !== $actual) throw new ApiError(409, 'Die zugrunde liegenden Einheitsberichte wurden inzwischen geändert.');
             query(
-                'UPDATE incidents SET consolidated_text=?,consolidated_at=UTC_TIMESTAMP() WHERE id=?',
+                'UPDATE incidents SET consolidated_text=?,consolidated_at=UTC_TIMESTAMP(),revision=revision+1 WHERE id=?',
                 [required($data['text'] ?? null, 'Gesamtbericht'), $incidentId]
             );
         });

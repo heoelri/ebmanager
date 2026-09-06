@@ -1,5 +1,52 @@
 # Security Review
 
+## Revisionsschutz für Berichte vom 6. September 2026 (#86)
+
+Die Änderung schützt sensible Berichtsinhalte vor verlorenen parallelen
+Bearbeitungen und vor wiederholten Workflowaktionen nach einem vollständigen
+Statuszyklus. Monotone ganzzahlige Revisionen ersetzen dabei keine
+Berechtigungsprüfung: Mandant, Rolle, Autor und Einheitszuordnung werden weiter
+serverseitig geprüft. Einsatzrevision und Gesamttext werden nur der Wehrführung
+ausgegeben; sichtbare Einheitsberichte enthalten ausschließlich ihre eigene
+Revision. Geheimnisse und zusätzliche personenbezogene Daten werden nicht
+erfasst oder protokolliert.
+
+Bearbeitung, Erstellung, Workflow, Konsolidierung und Import sperren zuerst
+den Einsatz und danach Berichte. Die Versionsprüfung erfolgt unter diesen
+Sperren vor Text-/Besatzungs-/Fahrzeugänderungen oder Historienschreibzugriffen.
+Die Konsolidierung prüft neben dem Gesamtstand die vollständige Menge der
+geladenen Quellberichts-IDs und -Revisionen. Rückgaben, erneute Übergaben,
+neue Berichte, zusätzliche Einheiten und Neuimporte widerrufen alte Stände.
+Konflikte rollen vollständig zurück und lösen keine Workflow-Mail aus.
+DIVERA bleibt ausschließlich per GET lesend angebunden.
+
+Der Browser bewahrt Texte, Rückgabekommentare und Ressourcenauswahl bei HTTP 409
+im geöffneten Formular; er lädt nicht automatisch nach und versendet keinen
+automatischen zweiten Versuch. Die Wiederherstellung ist ausdrücklich manuell.
+Sensible Entwürfe werden nicht in Local Storage oder weiteren Inhaltskopien
+persistiert.
+
+Die Regressionen prüfen zwei Bearbeiter einschließlich unveränderter
+Besatzung/Zusatzfahrzeuge, echte MySQL-Wartebeziehungen auf den primären
+Einsatzdatensatz, alle vier Workflowaktionen nach ABA-Zyklen, parallele
+Gesamttexte, veraltete Quellen trotz aktueller Einsatzrevision, Pflichtrevisionen,
+Import-/Zuordnungsinvalidierung und Bootstrap ohne neue Spalten.
+Der vorhandene Migrationscheck prüft Bestandsdaten und den Erhalt bereits
+erhöhter Revisionen bei wiederholten Läufen. Browserchecks prüfen die
+gesendeten Vorbedingungen und den Erhalt offener Formulare.
+
+Rollout-Voraussetzung ist Migration 004 vor gemeinsamem PHP-/Browserdeployment
+im Wartungsfenster; alter PHP-Code pflegt keine Revisionen. Die verbindlichen
+Schritte einschließlich Rollback stehen in `docs/WEBSPACE-DEPLOYMENT.md`.
+
+Validierung: PHP-8.2-Syntax, JavaScript-Syntax, `node test/frontend.mjs`,
+Shellsyntax und `git diff --check` sind erfolgreich. Der bestehende
+Migrationscheck lief in seinem frischen Compose-Projekt erfolgreich.
+Die vollständige Smoke-Suite lief sowohl gegen Apache/HTTPS als auch mit
+lokalen PHP-/SMTP-Testservern unter PHP 8.5 und MySQL 8.4 erfolgreich, jeweils
+mit neu angelegtem isoliertem Datenbankvolume. PHP-Assertions waren aktiviert;
+Produktivsysteme und bestehende Entwicklungsdatenbanken wurden nicht verwendet.
+
 ## Einmallinks und konsolidierte Texte vom 6. September 2026
 
 Der erneute Vollreview bestätigte zwei vorbestehende Schwachstellen hoher

@@ -173,6 +173,7 @@ ersten Umsetzung bewusst nicht persistiert.
 | `caller` | TEXT, NOT NULL | Sensible Angabe zur meldenden Person |
 | `consolidated_text` | TEXT, NOT NULL | Gesamtbericht der Wehrleitung; API-Ausgabe ausschließlich an die Wehrleitung, auch bei einem erhaltenen Arbeitsstand |
 | `consolidated_at` | DATETIME, NULL | Zeitpunkt der Konsolidierung |
+| `revision` | INT UNSIGNED, NOT NULL, DEFAULT 1 | Monotoner Stand des Einsatzes einschließlich Gesamttext, Einheitenzuordnungen und Quellberichte; API-Ausgabe nur an die Wehrleitung |
 
 Ein importierter Einsatz ist über `(organization_id, divera_id)` eindeutig.
 Ein erneuter Import aktualisiert ihn. Manuelle Einsätze haben keine
@@ -340,6 +341,7 @@ Eindeutig ist `(unit_id, divera_id)`. Ein Stammdatenabgleich ersetzt den aktuell
 | `created_at` | DATETIME, NOT NULL | Erstellungszeit |
 | `updated_at` | DATETIME, NOT NULL | Letzte Änderung |
 | `released_at` | DATETIME, NULL | Freigabezeit |
+| `revision` | INT UNSIGNED, NOT NULL, DEFAULT 1 | Monotoner Stand des Berichts einschließlich Besatzung, Zusatzfahrzeuge, Workflow und importierter Einsatzdaten |
 
 Eindeutig ist `(incident_id, unit_id)`: Jede Einheit schreibt pro Einsatz
 genau einen Bericht. Zusätzlich ist `(unit_id, report_year, running_number)`
@@ -364,6 +366,37 @@ ausschließlich deren dort festgelegte Werte:
 
 Die Spalten `vehicles` und `personnel` sind nur lesbare Zusammenfassungen aus
 `report_crew`; die strukturierte Zuordnung ist maßgeblich.
+
+#### Schutz vor veralteten Bearbeitungsständen
+
+Neue und migrierte Berichte beginnen bei Revision 1. Jede erfolgreiche
+Bearbeitung oder Statusänderung erhöht `reports.revision` und
+`incidents.revision` in derselben Transaktion. Eine Berichtserstellung erhöht
+die Einsatzrevision. Jede erfolgreiche Konsolidierung erhöht die
+Einsatzrevision. Neuimporte eines bestehenden Einsatzes erhöhen dessen Revision
+und die Revisionen aller zugehörigen Berichte konservativ auch bei gleichen
+Quelldaten; dies umfasst Änderungen der Einsatzfelder, Alarmfahrzeuge und
+zusätzliche Einheitenzuordnungen. Fachliche Import-/Invalidierungsregeln bleiben
+ansonsten unverändert. Die Zähler werden nie aus Zeitstempeln oder Statusnamen
+abgeleitet und im laufenden Betrieb nicht zurückgesetzt.
+
+Berichtsspeicherung und sämtliche Übergaben/Rückgaben verlangen die zuvor über
+`GET /api/incidents/{id}/reports` geladene ganzzahlige `revision`.
+Die Konsolidierung verlangt die über `GET /api/incidents` geladene
+Einsatz-`revision` und `reportVersions: [{id, revision}, …]` mit genau allen
+geladenen Quellberichten. So können weder neuere Gesamttexte noch zwischenzeitlich
+bearbeitete oder erneut eingereichte Quellen überschrieben werden, auch wenn
+deren Status wieder gleich lautet.
+
+Alle beteiligten Schreibpfade sperren zuerst den Einsatz, dann seine Berichte
+und prüfen die Vorbedingungen nach dem Warten auf die Sperren. Abweichungen
+liefern HTTP 409 ohne fachliche Änderungen, Historienschreibzugriffe oder
+Benachrichtigungen; fehlende oder ungültige Revisionen liefern HTTP 400.
+Berechtigungsprüfungen bleiben unabhängig davon erforderlich.
+Der Browser behält ungespeicherte Eingaben ausschließlich im offenen Formular
+und fordert zum Sichern vor einem bewussten Neuladen und Abgleich auf.
+Es gibt weder automatische Konfliktauflösung noch zusätzliche Inhaltskopien,
+Browserpersistenz oder Ereignishistorien.
 
 ### `report_transitions`
 

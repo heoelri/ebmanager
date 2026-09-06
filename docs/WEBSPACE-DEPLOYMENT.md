@@ -248,6 +248,51 @@ Wenn das automatische Deployment verwendet wird, müssen erforderliche Migration
 Für andere Ausgangs- oder Zielversionen gelten die jeweils datierten
 Upgrade-Hinweise im [Changelog](../CHANGELOG.md).
 
+### Revisionen für Einheits- und Gesamtberichte einführen (#86)
+
+1. Ein Wartungsfenster vereinbaren und Schreibzugriffe während Migration und
+   Codewechsel unterbinden. Datenbank und bisherige Anwendungsdateien sichern.
+   Anwender müssen offene, ungespeicherte Eingaben vor dem Neuladen sichern.
+   Die Sperre muss außerhalb der vom SFTP-Workflow überschriebenen Dateien
+   liegen, etwa als vorgelagerte Zugriffssperre beim Hoster. Eine temporäre
+   Änderung der ausgelieferten `.htaccess` reicht nicht: Der bisherige
+   Deployment-Workflow ersetzt sie bereits zu Beginn des Uploads.
+2. Prüfen, dass Migrationen 001 bis 003 vollständig angewendet und in
+   `schema_migrations` vermerkt sind.
+3. `migrations/004-report-revisions.sql` über die Datenbankverwaltung genau
+   einmal importieren. Die beiden neuen `INT UNSIGNED NOT NULL DEFAULT 1`-Spalten
+   `incidents.revision` und `reports.revision` müssen danach vorhanden sein.
+   Fachliche Daten bleiben erhalten. MySQL-DDL ist nicht transaktional:
+   Bei einem Teilfehler nicht blind die ganze Datei erneut ausführen, sondern
+   den vorhandenen Spaltenstand prüfen und nur die fehlende Anweisung nachholen.
+4. Nach erfolgreichem vollständigem Import manuell ausführen:
+
+   ```sql
+   INSERT INTO schema_migrations(name,applied_at)
+   VALUES('004-report-revisions.sql',UTC_TIMESTAMP());
+   ```
+
+   Im lokalen Compose-Betrieb übernimmt ausschließlich `docker/migrate.sh`
+   diesen Vermerk automatisch.
+5. **Vor dem Merge nach `main`** den erfolgreichen Migrationsstand bestätigen;
+   erst danach den neuen PHP- und Browsercode gemeinsam deployen. Der
+   SFTP-Workflow führt weiterhin keine Migration aus. Keine Mischversion für
+   Schreibzugriffe freigeben: Alter PHP-Code erhöht die Revisionen nicht.
+6. `/api/bootstrap` prüfen, Browseransichten neu laden und anschließend in
+   zwei Ansichten denselben Bericht öffnen. Nach Speichern der ersten Ansicht
+   muss die zweite HTTP 409 melden und ihre Eingaben erhalten. Dasselbe für
+   einen Gesamtbericht prüfen; Übergabe/Rückgabe müssen weiterhin funktionieren.
+7. Erst danach die Anwendung wieder für Schreibzugriffe freigeben.
+
+Rollback: Im Wartungsfenster PHP- und Browsercode gemeinsam zurücksetzen;
+die additiven Revisionsspalten und der Migrationsvermerk dürfen bleiben.
+Der alte Code bietet dann keinen Konfliktschutz. Vor erneuter Aktivierung
+des neuen Codes nach Schreibzugriffen mit altem Code zunächst im Wartungsfenster
+`UPDATE incidents SET revision=revision+1;` und
+`UPDATE reports SET revision=revision+1;` ausführen und alle Browseransichten
+neu laden lassen. Revisionen niemals auf 1 zurücksetzen und Migration 004
+nicht erneut ausführen.
+
 ## 11. Rollback
 
 1. Vor jeder Aktualisierung eine Datenbanksicherung und eine Kopie der bisherigen Anwendungsdateien erstellen.

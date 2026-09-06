@@ -24,6 +24,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Fixed
 
+- Geladene Einheitsberichte, Übergaben und Rückgaben sind durch monotone Revisionen vor veralteten Schreibzugriffen geschützt, auch nach Rückkehr zum selben Workflowstatus. Die Konsolidierung prüft zusätzlich den geladenen Gesamtstand und alle Quellberichte. HTTP-409-Konflikte lassen ungespeicherte Texte, Besatzung, Fahrzeugauswahl und Kommentare im Browser geöffnet und erklären die manuelle Wiederherstellung (#86).
 - Administrative Passwort- und E-Mail-Änderungen widerrufen ausstehende Einladungs- und Wiederherstellungslinks atomar. Tokenanforderungen und Bestätigungen werden mit Kontoänderungen über dieselbe Sperrreihenfolge koordiniert; fehlgeschlagene Mailversuche löschen keine zwischenzeitlich neu ausgestellten Links (#99).
 - Abgelaufene Einmallinks werden vor neuen Wiederherstellungsanforderungen außerhalb der Benutzertransaktion bereinigt; gültige Links bleiben erhalten. Der Parallelitätstest respektiert die konfigurierte PDO-Verbindung einschließlich Port- und Socket-Angaben.
 - Die Parallelitätsregression prüft die konkrete MySQL-Wartebeziehung auf den Primärschlüssel der Benutzertabelle statt lediglich einen wartenden `SELECT`.
@@ -35,7 +36,22 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 Die API-Antwort von `GET /api/incidents` enthält für `fuehrungskraft` und `einheitsleitung` kein `consolidated_text` mehr. Der native Browserclient benötigt keine Anpassung. Die Sicherheitskorrekturen für #99 und #100 erfordern keine zusätzliche Migration.
 
 1. Bestehende Installationen auf Basis von `2026-09-03` müssen vor dem neuen Anwendungscode `migrations/003-report-additional-vehicles.sql` genau einmal importieren.
-2. Danach muss `003-report-additional-vehicles.sql` in `schema_migrations` vorhanden sein. Neue Installationen verwenden weiterhin ausschließlich das aktuelle `schema.sql`.
+2. Danach muss `003-report-additional-vehicles.sql` in `schema_migrations` vorhanden sein.
+3. Für #86 anschließend `migrations/004-report-revisions.sql` genau einmal importieren und den erfolgreichen Import in `schema_migrations` vermerken. Die Migration ergänzt `incidents.revision` und `reports.revision` mit Startwert 1, ohne fachliche Daten zu löschen.
+4. Erst danach den neuen PHP- und Browsercode zusammen deployen; bei automatischem Deployment muss die Migration **vor dem Merge nach `main`** abgeschlossen sein. Alte Browseransichten vor dem Neuladen sichern. Neue Installationen verwenden ausschließlich das aktuelle `schema.sql`.
+
+`PUT /api/reports/{id}` und alle Berichtsübergaben/-rückgaben verlangen jetzt die
+geladene ganzzahlige `revision`. `PUT /api/incidents/{id}/consolidation` verlangt
+die geladene Einsatz-`revision` sowie `reportVersions: [{id, revision}, …]` aller
+Quellberichte. Fehlende/ungültige Vorbedingungen liefern HTTP 400, veraltete
+Vorbedingungen HTTP 409; Rollen- und Mandantenprüfungen bleiben bestehen.
+Ein Neuimport erhöht konservativ auch bei identischen Quelldaten die Revisionen
+des bestehenden Einsatzes und seiner Berichte. Es gibt keine automatische
+Übernahme oder Wiederholung veralteter Eingaben.
+
+Die verbindliche Reihenfolge einschließlich Wartungsfenster, SQL-Vermerk,
+Prüfung und Rollback steht in
+[Deployment: Revisionen einführen](docs/WEBSPACE-DEPLOYMENT.md#revisionen-für-einheits--und-gesamtberichte-einführen-86).
 
 ## 2026-09-03
 

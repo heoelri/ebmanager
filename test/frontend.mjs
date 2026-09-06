@@ -99,6 +99,88 @@ await assert.rejects(
 );
 assert.deepEqual(await apiFor(new Response(null, {status: 204}))('/api/empty'), {});
 
+// Konflikte behalten den HTTP-Status, nennen die Wiederherstellung und wiederholen den Schreibzugriff nicht.
+{
+const reportWriteSource = html.match(/async function reportWrite[^\n]+/)?.[0];
+assert(reportWriteSource, 'Revisionierter Berichtsaufruf fehlt');
+let writeCalls = [];
+const reportWrite = new Function('api', `${reportWriteSource}; return reportWrite;`)(async (path, options) => {
+  writeCalls.push({path, method: options.method, data: JSON.parse(options.body)});
+  throw Object.assign(Error('Der Bericht wurde inzwischen geändert.'), {status: 409});
+});
+await assert.rejects(reportWrite('/api/reports/7', {revision: 3}, 'PUT'), error =>
+  error.status === 409 && /Eingaben bleiben unverändert geöffnet.*Kopieren.*neu laden/.test(error.message));
+assert.deepEqual(writeCalls, [{path: '/api/reports/7', method: 'PUT', data: {revision: 3}}]);
+
+// Bearbeitungs- und Rückgabedialoge senden ihre geladene Revision und bleiben bei Konflikten unverändert offen.
+const editReportSource = html.match(/async function editReport[^\n]+/)?.[0];
+const returnReportSource = html.match(/function returnReport[^\n]+/)?.[0];
+assert(editReportSource && returnReportSource, 'Berichtsdialoge fehlen');
+for (const operation of ['edit', 'return']) {
+  const report = {id: 7, incident_id: 8, unit_id: 1, revision: 3, crew: '[]', narrative: 'Geladen'};
+  let handler;
+  const dialog = {innerHTML: '', open: false, showModal() {this.open = true;}, close() {assert.fail('Konflikt darf Dialog nicht schließen');}};
+  const form = {};
+  const options = {
+    currentReports: [report], currentIncident: {}, currentAssignments: [], dialog,
+    document: {querySelector: selector => selector === '#dialogTitle' ? {focus() {}} : form},
+    esc: value => value, reportDetailsFields: () => '', restoreDialogFocus() {},
+    bindForm: (selector, callback) => {handler = callback;},
+    reportDetailsPayload: () => ({runningNumber: '86/2026'}),
+    selectedAdditionalVehicles: () => ['Zusatzfahrzeug'],
+    selectedCrew: () => [{memberId: 11, vehicle: 'Zusatzfahrzeug', role: 'besatzung'}],
+    bindDuration() {}, loadReportCrew: async () => {}, reportWrite,
+    load: () => assert.fail('Konflikt darf nicht nachladen'),
+    incident: () => assert.fail('Konflikt darf Ansicht nicht ersetzen')
+  };
+  const invoke = new Function(...Object.keys(options),
+    `${editReportSource}; ${returnReportSource}; return ${operation === 'edit' ? 'editReport' : 'returnReport'};`
+  )(...Object.values(options));
+  if (operation === 'edit') await invoke(7, {});
+  else invoke(7, 8, 'return-to-unit', {});
+  const markup = dialog.innerHTML;
+  options.currentReports[0] = {...report, revision: 99};
+  const data = operation === 'edit' ? {narrative: 'Ungespeicherter Verlauf'} : {comment: 'Ungespeicherte Rückfrage'};
+  await assert.rejects(handler(data), error => error.status === 409);
+  assert.equal(dialog.open, true);
+  assert.equal(dialog.innerHTML, markup);
+  assert.equal(writeCalls.at(-1).data.revision, 3);
+  assert.equal(writeCalls.at(-1).data[operation === 'edit' ? 'narrative' : 'comment'], Object.values(data)[0]);
+  if (operation === 'edit') {
+    assert.deepEqual(writeCalls.at(-1).data.additionalVehicles, ['Zusatzfahrzeug']);
+    assert.deepEqual(writeCalls.at(-1).data.crew, [{memberId: 11, vehicle: 'Zusatzfahrzeug', role: 'besatzung'}]);
+  }
+}
+
+// Der Gesamtbericht bindet geladenen Textstand und Quellberichte, ohne beim Konflikt Formular oder Eingaben zu ersetzen.
+const consolidationBinding = html.match(/if\(me\.role==='wehrleitung'&&mayConsolidate\)bindForm[^\n]+/)?.[0];
+assert(consolidationBinding, 'Revisioniertes Konsolidierungsformular fehlt');
+let consolidationHandler;
+new Function('me', 'mayConsolidate', 'bindForm', 'reportWrite', 'id', 'item', 'reports', 'load', 'incident', consolidationBinding)(
+  {role: 'wehrleitung'}, true, (selector, handler) => {consolidationHandler = handler;}, reportWrite,
+  8, {revision: 12}, [{id: 7, revision: 3}, {id: 9, revision: 5}],
+  () => assert.fail('Konflikt darf nicht nachladen'), () => assert.fail('Konflikt darf Ansicht nicht ersetzen')
+);
+const unsavedConsolidation = {text: 'Ungespeicherter Gesamttext'};
+await assert.rejects(consolidationHandler(unsavedConsolidation), error => error.status === 409);
+assert.deepEqual(unsavedConsolidation, {text: 'Ungespeicherter Gesamttext'});
+assert.deepEqual(writeCalls.at(-1), {path: '/api/incidents/8/consolidation', method: 'PUT',
+  data: {text: 'Ungespeicherter Gesamttext', revision: 12, reportVersions: [{id: 7, revision: 3}, {id: 9, revision: 5}]}});
+
+// Auch direkte Übergabeschaltflächen senden die geladene Revision und laden bei Konflikten nicht nach.
+const submitReportSource = html.match(/async function submitReport[^\n]+/)?.[0];
+assert(submitReportSource, 'Revisionierte Übergabe fehlt');
+let submissionError;
+const submitReport = new Function('currentReports', 'reportWrite', 'load', 'incident', 'showError',
+  `${submitReportSource}; return submitReport;`)(
+  [{id: 7, revision: 3}], reportWrite, () => assert.fail('Konflikt darf nicht nachladen'),
+  () => assert.fail('Konflikt darf Ansicht nicht ersetzen'), error => {submissionError = error;}
+);
+await submitReport(7, 8, 'submit-to-command');
+assert.equal(submissionError.status, 409);
+assert.deepEqual(writeCalls.at(-1), {path: '/api/reports/7/submit-to-command', method: 'POST', data: {revision: 3}});
+}
+
 const resetPasswordSource = html.match(/async function resetPassword[^\n]+/)?.[0];
 assert(resetPasswordSource, 'resetPassword fehlt');
 assert.match(resetPasswordSource, /password-reset\/context.*method:'POST'.*JSON\.stringify\(\{token\}\)/);

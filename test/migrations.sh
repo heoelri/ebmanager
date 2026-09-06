@@ -16,8 +16,11 @@ for _ in {1..60}; do
 done
 "${compose[@]}" exec -T db mysql --host=127.0.0.1 --user=root -ptest-password einsatzberichte --execute="SELECT 1" >/dev/null
 
-# Eine Installation vor den Migrationen erhält Workflow, Stammdaten, Aktivstatus und zusätzliche Berichtsfahrzeuge genau einmal.
+# Eine Installation vor den Migrationen erhält Workflow, Stammdaten, Aktivstatus, Zusatzfahrzeuge und Revisionen genau einmal.
 "${compose[@]}" exec -T db mysql --user=root -ptest-password einsatzberichte --execute="
+  ALTER TABLE incidents DROP COLUMN revision;
+  ALTER TABLE reports DROP COLUMN revision;
+  DELETE FROM schema_migrations WHERE name='004-report-revisions.sql';
   DROP TABLE report_additional_vehicles;
   DELETE FROM schema_migrations WHERE name='003-report-additional-vehicles.sql';
   ALTER TABLE member_units DROP COLUMN active;
@@ -45,6 +48,10 @@ done
     (11,11,'fremd','Fremdes Mitglied');
   INSERT INTO report_crew(report_id,member_id) VALUES(10,10),(10,11);"
 "${compose[@]}" run --rm migrate
+# Bestandsrevisionen starten bei eins und dürfen bei wiederholtem Migrationslauf nicht zurückgesetzt werden.
+"${compose[@]}" exec -T db mysql --user=root -ptest-password einsatzberichte --execute="
+  UPDATE reports SET revision=7 WHERE id=10;
+  UPDATE incidents SET revision=9 WHERE id=10;"
 "${compose[@]}" exec -T db mysql --user=root -ptest-password einsatzberichte \
   --execute="DELETE FROM schema_migrations WHERE name='001-report-workflow-and-vehicles.sql'"
 "${compose[@]}" run --rm migrate
@@ -59,11 +66,14 @@ result="$("${compose[@]}" exec -T db mysql --user=root -ptest-password --batch -
     (SELECT COUNT(*) FROM schema_migrations WHERE name='001-report-workflow-and-vehicles.sql'),'|',
     (SELECT COUNT(*) FROM schema_migrations WHERE name='002-inactive-unit-members.sql'),'|',
     (SELECT COUNT(*) FROM schema_migrations WHERE name='003-report-additional-vehicles.sql'),'|',
+    (SELECT COUNT(*) FROM schema_migrations WHERE name='004-report-revisions.sql'),'|',
+    (SELECT GROUP_CONCAT(revision ORDER BY id) FROM reports WHERE id BETWEEN 10 AND 13),'|',
+    (SELECT GROUP_CONCAT(revision ORDER BY id) FROM incidents WHERE id BETWEEN 10 AND 13),'|',
     (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='report_additional_vehicles'),'|',
     (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='member_units' AND column_name='active'),'|',
     (SELECT CONCAT(COUNT(*),':',COALESCE(MAX(active),9)) FROM member_units WHERE member_id=10 AND unit_id=10)
   )")"
-test "$result" = '1|1|author_draft,unit_review,wehr_review,wehr_review|4|1|1|1|1|1|1:0'
+test "$result" = '1|1|author_draft,unit_review,wehr_review,wehr_review|4|1|1|1|1|7,1,1,1|9,1,1,1|1|1|1:0'
 
 # Migration 002 stellt keine historische Einheitszuordnung über Mandantengrenzen hinweg her.
 test "$("${compose[@]}" exec -T db mysql --user=root -ptest-password --batch --skip-column-names einsatzberichte \
