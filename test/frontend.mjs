@@ -715,6 +715,18 @@ assert.match(crewRoot.innerHTML, /data-name="Anna Historisch"/);
 assert(!crewRoot.innerHTML.includes('Anna Noch Neuer'));
 assert.equal(crewResources.members[0].name, 'Anna Noch Neuer');
 
+// Die Namensauflösung bleibt linear, auch wenn historische Personen im aktuellen Stamm fehlen.
+let snapshotIdReads = 0;
+crewResources.members = Array.from({length: 400}, (_, index) => ({id: index + 1, name: `Aktuell ${index + 1}`, active: 1}));
+const manySelected = Array.from({length: 200}, (_, index) => ({
+  get memberId() { snapshotIdReads++; return index + 301; },
+  name: `Archiv ${index + 301}`, vehicle: '', role: 'besatzung'
+}));
+await crewRenderer('#crew', 1, [], manySelected);
+assert(snapshotIdReads <= 12 * (crewResources.members.length + manySelected.length),
+  `Historische Besatzung verursacht wiederholte Vollsuchen (${snapshotIdReads} ID-Zugriffe)`);
+assert.match(crewRoot.innerHTML, /data-name="Archiv 500"/);
+
 // Importwarnungen werden sofort in der DIVERA-Ansicht angekündigt und nicht erst bei späterer Navigation sichtbar.
 const syncSource = html.match(/async function syncDivera[^\n]+/)?.[0];
 assert(syncSource, 'DIVERA-Synchronisierung fehlt');
