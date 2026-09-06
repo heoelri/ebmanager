@@ -731,11 +731,11 @@ function reportDetails(array $data, array $incident): array
     }
     $structured = [];
     foreach ([
-        'damagedParty' => ['name' => 'Name der geschädigten Person', 'phone' => 'Telefon der geschädigten Person', 'address' => 'Adresse der geschädigten Person'],
-        'damagingParty' => ['name' => 'Name des Schädigers', 'phone' => 'Telefon des Schädigers', 'address' => 'Adresse des Schädigers'],
-        'incidentCommand' => ['rank' => 'Dienstgrad der Einsatzleitung', 'name' => 'Name der Einsatzleitung', 'additionalRank' => 'Weiterer Dienstgrad', 'additionalName' => 'Weitere Führungskraft']
-    ] as $group => $fields) {
-        $source = objectInput($data[$group] ?? new stdClass(), array_values($fields)[0]);
+        'damagedParty' => ['Geschädigte Person', ['name' => 'Name der geschädigten Person', 'phone' => 'Telefon der geschädigten Person', 'address' => 'Adresse der geschädigten Person']],
+        'damagingParty' => ['Schädiger', ['name' => 'Name des Schädigers', 'phone' => 'Telefon des Schädigers', 'address' => 'Adresse des Schädigers']],
+        'incidentCommand' => ['Einsatzleitung', ['rank' => 'Dienstgrad der Einsatzleitung', 'name' => 'Name der Einsatzleitung', 'additionalRank' => 'Weiterer Dienstgrad', 'additionalName' => 'Weitere Führungskraft']]
+    ] as $group => [$groupLabel, $fields]) {
+        $source = objectInput($data[$group] ?? new stdClass(), $groupLabel);
         foreach ($fields as $field => $label) $structured[$group][$field] = optional($source[$field] ?? null, $label, $field === 'address' ? 500 : 200);
     }
     return [

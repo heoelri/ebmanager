@@ -26,7 +26,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Fixed
 
-- Fehlerhafte Text-, ID-, Kontakt-, Klassifikations- und Listenformen werden ausdrücklich abgewiesen statt als Leerwerte oder andere IDs übernommen. Fachliche Eindeutigkeitskonflikte erhalten passende Meldungen; Listen und Zusammenfassungen besitzen stabile Tie-Breaker (#92).
+- Fehlerhafte Text-, ID-, Kontakt-, Klassifikations- und Listenformen werden ausdrücklich abgewiesen statt als Leerwerte oder andere IDs übernommen. Objektfehler benennen den betroffenen Berichtsbereich; fachliche Eindeutigkeitskonflikte erhalten passende Meldungen. Listen und Zusammenfassungen besitzen stabile Tie-Breaker; auch der Demo-Seed-Check verarbeitet native Zuordnungslisten (#92).
 - Die Revisionshelfer der API-Regressionen verlangen vor der Payload-Erzeugung genau einen passenden Bericht beziehungsweise Einsatz; fehlende und doppelte Treffer brechen ausdrücklich ab.
 - Revisionskonflikte benennen kontextneutral den „geladenen Stand“, sodass der Hinweis zu Einheitsberichten ebenso wie zu Einsatz-/Gesamtstandsrevisionen passt; HTTP 409 und der Erhalt offener Eingaben bleiben unverändert. `public/app.js` ist für GitHub ausdrücklich als handgepflegter, nicht generierter Quelltext markiert.
 - Der Parallelitätstest zu #86 identifiziert Sperreigentümer über InnoDB-Transaktions- und Sperr-IDs statt über die Thread-Zuordnung impliziter Insertsperren. Er berücksichtigt gemeinsame Duplikatprüfsperren auf noch nicht bereinigten alten Indexeinträgen und meldet bei Fehlern ausschließlich Metadaten der betroffenen Testtransaktion.

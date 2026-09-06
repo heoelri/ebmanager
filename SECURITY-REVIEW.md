@@ -46,6 +46,11 @@ Nach der Kompatibilitätsnacharbeit bestand die Apache-/MySQL-Suite erneut
 mit frischem Volume und aktivierten PHP-Assertions. PHP-/JavaScript-Syntax
 und die erweiterten nativen Browser-Regressionsfälle bestanden ebenfalls.
 Produktive oder bestehende Entwicklungsdaten wurden dafür nicht verwendet.
+Die CI-Nacharbeit entfernt außerdem die zweite JSON-Dekodierung im separaten
+Demo-Seed-Check; dessen vollständiger Lauf bestätigt die weiterhin
+rollenbegrenzte Ausgabe der Verfasser. Objekt-Typfehler benennen nach dem
+Copilot-Hinweis die betroffene Gruppe statt eines darin enthaltenen Felds.
+HTTP-Regressionen prüfen diese Meldungen und den unveränderten Datenstand.
 
 Die Formatierung alter `DATETIME`-Werte korrigiert keine früheren
 Zeitzonenfehler; #87 bleibt offen. Die Umstellung verlangt einen gemeinsamen

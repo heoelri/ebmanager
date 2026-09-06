@@ -829,6 +829,14 @@ API_BASE_URL="$base_url" COOKIE="$session_cookie=$force_token" INCIDENT_ID="$inc
   foreach(["created_at","updated_at","alarmed_at","ended_at"] as $field) {
     if(!preg_match("/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/D",$loaded->$field)) throw new RuntimeException("Berichtszeit ist nicht ISO-UTC");
   }
+  // Typfehler benennen die Objektgruppe, nicht das darin enthaltene Namens- oder Dienstgradfeld.
+  foreach(["damagedParty"=>"Geschädigte Person","damagingParty"=>"Schädiger","incidentCommand"=>"Einsatzleitung"] as $group=>$label) {
+    $data=json_decode(getenv("PAYLOAD"),false,512,JSON_THROW_ON_ERROR);
+    $data->$group=[]; $data->revision=$loaded->revision;
+    [$status,$body]=$call($path,$data);
+    if($status!==400 || json_decode($body,true,512,JSON_THROW_ON_ERROR)!==["error"=>$label." muss ein Objekt sein"]
+      || $call($read)!==$before) throw new RuntimeException("Irreführende Objektfehlermeldung oder Teilmutation");
+  }
   $invalid=[
     "{\"damagedParty\":[]}", "{\"damagedParty\":\"Text\"}", "{\"damagedParty\":{\"name\":[]}}",
     "{\"damagingParty\":{\"phone\":{}}}", "{\"incidentCommand\":{\"rank\":[]}}",
