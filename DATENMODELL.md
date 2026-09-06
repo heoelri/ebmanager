@@ -411,7 +411,9 @@ Prüfverlauf sind voneinander unabhängige zeitpunktbezogene Angaben.
 Migration 005 übernimmt für Altbestände ausschließlich die heute vorhandenen
 Namen aus derselben Organisation, bei fehlender zulässiger Quelle `""` statt
 NULL oder eines fremden Namens. Frühere, bereits überschriebene Namen können
-nicht rekonstruiert werden. Die Migration ersetzt die bisherige abgeleitete
+nicht rekonstruiert werden. Ein leerer Snapshot repariert keine ungültige
+Autorenzuordnung: Berichte mit mandantenfremdem Autor bleiben in Berichtsansicht
+und Einzel-PDF ausgeschlossen. Die Migration ersetzt die bisherige abgeleitete
 Personalübersicht durch die strukturierte Besatzung, auch wenn dort noch
 ältere freie Namensstände standen. Sie erhöht jede Bestandsberichtsrevision
 und jede Einsatzrevision mit Berichten einmalig und setzt deren Freeze-Marker.

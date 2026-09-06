@@ -11,6 +11,15 @@ ersetzen. Rollen, Einheiten, Autorensichtbarkeit und Gesamttext-Projektion
 bleiben bestehen. Autor-/Besatzungsnamen aus Clients werden nicht übernommen.
 Der Prüfverlauf behält seine unveränderlichen Akteursnamen.
 
+Nach Copilot-Review bleibt die bestehende mandantengleiche Autorenzuordnung
+ausdrücklich Voraussetzung der Berichtslesesicht. `reports_author_fk` und
+`author_id NOT NULL` verhindern regulär fehlende Autoren; der INNER JOIN
+schließt zusätzlich ungültige mandantenfremde Altzuordnungen aus. Ein leerer
+Namensbackfill hebt diese Grenze nicht auf. Die Regression umfasst Ausschluss
+aus Berichtsansicht und Einzel-PDF sowie unveränderte Sichtbarkeit nach
+Wiederherstellung der zulässigen Zuordnung. Nur der ungenutzte LEFT JOIN
+zur früheren Namensquelle in der Einsatzliste wurde entfernt.
+
 Berichtsanlage und DIVERA-Import sperren denselben Elterneinsatz. Der erste
 erfolgreich gespeicherte Bericht setzt den Freeze-Marker atomar; ein
 fehlgeschlagener Bericht friert nichts ein. Der Schutz umfasst bereits

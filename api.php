@@ -447,6 +447,7 @@ function visibleIncidentReports(int $incidentId, array $user): array
     [$visibility, $visibilityParams] = reportVisibilitySql($user);
     $where = " AND $visibility";
     $params = array_merge([$incidentId, $user['organization_id']], $visibilityParams);
+    // The author join enforces tenant integrity; the name comes only from the report snapshot.
     $rows = query(
         "SELECT r.*,un.name unit_name FROM reports r
          JOIN incidents i ON i.id=r.incident_id
@@ -1601,7 +1602,6 @@ try {
              FROM incident_units iu JOIN incidents i ON i.id=iu.incident_id JOIN units u ON u.id=iu.unit_id AND u.organization_id=i.organization_id
              $membershipJoin
              LEFT JOIN reports r ON r.incident_id=iu.incident_id AND r.unit_id=iu.unit_id
-             LEFT JOIN users author ON author.id=r.author_id AND author.organization_id=i.organization_id
              WHERE $where ORDER BY iu.incident_id,iu.unit_id",
             $assignmentParams
         )->fetchAll() as $assignment) {

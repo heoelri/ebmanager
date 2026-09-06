@@ -2133,6 +2133,25 @@ historical_ids=$(FORCE_COOKIE="$session_cookie=$force_token" COMMAND_COOKIE="$se
   $nextPayload["unitId"]=$mailUnit;
   $call("/api/incidents/$id/reports","POST",$nextPayload,$command,201);
   $call("/api/incidents/$id/consolidation","PUT",$aggregate($id),$command);
+
+  // Ein leerer Namenssnapshot legitimiert keinen mandantenfremden Autor; Berichtsansicht und Einzel-PDF bleiben gesperrt.
+  $valid=$state($id);
+  $originalAuthor=one("SELECT author_id,author_name FROM reports WHERE id=?",[$reportId]);
+  query("UPDATE reports SET author_id=900,author_name=?,updated_at=updated_at WHERE id=?",["",$reportId]);
+  foreach([$leader,$command] as $viewer) {
+    $visible=$call("/api/incidents/$id/reports","GET",null,$viewer);
+    assert(count(array_filter($visible,fn($row)=>$row["id"]===$reportId))===0);
+    $call("/api/reports/$reportId/pdf","GET",null,$viewer,404);
+  }
+  // Nach Wiederherstellung der zulässigen Autorenzuordnung ist der unveränderte historische Bericht wieder sichtbar.
+  query("UPDATE reports SET author_id=?,author_name=?,updated_at=updated_at WHERE id=?",
+    [$originalAuthor["author_id"],$originalAuthor["author_name"],$reportId]);
+  assert($state($id)===$valid);
+  foreach([$leader,$command] as $viewer) {
+    $visible=$call("/api/incidents/$id/reports","GET",null,$viewer);
+    $restored=array_values(array_filter($visible,fn($row)=>$row["id"]===$reportId));
+    assert(count($restored)===1 && $restored[0]["author_name"]===$originalAuthor["author_name"]);
+  }
   echo "$id|$reportId";
 ')
 IFS='|' read -r historical_incident_id historical_report_id <<< "$historical_ids"
