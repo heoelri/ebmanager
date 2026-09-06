@@ -1181,7 +1181,7 @@ try {
             if ($recent) return null;
             $token = bin2hex(random_bytes(32));
             query('DELETE FROM password_resets WHERE user_id=?', [$user['id']]);
-            query('INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 30 MINUTE)', [$user['id'], hash('sha256', $token)]);
+            query('INSERT INTO password_resets(user_id,token_hash,requested_at,expires_at) VALUES(?,?,UTC_TIMESTAMP(),UTC_TIMESTAMP()+INTERVAL 30 MINUTE)', [$user['id'], hash('sha256', $token)]);
             return compact('user', 'token');
         });
         if ($request && !sendPasswordEmail($request['user'], $request['token'])) {
@@ -1401,7 +1401,7 @@ try {
             $id = (int)db()->lastInsertId();
             replaceMemberships($id, $unitIds);
             query(
-                'INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 7 DAY)',
+                'INSERT INTO password_resets(user_id,token_hash,requested_at,expires_at) VALUES(?,?,UTC_TIMESTAMP(),UTC_TIMESTAMP()+INTERVAL 7 DAY)',
                 [$id, hash('sha256', $token)]
             );
             return [$id, new DateTimeImmutable((string)one(
@@ -1431,7 +1431,7 @@ try {
             if (!$target) throw new ApiError(404, 'Benutzer nicht gefunden');
             query('DELETE FROM password_resets WHERE user_id=?', [$id]);
             query(
-                'INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 7 DAY)',
+                'INSERT INTO password_resets(user_id,token_hash,requested_at,expires_at) VALUES(?,?,UTC_TIMESTAMP(),UTC_TIMESTAMP()+INTERVAL 7 DAY)',
                 [$id, hash('sha256', $token)]
             );
             $expiresAt = new DateTimeImmutable((string)one(

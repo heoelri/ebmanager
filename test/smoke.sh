@@ -297,7 +297,7 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT COUNT(*) FROM units WHERE organization_id=1 AND name='Löschgruppe'")" = 1
 
-# Einladungen gelten sieben Tage, nennen ihr Ablaufdatum und Nutzer können mehreren Einheiten zugeordnet werden.
+# Einladungen speichern Anforderung und Ablauf in UTC, gelten sieben Tage und erlauben mehrere Einheitszuordnungen.
 invite_status=$(curl --insecure --silent --output invite.json --write-out '%{http_code}' \
   --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
@@ -308,7 +308,7 @@ case "$invite_status" in
     invite_expiry=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
       einsatzberichte --execute="SELECT expires_at FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE u.email='invite@example.test'")
     test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
-      einsatzberichte --execute="SELECT ABS(TIMESTAMPDIFF(SECOND,expires_at,UTC_TIMESTAMP()+INTERVAL 7 DAY))<=2 FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE u.email='invite@example.test'")" = 1
+      einsatzberichte --execute="SELECT ABS(TIMESTAMPDIFF(SECOND,expires_at,UTC_TIMESTAMP()+INTERVAL 7 DAY))<=2 AND TIMESTAMPDIFF(SECOND,requested_at,expires_at)=604800 FROM password_resets pr JOIN users u ON u.id=pr.user_id WHERE u.email='invite@example.test'")" = 1
     invited_user_id=$(php -r '$data=json_decode(file_get_contents("invite.json"),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
     test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
       einsatzberichte --execute="SELECT COUNT(*) FROM user_units WHERE user_id=$invited_user_id")" = 2
@@ -434,7 +434,7 @@ if [[ -z "${TEST_BASE_URL:-}" ]]; then
   expected_invite_expiry=$(INVITE_EXPIRY="$invite_expiry" php -r '$date=(new DateTimeImmutable(getenv("INVITE_EXPIRY"),new DateTimeZone("UTC")))->setTimezone(new DateTimeZone("Europe/Berlin")); echo $date->format("d.m.Y")." um ".$date->format("H:i")." Uhr";')
   grep --fixed-strings --quiet "Der Link ist bis zum $expected_invite_expiry (Europe/Berlin) gültig." smtp-messages.log
 
-  # Ein erfolgreicher administrativer Reset ersetzt Zugang und Token erst bei erfolgreicher Mailannahme; ein Mailfehler lässt beides unverändert.
+  # Neueinladungen speichern UTC-Zeitpunkte und ersetzen den Zugang erst bei Mailannahme; ein Mailfehler lässt den alten Zugang unverändert.
   reinvite_session_token='eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
   reinvite_session_hash=$(php -r "echo hash('sha256', '$reinvite_session_token');")
   reinvite_user_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
@@ -453,7 +453,7 @@ if [[ -z "${TEST_BASE_URL:-}" ]]; then
     --execute="SELECT password_hash FROM users WHERE id=$reinvite_user_id")
   test "$new_reinvite_hash" != "$old_reinvite_hash"
   test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
-    --execute="SELECT CONCAT((SELECT COUNT(*) FROM sessions WHERE user_id=$reinvite_user_id),'|',(SELECT COUNT(*) FROM password_resets WHERE user_id=$reinvite_user_id),'|',(SELECT ABS(TIMESTAMPDIFF(SECOND,expires_at,UTC_TIMESTAMP()+INTERVAL 7 DAY))<=2 FROM password_resets WHERE user_id=$reinvite_user_id))")" = '0|1|1'
+    --execute="SELECT CONCAT((SELECT COUNT(*) FROM sessions WHERE user_id=$reinvite_user_id),'|',(SELECT COUNT(*) FROM password_resets WHERE user_id=$reinvite_user_id),'|',(SELECT ABS(TIMESTAMPDIFF(SECOND,expires_at,UTC_TIMESTAMP()+INTERVAL 7 DAY))<=2 AND TIMESTAMPDIFF(SECOND,requested_at,expires_at)=604800 FROM password_resets WHERE user_id=$reinvite_user_id))")" = '0|1|1'
   grep --quiet 'Recipient: reinvite@example.test' reinvite-messages.log
   grep --quiet 'Subject: Konto aktivieren' reinvite-messages.log
   reinvite_token_hash=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
@@ -1087,7 +1087,31 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request POST \
   "$base_url/api/units/1/divera/sync")" = 403
 
-# Passwort-Wiederherstellung verrät keine Konten und begrenzt neue Token pro Nutzer.
+# Neu ausgestellte Wiederherstellungslinks verwenden UTC für die 30-Minuten-Gültigkeit und erhalten ihren Token bei sofortiger Wiederholung.
+if [[ -z "${TEST_BASE_URL:-}" ]]; then
+  php test/fake-smtp.php smtp-cert.pem smtp-key.pem 1 reset-messages.log >>smtp-server.log 2>&1 &
+  smtp_pid=$!
+  sleep 0.25
+  test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+    --header 'Content-Type: application/json' --data '{"email":"admin@example.test"}' \
+    "$base_url/api/password-reset/request")" = 202
+  wait "$smtp_pid"
+  smtp_pid=''
+  test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
+    --execute="SELECT TIMESTAMPDIFF(SECOND,requested_at,expires_at)=1800 FROM password_resets WHERE user_id=$admin_user_id")" = 1
+  issued_reset_hash=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
+    --execute="SELECT token_hash FROM password_resets WHERE user_id=$admin_user_id")
+  test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+    --header 'Content-Type: application/json' --data '{"email":"admin@example.test"}' \
+    "$base_url/api/password-reset/request")" = 202
+  test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
+    --execute="SELECT COUNT(*) FROM password_resets WHERE user_id=$admin_user_id AND token_hash='$issued_reset_hash'")" = 1
+  MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" einsatzberichte \
+    --execute="DELETE FROM password_resets WHERE user_id=$admin_user_id"
+  rm -f reset-messages.log
+fi
+
+# Passwort-Wiederherstellung verrät keine Konten und begrenzt neue Token anhand der UTC-Anforderungszeit.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --header 'Content-Type: application/json' \
   --data '{"email":"nicht-registriert@example.test"}' \
@@ -1095,7 +1119,7 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
 rate_limit_hash=$(php -r "echo hash('sha256', 'rate-limit');")
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="DELETE FROM password_resets WHERE user_id=(SELECT id FROM users WHERE email='admin@example.test');
-    INSERT INTO password_resets(user_id,token_hash,expires_at) SELECT id,'$rate_limit_hash',UTC_TIMESTAMP()+INTERVAL 30 MINUTE FROM users WHERE email='admin@example.test'"
+    INSERT INTO password_resets(user_id,token_hash,requested_at,expires_at) SELECT id,'$rate_limit_hash',UTC_TIMESTAMP(),UTC_TIMESTAMP()+INTERVAL 30 MINUTE FROM users WHERE email='admin@example.test'"
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --header 'Content-Type: application/json' \
   --data '{"email":"admin@example.test"}' \

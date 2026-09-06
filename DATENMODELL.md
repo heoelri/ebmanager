@@ -140,7 +140,7 @@ Die zugehörigen Links werden standardmäßig über PHP `mail()` oder bei vorhan
 | `id` | BIGINT UNSIGNED, PK | Interne ID |
 | `user_id` | BIGINT UNSIGNED, FK, UNIQUE | Benutzer mit höchstens einem aktiven Token |
 | `token_hash` | CHAR(64), UNIQUE | SHA-256-Hash des zufälligen 256-Bit-Tokens |
-| `requested_at` | DATETIME, NOT NULL | Zeitpunkt der Anforderung und Grundlage der Fünf-Minuten-Sperre |
+| `requested_at` | DATETIME, NOT NULL | UTC-Zeitpunkt der Anforderung und Grundlage der Fünf-Minuten-Sperre; alle Tokenaussteller schreiben explizit `UTC_TIMESTAMP()` |
 | `expires_at` | DATETIME, NOT NULL | Ablaufzeitpunkt: Einladungen nach sieben Tagen, Passwort-Wiederherstellungen nach 30 Minuten |
 
 Der Klartexttoken wird nur per E-Mail versendet und nie gespeichert. Nach erfolgreichem Zurücksetzen werden der Token und alle Sitzungen des Benutzers gelöscht. Eine administrative Änderung von Passwort oder E-Mail-Adresse widerruft alle ausstehenden Einladungs- und Wiederherstellungstoken in derselben Transaktion; reine Profiländerungen erhalten sie. Eine Passwortänderung widerruft zusätzlich alle Sitzungen. Tokenausstellung, Bestätigung und Kontoänderungen sperren zuerst den Benutzer und danach seine Token. Nach dem Warten auf eine Kontoänderung werden Adresse beziehungsweise Token erneut geprüft. Ein fehlgeschlagener Wiederherstellungsversand entfernt nur den Token des betroffenen Versuchs.

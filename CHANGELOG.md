@@ -27,6 +27,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 - Administrative Passwort- und E-Mail-Änderungen widerrufen ausstehende Einladungs- und Wiederherstellungslinks atomar. Tokenanforderungen und Bestätigungen werden mit Kontoänderungen über dieselbe Sperrreihenfolge koordiniert; fehlgeschlagene Mailversuche löschen keine zwischenzeitlich neu ausgestellten Links (#99).
 - Abgelaufene Einmallinks werden vor neuen Wiederherstellungsanforderungen außerhalb der Benutzertransaktion bereinigt; gültige Links bleiben erhalten. Der Parallelitätstest respektiert die konfigurierte PDO-Verbindung einschließlich Port- und Socket-Angaben.
 - Die Parallelitätsregression prüft die konkrete MySQL-Wartebeziehung auf den Primärschlüssel der Benutzertabelle statt lediglich einen wartenden `SELECT`.
+- Neue Wiederherstellungs-, Einladungs- und Neueinladungstoken speichern ihre Anforderungszeit explizit in UTC, damit die Fünf-Minuten-Sperre nicht von der MySQL-Zeitzone abhängt. Bereits vorhandene Zeitwerte werden nicht pauschal umgerechnet; die weitergehenden Zeitkorrekturen aus #87 bleiben separat.
 - Die Einsatzlisten-API liefert konsolidierte Berichtstexte einschließlich zurückbehaltener Arbeitsstände ausschließlich an die Wehrführung. Führungskräfte und Einheitsführungen erhalten weiterhin ihre zulässigen Einsatz- und Statusdaten (#100).
 
 ### Breaking Changes

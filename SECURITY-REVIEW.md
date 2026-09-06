@@ -24,6 +24,12 @@ Abgelaufene Token werden weiterhin bereinigt. Diese separate
 Autocommit-Anweisung läuft vor der Benutzertransaktion, damit keine
 Benutzersperre während einer kontenübergreifenden Bereinigung gehalten
 wird. Nicht abgelaufene Links werden dabei nicht verändert.
+Alle drei Tokenaussteller (Wiederherstellung, Einladung und Neueinladung)
+schreiben `requested_at` ausdrücklich mit `UTC_TIMESTAMP()`, ebenso wie
+die Ablaufzeit. Die Fünf-Minuten-Sperre verwendet damit für neue Token
+dieselbe Zeitbasis unabhängig von der MySQL-Session-Zeitzone. Bestehende
+Zeitwerte werden nicht pauschal umgerechnet; die übrigen Zeitfragen aus
+#87 bleiben getrennt von diesen Sicherheitskorrekturen.
 
 Die Einsatzliste verwendet eine explizite Spaltenprojektion.
 `consolidated_text` wird ausschließlich für `wehrleitung` abgefragt.
@@ -47,6 +53,10 @@ der gemeinsame Standard den `TEST_DB_HOST` des Compose-Betriebs.
 Die vollständige HTTP-/MySQL-/SMTP-Suite wurde zusätzlich mit expliziter
 PDO-Verbindung zu einem isolierten MySQL auf Port 3307 erfolgreich
 ausgeführt; die Apache-/HTTPS-Suite verwendet weiterhin den Standard.
+Zusätzliche vollständige HTTP-/MySQL-/SMTP-Durchläufe mit den
+MySQL-Zeitzonen `+02:00` und `-05:00` prüfen die UTC-Anforderungszeiten
+aller drei Tokenaussteller, die Gültigkeitsdauern und den Erhalt eines
+gerade ausgestellten Wiederherstellungslinks bei sofortiger Wiederholung.
 
 Die vorhandene HTTP-/MySQL-Suite einschließlich SMTP-Szenarien und die
 Apache-/HTTPS-Suite wurden in getrennten, frisch erstellten lokalen
