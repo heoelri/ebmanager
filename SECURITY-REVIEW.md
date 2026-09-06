@@ -1,5 +1,72 @@
 # Security Review
 
+## Einmallinks und konsolidierte Texte vom 6. September 2026
+
+Der erneute Vollreview bestätigte zwei vorbestehende Schwachstellen hoher
+Schwere: Alte Einladungs-/Wiederherstellungslinks überlebten administrative
+Passwort- oder E-Mail-Änderungen (#99), und die Einsatzliste gab
+`consolidated_text` auch an niedrigere Rollen aus (#100).
+
+Die Benutzerbearbeitung widerruft ausstehende Einmallinks nun zusammen mit
+der Passwort-/E-Mail-Änderung in derselben Transaktion. Passwortänderungen
+widerrufen weiterhin alle Sitzungen; reine Profiländerungen erhalten
+gültige Links. Tokenausstellung, Bestätigung, Neueinladung und
+Benutzerbearbeitung sperren zuerst den Benutzer und anschließend seine
+Token. Eine Bestätigung prüft den Token nach dieser Sperre erneut; eine
+Anforderung sperrt anhand der zuvor ermittelten Benutzer-ID den
+Primärdatensatz und vergleicht die aktuelle Zieladresse erneut mit der
+angefragten Adresse. Eine Sperre über den E-Mail-Sekundärindex wird
+vermieden, damit parallele Adressänderungen keinen umgekehrten
+Index-Sperrpfad erzeugen. Ein nachträglich
+fehlgeschlagener Mailversuch entfernt nur seinen eigenen Token-Hash.
+Die Neueinladung behält ihr Rollback bei fehlgeschlagener Mailannahme.
+Abgelaufene Token werden weiterhin bereinigt. Diese separate
+Autocommit-Anweisung läuft vor der Benutzertransaktion, damit keine
+Benutzersperre während einer kontenübergreifenden Bereinigung gehalten
+wird. Nicht abgelaufene Links werden dabei nicht verändert.
+Alle drei Tokenaussteller (Wiederherstellung, Einladung und Neueinladung)
+schreiben `requested_at` ausdrücklich mit `UTC_TIMESTAMP()`, ebenso wie
+die Ablaufzeit. Die Fünf-Minuten-Sperre verwendet damit für neue Token
+dieselbe Zeitbasis unabhängig von der MySQL-Session-Zeitzone. Bestehende
+Zeitwerte werden nicht pauschal umgerechnet; die übrigen Zeitfragen aus
+#87 bleiben getrennt von diesen Sicherheitskorrekturen.
+
+Die Einsatzliste verwendet eine explizite Spaltenprojektion.
+`consolidated_text` wird ausschließlich für `wehrleitung` abgefragt.
+Dies gilt sowohl für abgeschlossene Gesamtberichte als auch für nach einer
+Rückgabe erhaltene Arbeitsstände; Status und zulässige Einheitsdaten bleiben
+für frühere Rollen verfügbar. Die bestehenden PDF- und
+Einzelberichtsberechtigungen bleiben unverändert.
+
+Die fokussierten Regressionen in `test/smoke.sh` umfassen Passwort-only-,
+E-Mail-only-, kombinierte und reine Profiländerungen, Kontext und Bestätigung
+alter Links, auf einer MySQL-Benutzersperre wartende Anforderungen und
+Bestätigungen sowie die Sicht beider niedrigeren Rollen auf abgeschlossene
+und invalidierte Mehr-Einheiten-Gesamtberichte. Für diese Korrekturen werden
+keine weiteren personenbezogenen Daten, Geheimnisprotokolle oder
+Abhängigkeiten eingeführt.
+
+Die Review-Nacharbeit ergänzt die Bereinigung abgelaufener Token bei
+gleichzeitigem Erhalt gültiger Links. Der Parallelitätstest übernimmt die
+explizit konfigurierte `DB_DSN` unverändert; ohne Vorgabe berücksichtigt
+der gemeinsame Standard den `TEST_DB_HOST` des Compose-Betriebs.
+Die vollständige HTTP-/MySQL-/SMTP-Suite wurde zusätzlich mit expliziter
+PDO-Verbindung zu einem isolierten MySQL auf Port 3307 erfolgreich
+ausgeführt; die Apache-/HTTPS-Suite verwendet weiterhin den Standard.
+Zusätzliche vollständige HTTP-/MySQL-/SMTP-Durchläufe mit den
+MySQL-Zeitzonen `+02:00` und `-05:00` prüfen die UTC-Anforderungszeiten
+aller drei Tokenaussteller, die Gültigkeitsdauern und den Erhalt eines
+gerade ausgestellten Wiederherstellungslinks bei sofortiger Wiederholung.
+
+Die vorhandene HTTP-/MySQL-Suite einschließlich SMTP-Szenarien und die
+Apache-/HTTPS-Suite wurden in getrennten, frisch erstellten lokalen
+Compose-Umgebungen erfolgreich ausgeführt. Die MySQL-Szenarien beobachten
+über `performance_schema` die tatsächliche Wartebeziehung zur eigenen
+Testverbindung und verlangen die Tabelle `users` sowie den Index `PRIMARY`
+in der konfigurierten Datenbank. Ein beliebiger anderer wartender
+`SELECT` genügt nicht. Danach prüfen sie die erneute Adress-/Tokenprüfung
+nach dem Commit der parallelen Kontoänderung.
+
 ## Einheitsstatistik vom 3. September 2026
 
 `GET /api/statistics` ist ausschließlich für `einheitsleitung` freigegeben

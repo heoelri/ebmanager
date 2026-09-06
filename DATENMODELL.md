@@ -140,10 +140,14 @@ Die zugehörigen Links werden standardmäßig über PHP `mail()` oder bei vorhan
 | `id` | BIGINT UNSIGNED, PK | Interne ID |
 | `user_id` | BIGINT UNSIGNED, FK, UNIQUE | Benutzer mit höchstens einem aktiven Token |
 | `token_hash` | CHAR(64), UNIQUE | SHA-256-Hash des zufälligen 256-Bit-Tokens |
-| `requested_at` | DATETIME, NOT NULL | Zeitpunkt der Anforderung und Grundlage der Fünf-Minuten-Sperre |
+| `requested_at` | DATETIME, NOT NULL | UTC-Zeitpunkt der Anforderung und Grundlage der Fünf-Minuten-Sperre; alle Tokenaussteller schreiben explizit `UTC_TIMESTAMP()` |
 | `expires_at` | DATETIME, NOT NULL | Ablaufzeitpunkt: Einladungen nach sieben Tagen, Passwort-Wiederherstellungen nach 30 Minuten |
 
-Der Klartexttoken wird nur per E-Mail versendet und nie gespeichert. Nach erfolgreichem Zurücksetzen werden der Token und alle Sitzungen des Benutzers gelöscht. Die Wehrleitung kann für fremde Benutzer eine neue Einladung erzeugen; nach erfolgreicher Mailannahme ersetzt sie vorhandene Token, setzt den Passwort-Hash auf einen unbekannten Zufallswert und widerruft alle Sitzungen. Beim Löschen des Benutzers wird auch sein Token mitgelöscht.
+Der Klartexttoken wird nur per E-Mail versendet und nie gespeichert. Nach erfolgreichem Zurücksetzen werden der Token und alle Sitzungen des Benutzers gelöscht. Eine administrative Änderung von Passwort oder E-Mail-Adresse widerruft alle ausstehenden Einladungs- und Wiederherstellungstoken in derselben Transaktion; reine Profiländerungen erhalten sie. Eine Passwortänderung widerruft zusätzlich alle Sitzungen. Tokenausstellung, Bestätigung und Kontoänderungen sperren zuerst den Benutzer und danach seine Token. Nach dem Warten auf eine Kontoänderung werden Adresse beziehungsweise Token erneut geprüft. Ein fehlgeschlagener Wiederherstellungsversand entfernt nur den Token des betroffenen Versuchs.
+
+Abgelaufene Token werden vor Wiederherstellungsanforderungen außerhalb der Benutzertransaktion bereinigt; gültige Token bleiben dabei erhalten.
+
+Die Wehrleitung kann für fremde Benutzer eine neue Einladung erzeugen; nach erfolgreicher Mailannahme ersetzt sie vorhandene Token, setzt den Passwort-Hash auf einen unbekannten Zufallswert und widerruft alle Sitzungen. Beim Löschen des Benutzers wird auch sein Token mitgelöscht.
 
 Workflow-Benachrichtigungen werden nach dem erfolgreichen Speichern eines
 Einsatzes, Berichts oder einer Freigabe unmittelbar versendet. Sie benötigen
@@ -167,7 +171,7 @@ ersten Umsetzung bewusst nicht persistiert.
 | `remark` | TEXT, NOT NULL | Bemerkung |
 | `patient` | TEXT, NOT NULL | Sensible Patientenangabe |
 | `caller` | TEXT, NOT NULL | Sensible Angabe zur meldenden Person |
-| `consolidated_text` | TEXT, NOT NULL | Gesamtbericht der Wehrleitung |
+| `consolidated_text` | TEXT, NOT NULL | Gesamtbericht der Wehrleitung; API-Ausgabe ausschließlich an die Wehrleitung, auch bei einem erhaltenen Arbeitsstand |
 | `consolidated_at` | DATETIME, NULL | Zeitpunkt der Konsolidierung |
 
 Ein importierter Einsatz ist über `(organization_id, divera_id)` eindeutig.
