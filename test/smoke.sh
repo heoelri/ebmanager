@@ -20,27 +20,31 @@ incident_status() {
   curl --insecure --silent --fail --cookie "$session_cookie=$1" "$base_url/api/incidents" |
     INCIDENT_ID="$2" php -r '$items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $matches=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID"))); assert(count($matches)===1); echo $matches[0]["reportStatus"]["key"];'
 }
-# Bearbeitungen verwenden die zuvor per API geladene Berichtsrevision; Konflikttests behalten dieses Ergebnis bewusst zurück.
+# Bearbeitungen verlangen genau einen sichtbaren Bericht und verwenden dessen zuvor geladene Revision.
 report_data() {
   local payload=$1 token=${2:-$force_token} incident=${3:-$incident_id} report=${4:-$report_id}
   curl --insecure --silent --fail --cookie "$session_cookie=$token" "$base_url/api/incidents/$incident/reports" |
     REPORT_ID="$report" PAYLOAD="$payload" php -r '
       $reports=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
-      $report=array_values(array_filter($reports,fn($row)=>$row["id"]===(int)getenv("REPORT_ID")))[0];
+      $matches=array_values(array_filter($reports,fn($row)=>$row["id"]===(int)getenv("REPORT_ID")));
+      if(count($matches)!==1) throw new RuntimeException("Genau ein sichtbarer Testbericht ist erforderlich");
+      $report=$matches[0];
       assert(is_int($report["revision"]) && $report["revision"]>0);
       $data=json_decode(getenv("PAYLOAD"),true,512,JSON_THROW_ON_ERROR);
       $data["revision"]=$report["revision"];
       echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);
     '
 }
-# Die Konsolidierung bindet sowohl den geladenen Gesamtstand als auch sämtliche geladenen Quellberichte.
+# Die Konsolidierung verlangt genau einen sichtbaren Einsatz und bindet seinen Gesamtstand sowie sämtliche geladenen Quellberichte.
 consolidation_data() {
   local text=$1 incident=${2:-$incident_id} snapshot reports
   snapshot=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents")
   reports=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$incident/reports")
   SNAPSHOT="$snapshot" REPORTS="$reports" INCIDENT_ID="$incident" TEXT="$text" php -r '
     $items=json_decode(getenv("SNAPSHOT"),true,512,JSON_THROW_ON_ERROR);
-    $incident=array_values(array_filter($items,fn($row)=>$row["id"]===(int)getenv("INCIDENT_ID")))[0];
+    $matches=array_values(array_filter($items,fn($row)=>$row["id"]===(int)getenv("INCIDENT_ID")));
+    if(count($matches)!==1) throw new RuntimeException("Genau ein sichtbarer Testeinsatz ist erforderlich");
+    $incident=$matches[0];
     assert(is_int($incident["revision"]) && $incident["revision"]>0);
     $reports=json_decode(getenv("REPORTS"),true,512,JSON_THROW_ON_ERROR);
     echo json_encode(["text"=>getenv("TEXT"),"revision"=>$incident["revision"],
@@ -89,6 +93,25 @@ if mysql --help 2>&1 | grep -- '--ssl-mode' >/dev/null; then
 elif mysql --help 2>&1 | grep -- '--skip-ssl' >/dev/null; then
   mysql_tls_args=(--skip-ssl)
 fi
+
+# Revisionshelfer brechen bei fehlenden oder doppelten Treffern ab; genau ein Treffer liefert die erwarteten Vorbedingungen.
+(
+  session_token='test-helper'
+  curl() { printf '%s' "$fixture"; }
+  for fixture in '[]' '[{"id":7,"revision":3},{"id":7,"revision":4}]'; do
+    if report_data '{}' test-helper 7 7 >/dev/null 2>&1; then
+      echo "Berichtshelfer akzeptiert fehlende oder doppelte Treffer" >&2
+      exit 1
+    fi
+    if consolidation_data 'Test' 7 >/dev/null 2>&1; then
+      echo "Konsolidierungshelfer akzeptiert fehlende oder doppelte Treffer" >&2
+      exit 1
+    fi
+  done
+  fixture='[{"id":7,"revision":3}]'
+  test "$(report_data '{}' test-helper 7 7)" = '{"revision":3}'
+  test "$(consolidation_data 'Test' 7)" = '{"text":"Test","revision":3,"reportVersions":[{"id":7,"revision":3}]}'
+)
 
 # Fehlende Datenbankkonfiguration wird bei Root-, Unterverzeichnis- und authentifizierten Anfragen gemeldet.
 DB_DSN='' REQUEST_METHOD=GET REQUEST_URI=/api/bootstrap php api.php | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
