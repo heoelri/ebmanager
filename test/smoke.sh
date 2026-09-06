@@ -377,7 +377,7 @@ for change in profile password email both; do
   fi
 done
 
-# Parallele Tokenzugriffe verwenden die konfigurierte Datenbank, warten auf Kontoänderungen und verwenden danach keine veralteten Links oder Adressen.
+# Parallele Tokenzugriffe warten auf die eigene users-Primärschlüsselsperre und verwenden nach Kontoänderungen keine veralteten Links oder Adressen.
 CREDENTIAL_USER_ID="$credential_user_id" CREDENTIAL_TOKEN="$credential_token" API_BASE_URL="$base_url" php -r '
   require "support.php";
   $id=(int)getenv("CREDENTIAL_USER_ID");
@@ -396,12 +396,15 @@ CREDENTIAL_USER_ID="$credential_user_id" CREDENTIAL_TOKEN="$credential_token" AP
       $waiting=null;
       $deadline=microtime(true)+5;
       while(microtime(true)<$deadline) {
-        $waiting=one("SELECT trx_query FROM information_schema.innodb_trx WHERE trx_state=? AND trx_mysql_thread_id<>CONNECTION_ID()",["LOCK WAIT"]);
+        $waiting=one("SELECT l.OBJECT_NAME AS table_name,l.INDEX_NAME AS index_name
+          FROM performance_schema.data_lock_waits w
+          JOIN performance_schema.data_locks l ON l.ENGINE=w.ENGINE AND l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+          JOIN performance_schema.threads t ON t.THREAD_ID=w.BLOCKING_THREAD_ID
+          WHERE t.PROCESSLIST_ID=CONNECTION_ID() AND l.OBJECT_SCHEMA=DATABASE()");
         if($waiting) break;
-        // Häufigeres Polling hält den InnoDB-Metadaten-Cache unverändert.
         usleep(250000);
       }
-      if(!$waiting || !str_starts_with($waiting["trx_query"] ?? "","SELECT")) throw new RuntimeException("Tokenzugriff sperrt nicht zuerst den Benutzer");
+      if(!$waiting || $waiting["table_name"]!=="users" || $waiting["index_name"]!=="PRIMARY") throw new RuntimeException("Tokenzugriff wartet nicht auf den primären Benutzerdatensatz");
       query("UPDATE users SET email=? WHERE id=?",["credential-new@example.test",$id]);
       query("DELETE FROM password_resets WHERE user_id=?",[$id]);
       db()->commit();

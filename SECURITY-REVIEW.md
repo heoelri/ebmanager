@@ -51,8 +51,11 @@ ausgeführt; die Apache-/HTTPS-Suite verwendet weiterhin den Standard.
 Die vorhandene HTTP-/MySQL-Suite einschließlich SMTP-Szenarien und die
 Apache-/HTTPS-Suite wurden in getrennten, frisch erstellten lokalen
 Compose-Umgebungen erfolgreich ausgeführt. Die MySQL-Szenarien beobachten
-die tatsächliche Sperrwartephase vor der parallelen Kontoänderung; sie
-prüfen auch die erneute Adress-/Tokenprüfung nach deren Commit.
+über `performance_schema` die tatsächliche Wartebeziehung zur eigenen
+Testverbindung und verlangen die Tabelle `users` sowie den Index `PRIMARY`
+in der konfigurierten Datenbank. Ein beliebiger anderer wartender
+`SELECT` genügt nicht. Danach prüfen sie die erneute Adress-/Tokenprüfung
+nach dem Commit der parallelen Kontoänderung.
 
 ## Einheitsstatistik vom 3. September 2026
 
