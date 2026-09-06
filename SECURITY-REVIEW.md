@@ -20,6 +20,32 @@ neue Berichte, zusätzliche Einheiten und Neuimporte widerrufen alte Stände.
 Konflikte rollen vollständig zurück und lösen keine Workflow-Mail aus.
 DIVERA bleibt ausschließlich per GET lesend angebunden.
 
+Die unabhängige Nachprüfung fand einen Deadlock im ersten Revisionsstand:
+Der Vollabgleich hielt eine Mitgliedssperre und wartete auf den Einsatz,
+während eine Berichtsspeicherung den Einsatz hielt und für ihre Besatzung
+auf dasselbe Mitglied wartete. Der Vollabgleich führt deshalb jetzt alle
+Alarmimporte in stabiler DIVERA-ID-Reihenfolge **vor** dem Mitglieder- und
+Fahrzeugabgleich aus. Die vorhandenen Upserts sperren dabei auch gleichzeitig
+neu angelegte Einsätze; die Lösung verlässt sich nicht auf eine ungesicherte
+Bestandsliste. Ein Stammdatenfehler rollt weiterhin die gesamte Transaktion
+einschließlich Alarmimporten und Revisionserhöhungen zurück. Es werden keine
+Deadlocks abgefangen, als Erfolg ausgegeben oder pauschal wiederholt.
+
+Die neue Apache-Regression startet echte parallele API-Anfragen mit Besatzung
+und kontrollierter MySQL-Mitgliedssperre. Sie verlangt anhand konkreter
+Verbindungs- und Datensatz-IDs die Warteketten auf `members.PRIMARY` und
+`incidents.PRIMARY`. Startet das Speichern zuerst, gelingen Speicherung und
+Vollabgleich; startet der Vollabgleich zuerst, erhält der veraltete Editor
+HTTP 409. Beide Reihenfolgen werden zusätzlich mit einer neuen
+Berichtserstellung geprüft, die jeweils erfolgreich bleibt. Eine weitere
+Warteprobe legt einen noch nicht sichtbaren Alarm parallel an: Während der
+Vollabgleich auf dessen eindeutigen Einsatzschlüssel wartet, kann ein Bericht
+zu einem anderen Einsatz mit demselben Mitglied erfolgreich entstehen.
+Damit deckt der Test auch die Lücke einer bloßen Vorabfrage bestehender
+Einsatz-IDs ab. Die Regression läuft im vorhandenen Apache-/HTTPS-Test;
+der lokale einzelne PHP-Testserver
+kann keine zwei HTTP-Anfragen gleichzeitig bearbeiten.
+
 Der Browser bewahrt Texte, Rückgabekommentare und Ressourcenauswahl bei HTTP 409
 im geöffneten Formular; er lädt nicht automatisch nach und versendet keinen
 automatischen zweiten Versuch. Die Wiederherstellung ist ausdrücklich manuell.
@@ -46,6 +72,12 @@ Die vollständige Smoke-Suite lief sowohl gegen Apache/HTTPS als auch mit
 lokalen PHP-/SMTP-Testservern unter PHP 8.5 und MySQL 8.4 erfolgreich, jeweils
 mit neu angelegtem isoliertem Datenbankvolume. PHP-Assertions waren aktiviert;
 Produktivsysteme und bestehende Entwicklungsdatenbanken wurden nicht verwendet.
+
+Die Sperrreihenfolge-Nacharbeit wurde erneut mit der vollständigen
+Apache-/HTTPS-Smoke-Suite auf einem frischen isolierten MySQL-8.4-Volume
+erfolgreich geprüft, einschließlich aller fünf neuen Parallelitätsszenarien
+und Rücknahme bereits ausgeführter Importe bei einem Stammdatenfehler.
+PHP-8.2-Syntax, Shellsyntax und `git diff --check` waren ebenfalls erfolgreich.
 
 ## Einmallinks und konsolidierte Texte vom 6. September 2026
 

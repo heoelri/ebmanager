@@ -24,6 +24,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Fixed
 
+- Die Review-Nacharbeit zu #86 beseitigt einen Deadlock zwischen vollständigem DIVERA-Abgleich und Berichtsspeicherung/-erstellung mit Besatzung. Der Vollabgleich importiert und sperrt alle gelieferten Einsätze in stabiler DIVERA-ID-Reihenfolge, bevor er Mitglieder und Fahrzeuge sperrt. Auch gleichzeitig angelegte Einsätze sind über ihre Upserts geschützt; alle Änderungen bleiben gemeinsam transaktional.
 - Geladene Einheitsberichte, Übergaben und Rückgaben sind durch monotone Revisionen vor veralteten Schreibzugriffen geschützt, auch nach Rückkehr zum selben Workflowstatus. Die Konsolidierung prüft zusätzlich den geladenen Gesamtstand und alle Quellberichte. HTTP-409-Konflikte lassen ungespeicherte Texte, Besatzung, Fahrzeugauswahl und Kommentare im Browser geöffnet und erklären die manuelle Wiederherstellung (#86).
 - Administrative Passwort- und E-Mail-Änderungen widerrufen ausstehende Einladungs- und Wiederherstellungslinks atomar. Tokenanforderungen und Bestätigungen werden mit Kontoänderungen über dieselbe Sperrreihenfolge koordiniert; fehlgeschlagene Mailversuche löschen keine zwischenzeitlich neu ausgestellten Links (#99).
 - Abgelaufene Einmallinks werden vor neuen Wiederherstellungsanforderungen außerhalb der Benutzertransaktion bereinigt; gültige Links bleiben erhalten. Der Parallelitätstest respektiert die konfigurierte PDO-Verbindung einschließlich Port- und Socket-Angaben.

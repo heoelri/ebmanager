@@ -398,6 +398,15 @@ und fordert zum Sichern vor einem bewussten Neuladen und Abgleich auf.
 Es gibt weder automatische Konfliktauflösung noch zusätzliche Inhaltskopien,
 Browserpersistenz oder Ereignishistorien.
 
+Der vollständige DIVERA-Abgleich führt innerhalb seiner Transaktion zuerst
+sämtliche Alarmimporte in aufsteigender DIVERA-ID-Reihenfolge und erst danach
+Mitglieder- und Fahrzeugabgleich aus. Die Upserts sperren bestehende wie
+gleichzeitig angelegte Einsätze; eine vorherige Bestandsabfrage allein reicht
+nicht aus. So hält der Vollabgleich keine Mitgliedssperre, während er auf einen
+Einsatz mit paralleler Besatzungsspeicherung oder Berichtserstellung wartet.
+Fehler im anschließenden Stammdatenabgleich rollen auch die bereits ausgeführten
+Alarmimporte und Revisionserhöhungen zurück.
+
 ### `report_transitions`
 
 Die Tabelle bildet die unveränderliche Historie jedes Berichts ab. Auch der Initialstatus wird als Eintrag ohne `from_status` gespeichert.

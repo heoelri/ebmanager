@@ -1275,7 +1275,146 @@ test "$(grep --count '^GET /api/v2/alarms$' "$divera_log")" = 1
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT COUNT(*) FROM report_additional_vehicles WHERE report_id=$report_id_int AND vehicle='Zusatzfahrzeug'")" = 1
 
+# Apache kann zwei API-Anfragen gleichzeitig bearbeiten; der lokale PHP-Einzelprozess kann dies nicht.
+# Gesamtabgleich und Berichte mit echter Besatzung warten in beiden Startreihenfolgen ohne Deadlock auf Einsatz-/Mitgliedssperren.
+if [[ -n "${TEST_BASE_URL:-}" ]]; then
+  REPORT_ID="$imported_report_id" INCIDENT_ID="$imported_incident_id" REPORT_PAYLOAD="$import_report_payload" \
+    UNRELATED_INCIDENT_ID="$duplicate_incident_id" FORCE_COOKIE="$session_cookie=$force_token" \
+    COMMAND_COOKIE="$session_cookie=$session_token" API_BASE_URL="$base_url" php -r '
+    require "support.php";
+    $memberId=(int)one("SELECT id FROM members WHERE organization_id=1 AND divera_id=?",["m1"])["id"];
+    $creationIncidentId=(int)one("SELECT id FROM incidents WHERE organization_id=1 AND divera_id=?",["alarm-2"])["id"];
+    $blockerId=(int)query("SELECT CONNECTION_ID()")->fetchColumn();
+    $start=function(string $path, array $payload, string $cookie, string $method): array {
+      $process=proc_open(["curl","--insecure","--silent","--show-error","--max-time","20",
+        "--write-out","\n%{http_code}","--cookie",$cookie,"--header","Content-Type: application/json",
+        "--request",$method,"--data",json_encode($payload,JSON_THROW_ON_ERROR),getenv("API_BASE_URL").$path],
+        [0=>["pipe","r"],1=>["pipe","w"],2=>["pipe","w"]],$pipes);
+      if(!is_resource($process)) throw new RuntimeException("Parallele Anfrage konnte nicht gestartet werden");
+      fclose($pipes[0]);
+      return ["process"=>$process,"pipes"=>$pipes];
+    };
+    $wait=function(int $blockingId, string $table, int|string $key, string $index="PRIMARY"): int {
+      $deadline=microtime(true)+5;
+      while(microtime(true)<$deadline) {
+        $waiting=one("SELECT requester.PROCESSLIST_ID AS requesting_id,l.LOCK_DATA AS lock_key
+          FROM performance_schema.data_lock_waits w
+          JOIN performance_schema.data_locks l ON l.ENGINE=w.ENGINE AND l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+          JOIN performance_schema.threads blocker ON blocker.THREAD_ID=w.BLOCKING_THREAD_ID
+          JOIN performance_schema.threads requester ON requester.THREAD_ID=w.REQUESTING_THREAD_ID
+          WHERE blocker.PROCESSLIST_ID=? AND l.OBJECT_SCHEMA=DATABASE()
+            AND l.OBJECT_NAME=? AND l.INDEX_NAME=?",
+          [$blockingId,$table,$index]);
+        if($waiting && ($waiting["lock_key"]===(string)$key
+          || ($index==="incidents_org_divera" && str_starts_with($waiting["lock_key"],"$key, ")))) {
+          return (int)$waiting["requesting_id"];
+        }
+        usleep(50000);
+      }
+      throw new RuntimeException("Erwartete Wartebeziehung auf $table.$index fehlt");
+    };
+    $finish=function(array $request, int $expected): array {
+      $output=stream_get_contents($request["pipes"][1]);
+      $error=stream_get_contents($request["pipes"][2]);
+      fclose($request["pipes"][1]);
+      fclose($request["pipes"][2]);
+      $exit=proc_close($request["process"]);
+      if($exit!==0 || substr($output,-3)!==(string)$expected) {
+        throw new RuntimeException("Parallele Anfrage: erwartet HTTP $expected, erhalten ".substr($output,-3).", curl=$exit $error");
+      }
+      return json_decode(substr($output,0,-4),true,512,JSON_THROW_ON_ERROR);
+    };
+    foreach(["save","create"] as $action) foreach(["report","sync"] as $first) {
+      $incidentId=$action==="save" ? (int)getenv("INCIDENT_ID") : $creationIncidentId;
+      $reportId=(int)getenv("REPORT_ID");
+      $before=one("SELECT narrative,revision FROM reports WHERE id=?",[$reportId]);
+      $payload=json_decode(getenv("REPORT_PAYLOAD"),true,512,JSON_THROW_ON_ERROR);
+      $payload["narrative"]="Parallel geprüft: $action/$first";
+      $payload["crew"]=[["memberId"=>$memberId,"vehicle"=>"","role"=>"besatzung"]];
+      if($action==="save") {
+        $payload["revision"]=(int)$before["revision"];
+        $path="/api/reports/$reportId";
+      } else {
+        $payload["runningNumber"]="87/2026";
+        $payload["departedAt"]=$payload["arrivedAt"]=null;
+        $payload["endedAt"]="2026-08-22T21:00:00.000Z";
+        $path="/api/incidents/$incidentId/reports";
+      }
+      $requests=[];
+      db()->beginTransaction();
+      query("SELECT id FROM members WHERE id=? FOR UPDATE",[$memberId]);
+      try {
+        $reportRequest=fn()=>$start($path,$payload,getenv("FORCE_COOKIE"),$action==="save" ? "PUT" : "POST");
+        $syncRequest=fn()=>$start("/api/units/1/divera/sync",[],getenv("COMMAND_COOKIE"),"POST");
+        $requests[$first]=$first==="report" ? $reportRequest() : $syncRequest();
+        $firstConnection=$wait($blockerId,"members",$memberId);
+        $second=$first==="report" ? "sync" : "report";
+        $requests[$second]=$second==="report" ? $reportRequest() : $syncRequest();
+        $wait($firstConnection,"incidents",$incidentId);
+        db()->commit();
+        $expected=$action==="create" ? 201 : ($first==="report" ? 200 : 409);
+        $saved=$finish($requests["report"],$expected);
+        unset($requests["report"]);
+        $synced=$finish($requests["sync"],200);
+        unset($requests["sync"]);
+        assert($synced["incidentsUpdated"]===2 && $synced["incidentsCreated"]===0);
+        if($action==="create") $reportId=(int)$saved["id"];
+        $stored=one("SELECT narrative,revision FROM reports WHERE id=?",[$reportId]);
+        $expectedNarrative=$expected===409 ? $before["narrative"] : $payload["narrative"];
+        $expectedRevision=$action==="create" ? ($first==="report" ? 2 : 1) : (int)$before["revision"]+($first==="report" ? 2 : 1);
+        assert($stored["narrative"]===$expectedNarrative && (int)$stored["revision"]===$expectedRevision);
+        assert((int)query("SELECT COUNT(*) FROM report_crew WHERE report_id=? AND member_id=? AND vehicle=? AND role=?",
+          [$reportId,$memberId,"","besatzung"])->fetchColumn()===1);
+        if($action==="create") query("DELETE FROM reports WHERE id=? AND incident_id=?",[$reportId,$incidentId]);
+      } finally {
+        if(db()->inTransaction()) db()->rollBack();
+        foreach($requests as $request) {
+          if(is_resource($request["process"])) proc_terminate($request["process"]);
+          foreach($request["pipes"] as $pipe) if(is_resource($pipe)) fclose($pipe);
+          if(is_resource($request["process"])) proc_close($request["process"]);
+        }
+      }
+    }
+
+    // Ein gleichzeitig angelegter Alarm muss vor Mitgliedern gesperrt werden, auch wenn er in einer Bestandsabfrage noch fehlt.
+    assert((int)query("SELECT COUNT(*) FROM reports WHERE incident_id=?",[$creationIncidentId])->fetchColumn()===0);
+    query("DELETE FROM incidents WHERE id=? AND organization_id=1",[$creationIncidentId]);
+    db()->beginTransaction();
+    query("INSERT INTO incidents(organization_id,divera_id,title,started_at,message,remark,patient,caller,consolidated_text)
+      VALUES(1,?,?,?,?,?,?,?,?)",["alarm-2","Paralleler Import","2026-08-22T19:00:00.000Z","","","","",""]);
+    $createdIncidentId=(int)db()->lastInsertId();
+    query("INSERT INTO incident_units(incident_id,unit_id,vehicles) VALUES(?,1,?)",[$createdIncidentId,"[]"]);
+    $requests=[];
+    try {
+      $requests["sync"]=$start("/api/units/1/divera/sync",[],getenv("COMMAND_COOKIE"),"POST");
+      $wait($blockerId,"incidents","1, ".chr(39)."alarm-2".chr(39),"incidents_org_divera");
+      $payload["runningNumber"]="88/2026";
+      $payload["narrative"]="Bericht während paralleler Alarmanlage";
+      unset($payload["revision"]);
+      $unrelatedIncidentId=(int)getenv("UNRELATED_INCIDENT_ID");
+      $requests["report"]=$start("/api/incidents/$unrelatedIncidentId/reports",$payload,getenv("FORCE_COOKIE"),"POST");
+      $created=$finish($requests["report"],201);
+      unset($requests["report"]);
+      $wait($blockerId,"incidents","1, ".chr(39)."alarm-2".chr(39),"incidents_org_divera");
+      db()->commit();
+      $synced=$finish($requests["sync"],200);
+      unset($requests["sync"]);
+      assert($synced["incidentsUpdated"]===2 && $synced["incidentsCreated"]===0);
+      assert((int)query("SELECT COUNT(*) FROM report_crew WHERE report_id=? AND member_id=?",[$created["id"],$memberId])->fetchColumn()===1);
+      query("DELETE FROM reports WHERE id=? AND incident_id=?",[$created["id"],$unrelatedIncidentId]);
+    } finally {
+      if(db()->inTransaction()) db()->rollBack();
+      foreach($requests as $request) {
+        if(is_resource($request["process"])) proc_terminate($request["process"]);
+        foreach($request["pipes"] as $pipe) if(is_resource($pipe)) fclose($pipe);
+        if(is_resource($request["process"])) proc_close($request["process"]);
+      }
+    }
+  '
+fi
+
 # Fehlerhafte DIVERA-Antworten brechen den Abgleich ab, ohne bestehende Stammdaten zu verändern.
+before_failed_sync=$(consolidation_data 'Unverändert' "$imported_incident_id")
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE units SET divera_access_key='malformed' WHERE id=1"
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
@@ -1283,6 +1422,8 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   "$base_url/api/units/1/divera/sync")" = 502
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT CONCAT((SELECT COUNT(*) FROM vehicles WHERE unit_id=1),'|',(SELECT COUNT(*) FROM member_units WHERE unit_id=1))")" = '2|4'
+# Auch die bereits vor den Stammdaten ausgeführten Importe und Revisionserhöhungen werden bei einem Abgleichfehler zurückgerollt.
+test "$(consolidation_data 'Unverändert' "$imported_incident_id")" = "$before_failed_sync"
 
 # Nicht mehr gelieferte Mitglieder werden inaktiv, bleiben in historischen Berichten und sind nicht neu auswählbar.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \

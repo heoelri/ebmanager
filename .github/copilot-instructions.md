@@ -103,6 +103,7 @@
 - Ein DIVERA-Einsatz ist innerhalb einer Organisation über `divera_id` eindeutig. Wiederholter Import aktualisiert Einsatz und `incident_units`, statt sie zu duplizieren.
 - Führungskräfte dürfen für ihre Einheiten Einsätze erkennen und einzeln importieren. Nur Einheits- und Wehrführung dürfen Access-Keys ändern oder Mitglieder, Qualifikationen und Fahrzeuge synchronisieren.
 - „Alles synchronisieren“ ruft `pull/all` und `alarms` je höchstens einmal ab, ersetzt die Stammdaten und importiert beziehungsweise aktualisiert alle gelieferten Einsätze.
+- Der vollständige Abgleich führt alle Alarm-Upserts in stabiler DIVERA-ID-Reihenfolge vor dem Mitglieder-/Fahrzeugabgleich in derselben Transaktion aus. Damit werden bestehende und gleichzeitig angelegte Einsätze vor Mitgliedern/Ressourcen gesperrt; eine reine Vorabfrage bestehender Einsatz-IDs ersetzt diese Sperren nicht.
 
 ## Oberfläche und Barrierefreiheit
 

@@ -1840,13 +1840,10 @@ try {
         if (!$foundUnit || !$foundUnit['divera_access_key']) throw new ApiError(400, 'DIVERA ist nicht konfiguriert');
         $cluster = diveraCluster($foundUnit);
         $data = diveraData($foundUnit, true, $cluster);
+        usort($data['alarms'], fn($left, $right) => strcmp($left['id'], $right['id']));
         $result = transaction(function () use ($cluster, $data, $unitId, $user) {
-            $counts = syncDiveraMembers($cluster, $unitId, (int)$user['organization_id']);
-            $counts['vehicles'] = syncDiveraVehicles($cluster, $unitId);
-            $counts['incidentsCreated'] = 0;
-            $counts['incidentsUpdated'] = 0;
-            $counts['assignmentsCreated'] = 0;
-            $counts['notifications'] = [];
+            $counts = ['incidentsCreated' => 0, 'incidentsUpdated' => 0, 'assignmentsCreated' => 0, 'notifications' => []];
+            // Upserts also lock concurrently created incidents, before any member/vehicle locks.
             foreach ($data['alarms'] as $alarm) {
                 $import = persistDiveraAlarm($alarm, $unitId, $user);
                 $counts[$import['newIncident'] ? 'incidentsCreated' : 'incidentsUpdated']++;
@@ -1855,6 +1852,8 @@ try {
                     $counts['notifications'][] = $import['id'];
                 }
             }
+            $counts += syncDiveraMembers($cluster, $unitId, (int)$user['organization_id']);
+            $counts['vehicles'] = syncDiveraVehicles($cluster, $unitId);
             return $counts;
         });
         $warnings = 0;
