@@ -77,6 +77,7 @@ Bereits gespeicherte Dienstgradwerte bleiben beim Bearbeiten auswählbar, auch w
 
 - [Dokumentationsübersicht](docs/README.md)
 - [Architektur](docs/ARCHITEKTUR.md)
+- [API-Referenz](docs/API.md)
 - [Deployment auf Webspace](docs/WEBSPACE-DEPLOYMENT.md)
 - [Datenmodell](DATENMODELL.md)
 - [Security Review](SECURITY-REVIEW.md)

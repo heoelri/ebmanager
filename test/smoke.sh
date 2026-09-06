@@ -20,7 +20,7 @@ incident_status() {
   curl --insecure --silent --fail --cookie "$session_cookie=$1" "$base_url/api/incidents" |
     INCIDENT_ID="$2" php -r '$items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $matches=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID"))); assert(count($matches)===1); echo $matches[0]["reportStatus"]["key"];'
 }
-# Bearbeitungen verlangen genau einen sichtbaren Bericht und verwenden dessen zuvor geladene Revision.
+# Bearbeitungen verlangen genau einen sichtbaren Bericht und bewahren beim Ergänzen der geladenen Revision JSON-Objekte und -Listen.
 report_data() {
   local payload=$1 token=${2:-$force_token} incident=${3:-$incident_id} report=${4:-$report_id}
   curl --insecure --silent --fail --cookie "$session_cookie=$token" "$base_url/api/incidents/$incident/reports" |
@@ -30,8 +30,8 @@ report_data() {
       if(count($matches)!==1) throw new RuntimeException("Genau ein sichtbarer Testbericht ist erforderlich");
       $report=$matches[0];
       assert(is_int($report["revision"]) && $report["revision"]>0);
-      $data=json_decode(getenv("PAYLOAD"),true,512,JSON_THROW_ON_ERROR);
-      $data["revision"]=$report["revision"];
+      $data=json_decode(getenv("PAYLOAD"),false,512,JSON_THROW_ON_ERROR);
+      $data->revision=$report["revision"];
       echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);
     '
 }
@@ -123,6 +123,36 @@ DIVERA_API_BASE_URL='http://divera:8090/' php -r 'require "support.php"; if (div
 for invalid_divera_url in 'https://host?x=1' 'https://user@host' 'https://host/path' 'https://host#fragment'; do
   DIVERA_API_BASE_URL="$invalid_divera_url" php -r 'require "support.php"; try { diveraBaseUrl(); exit(1); } catch (ApiError $error) { if ($error->status!==503) exit(1); }'
 done
+
+# Primitive Validatoren sortieren IDs verlustfrei, raten keine IDs/Koordinaten und erhalten Passwort-Leerzeichen sowie optionale Textskalare.
+php -r '
+  require "support.php";
+  $maximum=min(PHP_INT_MAX,MAX_API_INTEGER);
+  assert(positiveId((string)$maximum)===$maximum);
+  assert(positiveId("12")===12);
+  assert(idList([$maximum,$maximum-1],"IDs")===[$maximum-1,$maximum]);
+  if(PHP_INT_SIZE>=8) assert(positiveId("4294967296")===4294967296);
+  foreach(["9007199254740992","9007199254740993","9223372036854775807"] as $value) {
+    try { positiveId($value); throw new RuntimeException("Unsichere Browser-ID akzeptiert"); }
+    catch(ApiError $error) { assert($error->status===400); }
+  }
+  assertResponseIntegers(["id"=>$maximum,"objects"=>[(object)["id"=>1]]]);
+  if(PHP_INT_SIZE>=8) {
+    try { assertResponseIntegers(["objects"=>[(object)["id"=>9007199254740992]]]); throw new LogicException("Unsichere Antwort-ID akzeptiert"); }
+    catch(RuntimeException $error) { assert($error->getMessage()==="Ganzzahl außerhalb des sicheren JSON-Bereichs"); }
+  }
+  assert(passwordInput("  zehn Zeichen  ")==="  zehn Zeichen  ");
+  assert(optional(null,"Text")==="" && optional(0,"Text")==="0" && optional(false,"Text")==="");
+  assert(finiteNumber(null,"Koordinate")===null && finiteNumber("50.9","Koordinate")===50.9);
+  foreach([[],new stdClass(),true,false,"50x"] as $value) {
+    try { finiteNumber($value,"Koordinate"); throw new RuntimeException("Koordinatentyp akzeptiert"); }
+    catch(ApiError $error) { assert($error->status===400); }
+  }
+  foreach([[],new stdClass(),true,123,"null\0byte"] as $value) {
+    try { passwordInput($value); throw new RuntimeException("Passworttyp akzeptiert"); }
+    catch(ApiError $error) { assert($error->status===400); }
+  }
+'
 
 # Der Renderer erzeugt mehrseitige PDFs mit Umlauten und Exportmetadaten auf jeder Seite.
 php -r '
@@ -274,6 +304,95 @@ WEAK_HASH="$weak_password_hash" CURRENT_HASH="$current_password_hash" php -r '
 users_json=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/users")
 printf '%s' "$users_json" | php -r '$users=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); exit(count($users[0]["loginHistory"])===1 ? 0 : 1);'
 rm -f second-login-cookies.txt
+
+# Text-, Wurzel-, ID- und Listenfehler liefern HTTP 400; abgewiesene Anfragen ändern weder Benutzer noch Einheiten oder Einsätze.
+API_BASE_URL="$base_url" COOKIE="$session_cookie=$session_token" php -r '
+  $call=function(string $path, string $method="GET", ?string $payload=null): array {
+    $args=["curl","--insecure","--silent","--show-error","--cookie",getenv("COOKIE"),"--write-out","\n%{http_code}",
+      "--header","Content-Type: application/json","--request",$method,getenv("API_BASE_URL").$path];
+    if($payload!==null) array_push($args,"--data",$payload);
+    $process=proc_open($args,[0=>["pipe","r"],1=>["pipe","w"],2=>["pipe","w"]],$pipes);
+    fclose($pipes[0]); $body=stream_get_contents($pipes[1]); $error=stream_get_contents($pipes[2]);
+    fclose($pipes[1]); fclose($pipes[2]);
+    if(proc_close($process)!==0) throw new RuntimeException("API-Testtransport fehlgeschlagen");
+    return [(int)substr($body,-3),substr($body,0,-4)];
+  };
+  $before=[$call("/api/users"),$call("/api/units"),$call("/api/incidents")];
+  foreach(["[]","null","false","0","\"Text\""] as $root) {
+    if($call("/api/units","POST",$root)[0]!==400) throw new RuntimeException("JSON-Wurzel akzeptiert");
+  }
+  foreach(["[]","{}"] as $wrong) {
+    foreach(["name","email","password"] as $field) {
+      $payload=json_decode("{\"name\":\"Neu\",\"email\":\"neu@example.test\",\"password\":\"geheim-12345\",\"role\":\"wehrleitung\"}");
+      $payload->$field=json_decode($wrong);
+      // Das Startpasswort wird bei Einladungen nicht verwendet; geprüft wird die Passwortänderung.
+      $path=$field==="password" ? "/api/users/1" : "/api/users";
+      if($call($path,$field==="password" ? "PUT" : "POST",json_encode($payload))[0]!==400) throw new RuntimeException("Ungültiger Benutzertyp akzeptiert");
+    }
+    if($call("/api/incidents","POST","{\"unitIds\":[1],\"title\":\"Test\",\"startedAt\":\"2026-08-22T18:00:00.000Z\",\"address\":$wrong}")[0]!==400) throw new RuntimeException("Adressobjekt akzeptiert");
+    if($call("/api/units","POST","{\"name\":$wrong}")[0]!==400) throw new RuntimeException("Namenstyp akzeptiert");
+  }
+  foreach(["true","false","1.0","1.5","\"1x\"","\"1e0\"","\"01\"","\" 1\"","\"+1\"","0","-1","9007199254740992","\"9007199254740993\"","9223372036854775808","\"18446744073709551616\"","[]","{}"] as $id) {
+    if($call("/api/incidents","POST","{\"unitIds\":[$id],\"title\":\"Test\",\"startedAt\":\"2026-08-22T18:00:00.000Z\"}")[0]!==400) throw new RuntimeException("Ungültige Einsatz-ID akzeptiert");
+    if($call("/api/users","POST","{\"name\":\"Test\",\"email\":\"test@example.test\",\"role\":\"wehrleitung\",\"unitIds\":[$id]}")[0]!==400) throw new RuntimeException("Ungültige Mitgliedschaft ignoriert");
+  }
+  foreach(["{}","\"[1]\"","true"] as $list) {
+    if($call("/api/users","POST","{\"name\":\"Test\",\"email\":\"test@example.test\",\"role\":\"wehrleitung\",\"unitIds\":$list}")[0]!==400) throw new RuntimeException("Einheitsliste akzeptiert");
+  }
+  foreach(["0","01","1.0","1x","1e0","true","9007199254740992","9223372036854775808"] as $id) {
+    if($call("/api/units/$id/resources")[0]!==400) throw new RuntimeException("Pfad-ID akzeptiert");
+  }
+  if([$call("/api/users"),$call("/api/units"),$call("/api/incidents")]!==$before) throw new RuntimeException("Teilmutation bei ungültiger Anfrage");
+  $users=json_decode($before[0][1]);
+  if($users[0]->unit_ids!==[] || !is_array($users[0]->loginHistory)) throw new RuntimeException("Benutzerlisten sind keine nativen Listen");
+  // Eine explizit leere optionale Zuordnung der Wehrführung bleibt zulässig und ändert keine Kontodaten.
+  $unchanged=["name"=>$users[0]->name,"email"=>$users[0]->email,"role"=>$users[0]->role,"unitIds"=>null];
+  if($call("/api/users/".$users[0]->id,"PUT",json_encode($unchanged,JSON_THROW_ON_ERROR))[0]!==200
+    || $call("/api/users")!==$before[0]) throw new RuntimeException("Optionale leere Benutzerzuordnung abgewiesen oder verändert");
+'
+
+# Bekannte Eindeutigkeitsverletzungen erhalten fachliche 409-Meldungen; ein unbekannter echter Unique-Key bleibt ein neutraler HTTP 500.
+test "$(curl --insecure --silent --write-out '|%{http_code}' --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' --data '{"name":"Löschzug"}' "$base_url/api/units")" = '{"error":"Eine Einheit mit diesem Namen existiert bereits in dieser Organisation"}|409'
+test "$(curl --insecure --silent --write-out '|%{http_code}' --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' --data '{"name":"Doppelt","email":"admin@example.test","role":"wehrleitung","unitIds":[]}' \
+  "$base_url/api/users")" = '{"error":"Diese E-Mail-Adresse wird bereits verwendet"}|409'
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="ALTER TABLE units RENAME INDEX units_org_name TO api92_unexpected_unique"
+unexpected_duplicate=$(curl --insecure --silent --write-out '|%{http_code}' --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' --data '{"name":"Löschzug"}' "$base_url/api/units")
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="ALTER TABLE units RENAME INDEX api92_unexpected_unique TO units_org_name"
+test "$unexpected_duplicate" = '{"error":"Interner Fehler"}|500'
+
+# BIGINT-IDs bis zur gemeinsamen Browsergrenze bleiben exakt; größere native Antwort-Integer liefern 500 statt gerundeter IDs.
+API_BASE_URL="$base_url" COOKIE="$session_cookie=$session_token" php -r '
+  require "support.php";
+  $call=function(string $path): array {
+    $process=proc_open(["curl","--insecure","--silent","--show-error","--cookie",getenv("COOKIE"),"--write-out","\n%{http_code}",
+      getenv("API_BASE_URL").$path],[0=>["pipe","r"],1=>["pipe","w"],2=>["pipe","w"]],$pipes);
+    fclose($pipes[0]); $body=stream_get_contents($pipes[1]); stream_get_contents($pipes[2]); fclose($pipes[1]); fclose($pipes[2]);
+    if(proc_close($process)!==0) throw new RuntimeException("ID-Grenztest nicht erreichbar");
+    return [(int)substr($body,-3),substr($body,0,-4)];
+  };
+  $before=$call("/api/units");
+  $next=(int)one("SELECT AUTO_INCREMENT FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=?",["units"])["AUTO_INCREMENT"];
+  try {
+    query("INSERT INTO units(id,organization_id,name) VALUES(9007199254740991,1,?)",["API sichere BIGINT-ID"]);
+    $safe=$call("/api/units");
+    $rows=json_decode($safe[1],false,512,JSON_THROW_ON_ERROR);
+    if($safe[0]!==200 || count(array_filter($rows,fn($row)=>$row->id===9007199254740991))!==1
+      || $call("/api/units/9007199254740991/resources")!==[200,"{\"members\":[],\"vehicles\":[]}"]) {
+      throw new RuntimeException("Sichere BIGINT-ID verändert");
+    }
+    query("INSERT INTO units(id,organization_id,name) VALUES(9007199254740992,1,?)",["API unsichere BIGINT-ID"]);
+    if($call("/api/units")!==[500,"{\"error\":\"Interner Fehler\"}"]) throw new RuntimeException("Unsichere native Antwort-ID ausgegeben");
+  } finally {
+    query("DELETE FROM units WHERE id IN (9007199254740991,9007199254740992) AND organization_id=1");
+    query("ALTER TABLE units AUTO_INCREMENT=$next");
+  }
+  if($call("/api/units")!==$before) throw new RuntimeException("ID-Grenztest hat fachliche Daten verändert");
+'
 
 # Die Systemübersicht enthält Status- und Build-Daten, aber keine Zugangsdaten oder Tokens.
 system_json=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/system")
@@ -544,7 +663,7 @@ incident_id=$(curl --insecure --silent --fail \
   "$base_url/api/incidents" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
-  SECOND_UNIT_ID="$second_unit_id" php -r '$incidents=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $assignments=json_decode($incidents[0]["assignments"],true,512,JSON_THROW_ON_ERROR); $expected=[1,(int)getenv("SECOND_UNIT_ID")]; sort($expected); assert(array_column($assignments,"unitId")===$expected); assert($incidents[0]["reportStatus"]["key"]==="reports_pending"); assert(count($incidents[0]["reportStatus"]["pendingUnits"])===2);'
+  SECOND_UNIT_ID="$second_unit_id" php -r '$incidents=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $assignments=$incidents[0]["assignments"]; $expected=[1,(int)getenv("SECOND_UNIT_ID")]; sort($expected); assert(array_column($assignments,"unitId")===$expected); assert(is_array($assignments[0]["vehicles"])); assert($incidents[0]["reportStatus"]["key"]==="reports_pending"); assert(count($incidents[0]["reportStatus"]["pendingUnits"])===2);'
 
 # Der letzte erfolgreiche DIVERA-Import wird je Einheit als UTC-Zeitpunkt ausgegeben.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
@@ -612,6 +731,11 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/statistics?from=2026-09-04&to=2026-09-07")" = 403
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" "$base_url/api/statistics?from=2026-09-04&to=2026-09-07")" = 403
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$leader_token" "$base_url/api/statistics?from=2026-09-08&to=2026-09-07")" = 400
+# Statistikgrenzen akzeptieren keine Query-Arrays statt eines Datumsstrings.
+for date_field in from to; do
+  test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$leader_token" \
+    "$base_url/api/statistics?$date_field%5B%5D=2026-09-04")" = 400
+done
 # Alarmierte Fahrzeuge anderer Einheiten erscheinen nicht in der Statistik.
 curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_url/api/statistics?from=2026-09-04&to=2026-09-07" |
   php -r '
@@ -651,7 +775,7 @@ curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_u
   INCIDENT_ID="$incident_id" php -r '
     $items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
     $incident=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")))[0];
-    $assignments=json_decode($incident["assignments"],true,512,JSON_THROW_ON_ERROR);
+    $assignments=$incident["assignments"];
     assert(array_column($assignments,"unitId")===[1]);
     assert($incident["units"]==="Löschzug");
     assert(!str_contains(json_encode($incident),"Fremdfahrzeug"));
@@ -683,7 +807,106 @@ test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-characte
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT CONCAT(COALESCE(foreign_id,''),'|',COALESCE(divera_id,'')) FROM incidents WHERE id=$incident_id")" = '|'
 
-# Zwei geladene Editoren: Der erste speichert, der zweite darf weder Text noch Besatzung oder Zusatzfahrzeuge überschreiben.
+# Ungültige Kontakt-, Aufgliederungs-, Besatzungs-, Fahrzeug- und Datumstypen liefern 400 ohne Änderungen, auch bei später Textvalidierung.
+API_BASE_URL="$base_url" COOKIE="$session_cookie=$force_token" INCIDENT_ID="$incident_id" REPORT_ID="$report_id" \
+  PAYLOAD="$report_with_additional_vehicle" php -r '
+  $call=function(string $path, ?object $payload=null): array {
+    $args=["curl","--insecure","--silent","--show-error","--cookie",getenv("COOKIE"),"--write-out","\n%{http_code}",getenv("API_BASE_URL").$path];
+    if($payload!==null) array_push($args,"--header","Content-Type: application/json","--request","PUT","--data",json_encode($payload,JSON_THROW_ON_ERROR|JSON_PRESERVE_ZERO_FRACTION));
+    $process=proc_open($args,[0=>["pipe","r"],1=>["pipe","w"],2=>["pipe","w"]],$pipes);
+    fclose($pipes[0]); $body=stream_get_contents($pipes[1]); stream_get_contents($pipes[2]); fclose($pipes[1]); fclose($pipes[2]);
+    if(proc_close($process)!==0) throw new RuntimeException("API-Testtransport fehlgeschlagen");
+    return [(int)substr($body,-3),substr($body,0,-4)];
+  };
+  $path="/api/reports/".getenv("REPORT_ID");
+  $read="/api/incidents/".getenv("INCIDENT_ID")."/reports";
+  $before=$call($read);
+  $loaded=json_decode($before[1],false,512,JSON_THROW_ON_ERROR)[0];
+  foreach(["damaged_party","damaging_party","incident_command","classification"] as $field) {
+    if(!$loaded->$field instanceof stdClass) throw new RuntimeException("Berichtsfeld ist kein natives Objekt");
+  }
+  if(!is_array($loaded->crew) || !is_array($loaded->history) || !is_array($loaded->additionalVehicles)) throw new RuntimeException("Berichtsliste ist nicht nativ");
+  foreach(["created_at","updated_at","alarmed_at","ended_at"] as $field) {
+    if(!preg_match("/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/D",$loaded->$field)) throw new RuntimeException("Berichtszeit ist nicht ISO-UTC");
+  }
+  // Typfehler benennen die Objektgruppe, nicht das darin enthaltene Namens- oder Dienstgradfeld.
+  foreach(["damagedParty"=>"Geschädigte Person","damagingParty"=>"Schädiger","incidentCommand"=>"Einsatzleitung"] as $group=>$label) {
+    $data=json_decode(getenv("PAYLOAD"),false,512,JSON_THROW_ON_ERROR);
+    $data->$group=[]; $data->revision=$loaded->revision;
+    [$status,$body]=$call($path,$data);
+    if($status!==400 || json_decode($body,true,512,JSON_THROW_ON_ERROR)!==["error"=>$label." muss ein Objekt sein"]
+      || $call($read)!==$before) throw new RuntimeException("Irreführende Objektfehlermeldung oder Teilmutation");
+  }
+  $invalid=[
+    "{\"damagedParty\":[]}", "{\"damagedParty\":\"Text\"}", "{\"damagedParty\":{\"name\":[]}}",
+    "{\"damagingParty\":{\"phone\":{}}}", "{\"incidentCommand\":{\"rank\":[]}}",
+    "{\"classification\":[]}", "{\"classification\":true}", "{\"classification\":{\"site\":{}}}",
+    "{\"classification\":{\"cause\":\"Brand\"}}", "{\"classification\":{\"technical\":[{}]}}",
+    "{\"crew\":{}}", "{\"crew\":\"[]\"}", "{\"crew\":[[]]}", "{\"crew\":[true]}",
+    "{\"crew\":[{\"memberId\":100,\"vehicle\":[]}]}","{\"crew\":[{\"memberId\":100,\"role\":{}}]}",
+    "{\"crew\":[{\"memberId\":100,\"vehicle\":0}]}",
+    "{\"additionalVehicles\":{}}", "{\"additionalVehicles\":[[]]}",
+    "{\"endedAt\":[]}", "{\"departedAt\":{}}", "{\"arrivedAt\":true}", "{\"endedAt\":\"2026-02-30T19:00:00.000Z\"}",
+    "{\"runningNumber\":{}}", "{\"narrative\":[],\"crew\":[],\"additionalVehicles\":[]}"
+  ];
+  foreach(["true","100.0","100.5","\"100x\"","\"1e2\"","\"0100\"","0","-1","9223372036854775808","\"18446744073709551616\""] as $id) {
+    $invalid[]="{\"crew\":[{\"memberId\":$id,\"vehicle\":\"\",\"role\":\"besatzung\"}]}";
+  }
+  foreach($invalid as $index=>$override) {
+    $data=json_decode(getenv("PAYLOAD"),false,512,JSON_THROW_ON_ERROR);
+    foreach(json_decode($override,false,512,JSON_THROW_ON_ERROR) as $key=>$value) $data->$key=$value;
+    $data->revision=$loaded->revision;
+    if($call($path,$data)[0]!==400) throw new RuntimeException("Ungültiger Berichtstyp akzeptiert: Test ".$index);
+    if($call($read)!==$before) throw new RuntimeException("Teilmutation bei ungültigem Bericht: Test ".$index);
+  }
+'
+
+# Fehlend, null und leere Objekte leeren optionale Kontakte; leere Listen bleiben Listen, gültige Textskalare und kanonische ID-Strings bleiben verwendbar.
+API_BASE_URL="$base_url" COOKIE="$session_cookie=$force_token" INCIDENT_ID="$incident_id" REPORT_ID="$report_id" \
+  PAYLOAD="$report_with_additional_vehicle" php -r '
+  $call=function(?object $payload=null): array {
+    $path=$payload===null ? "/api/incidents/".getenv("INCIDENT_ID")."/reports" : "/api/reports/".getenv("REPORT_ID");
+    $args=["curl","--insecure","--silent","--show-error","--fail","--cookie",getenv("COOKIE"),getenv("API_BASE_URL").$path];
+    if($payload!==null) array_push($args,"--header","Content-Type: application/json","--request","PUT","--data",json_encode($payload,JSON_THROW_ON_ERROR));
+    $process=proc_open($args,[0=>["pipe","r"],1=>["pipe","w"],2=>["pipe","w"]],$pipes);
+    fclose($pipes[0]); $body=stream_get_contents($pipes[1]); stream_get_contents($pipes[2]); fclose($pipes[1]); fclose($pipes[2]);
+    if(proc_close($process)!==0) throw new RuntimeException("Gültige Leerwerte abgelehnt");
+    return (array)json_decode($body,false,512,JSON_THROW_ON_ERROR);
+  };
+  foreach(["missing","null","object"] as $mode) {
+    $data=json_decode(getenv("PAYLOAD"),false,512,JSON_THROW_ON_ERROR);
+    foreach(["damagedParty","damagingParty","incidentCommand","classification"] as $field) {
+      if($mode==="missing") unset($data->$field);
+      else $data->$field=$mode==="null" ? null : new stdClass();
+    }
+    $data->departedAt=null; $data->arrivedAt=""; $data->crew=[]; $data->additionalVehicles=[];
+    $data->revision=$call()[0]->revision; $call($data);
+    $saved=$call()[0];
+    if($saved->damaged_party->name!=="" || $saved->classification->site!==[] || $saved->crew!==[] || $saved->departed_at!==null || $saved->arrived_at!==null) {
+      throw new RuntimeException("Leerwertsemantik geändert");
+    }
+  }
+  $data=json_decode(getenv("PAYLOAD"),false,512,JSON_THROW_ON_ERROR);
+  $data->damagedParty->name=123; $data->damagedParty->phone=0; $data->damagedParty->address=false;
+  $data->crew[0]->memberId="100"; $data->revision=$call()[0]->revision; $call($data);
+  $saved=$call()[0];
+  if($saved->damaged_party->name!=="123" || $saved->damaged_party->phone!=="0" || $saved->damaged_party->address!=="" || $saved->crew[0]->memberId!==100) {
+    throw new RuntimeException("Gültige skalare Eingabe verändert");
+  }
+  $data=json_decode(getenv("PAYLOAD"),false,512,JSON_THROW_ON_ERROR);
+  // Gültige kürzere Sekundenbruchteile bleiben erlaubt und erscheinen kanonisch mit drei Millisekundenstellen.
+  foreach(["1","12","123"] as $fraction) {
+    $prefix=substr($data->endedAt,0,20);
+    $data->endedAt=$prefix.$fraction."Z";
+    $data->revision=$call()[0]->revision; $call($data);
+    $saved=$call()[0];
+    if($saved->ended_at!==$prefix.str_pad($fraction,3,"0")."Z") throw new RuntimeException("Gültiger Sekundenbruch verändert");
+  }
+  $data=json_decode(getenv("PAYLOAD"),false,512,JSON_THROW_ON_ERROR);
+  $data->revision=$saved->revision; $call($data);
+'
+
+# Zwei geladene Editoren: Der erste speichert, der zweite darf weder Text noch native Besatzungslisten oder Zusatzfahrzeuge überschreiben.
 editor_one=$(report_data "$report_with_additional_vehicle")
 editor_two=$(report_data "${base_report_payload/Ursprünglich/Veralteter Text}")
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' \
@@ -695,7 +918,7 @@ EDITOR_ONE="$editor_one" SAVED_REPORT="$saved_report" php -r '
   assert($saved["revision"]===$loaded["revision"]+1);
   assert($saved["narrative"]==="Ursprünglich");
   assert($saved["additionalVehicles"]===["Zusatzfahrzeug"]);
-  assert(json_decode($saved["crew"],true,512,JSON_THROW_ON_ERROR)[0]["memberId"]===100);
+  assert($saved["crew"][0]["memberId"]===100);
 '
 # Eine veraltete Berichtsrevision meldet HTTP 409 mit einem kontextneutralen Hinweis auf den geladenen Stand.
 test "$(curl --insecure --silent --write-out '|%{http_code}' --cookie "$session_cookie=$force_token" \
@@ -870,24 +1093,46 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' -
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" \
   --header 'Content-Type: application/json' --request PUT --data '{"revision":1,"reportVersions":[],"text":"Unzulässig"}' "$base_url/api/incidents/$incident_id/consolidation")" = 403
 
-# Besatzungsmitglieder werden unabhängig von der Einfügereihenfolge stabil sortiert ausgegeben.
+# Native Besatzungslisten werden unabhängig von der Einfügereihenfolge stabil nach Mitglieds-ID sortiert ausgegeben.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="INSERT INTO members(id,organization_id,divera_id,name) VALUES(101,1,'test-101','Person 101'),(102,1,'test-102','Person 102'); INSERT INTO member_units(member_id,unit_id) VALUES(101,1),(102,1); INSERT INTO report_crew(report_id,member_id) VALUES($report_id_int,102),($report_id_int,101)"
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$incident_id/reports" |
-  php -r '$reports=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $crew=json_decode($reports[0]["crew"],true,512,JSON_THROW_ON_ERROR); assert(array_column($crew,"memberId")===[101,102]);'
+  php -r '$reports=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $crew=$reports[0]["crew"]; assert(array_column($crew,"memberId")===[101,102]);'
 
-# Laufende Nummern sind pro Einheit und Kalenderjahr eindeutig.
+# Auch aus umgekehrt eingesendeter Besatzung entstehen stabile Personal- und Fahrzeugzusammenfassungen.
+reverse_crew="${report_payload/\"crew\":[]/\"crew\":[{\"memberId\":102},{\"memberId\":\"101\"}]}"
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' \
+  --request PUT --data "$(report_data "$reverse_crew")" "$base_url/api/reports/$report_id" >/dev/null
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$incident_id/reports" |
+  php -r '$report=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR)[0]; assert($report["personnel"]==="Person 101, Person 102"); assert($report["vehicles"]===""); assert(array_column($report["crew"],"memberId")===[101,102]);'
+
+# Laufende Nummern sind pro Einheit und Kalenderjahr eindeutig und erhalten eine eigene fachliche 409-Meldung.
 duplicate_incident_id=$(curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
   --data '{"title":"Zweiter Testeinsatz","startedAt":"2026-08-22T18:00:00.000Z","address":"","unitIds":[1]}' \
   "$base_url/api/incidents" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
-test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+test "$(curl --insecure --silent --write-out '|%{http_code}' \
   --header 'Content-Type: application/json' \
   --cookie "$session_cookie=$force_token" \
   --data "$report_payload" \
-  "$base_url/api/incidents/$duplicate_incident_id/reports")" = 409
+  "$base_url/api/incidents/$duplicate_incident_id/reports")" = '{"error":"Diese laufende Nummer wird in dieser Einheit und diesem Kalenderjahr bereits verwendet"}|409'
+
+# Pro alarmierter Einheit gibt es genau einen Bericht; dieser Konflikt wird nicht als Nummernkonflikt ausgegeben.
+test "$(curl --insecure --silent --write-out '|%{http_code}' --cookie "$session_cookie=$force_token" \
+  --header 'Content-Type: application/json' --data "$report_payload" \
+  "$base_url/api/incidents/$incident_id/reports")" = '{"error":"Für diese Einheit existiert bereits ein Einsatzbericht"}|409'
+
+# Eine späte Besatzungsvalidierung bei der Neuanlage rollt auch den zuvor eingefügten Bericht und alle Revisionen zurück.
+before_invalid_creation=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents")
+invalid_creation="${base_report_payload/69\/2026/97\/2026}"
+invalid_creation="${invalid_creation/\"crew\":[]/\"crew\":[{\"memberId\":true}]}"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" \
+  --header 'Content-Type: application/json' --data "$invalid_creation" \
+  "$base_url/api/incidents/$duplicate_incident_id/reports")" = 400
+test "$(curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$duplicate_incident_id/reports")" = '[]'
+test "$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents")" = "$before_invalid_creation"
 
 # Berichte mit nicht chronologischen Einsatzzeiten werden abgelehnt.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
@@ -1014,6 +1259,19 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' -
   --header 'Content-Type: application/json' --request PUT --data "$missing_sources" "$base_url/api/incidents/$incident_id/consolidation")" = 400
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' --request PUT --data '{"text":"Ohne Revision"}' "$base_url/api/incidents/$incident_id/consolidation")" = 400
+# Revisionsquellen müssen eine Liste von Objekten mit gültigen IDs und ganzzahligen Revisionen sein; ungültige Formen verändern den Gesamtstand nicht.
+for invalid_sources in '{}' '"[]"' '[[]]' '[{"id":true,"revision":1}]' '[{"id":1.0,"revision":1}]' \
+  '[{"id":"1x","revision":1}]' '[{"id":9223372036854775808,"revision":1}]' '[{"id":1,"revision":true}]' \
+  '[{"id":1,"revision":1},{"id":"1","revision":1}]'; do
+  invalid_consolidation=$(SOURCES="$invalid_sources" PAYLOAD="$(consolidation_data 'Ungültige Quellen')" php -r '
+    $data=json_decode(getenv("PAYLOAD"),false,512,JSON_THROW_ON_ERROR);
+    $data->reportVersions=json_decode(getenv("SOURCES"),false,512,JSON_THROW_ON_ERROR);
+    echo json_encode($data,JSON_THROW_ON_ERROR|JSON_PRESERVE_ZERO_FRACTION);
+  ')
+  test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" \
+    --header 'Content-Type: application/json' --request PUT --data "$invalid_consolidation" "$base_url/api/incidents/$incident_id/consolidation")" = 400
+done
+test "$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents")" = "$saved_consolidation"
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE incidents SET consolidated_at='2026-08-24 09:00:00' WHERE id=$incident_id"
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
@@ -1186,6 +1444,12 @@ curl --insecure --silent --fail \
 
 # Die periodische DIVERA-Kurzabfrage lädt Alarme, aber keine Stammdaten.
 : > "$divera_log"
+# Die Zusammenfassungsoption akzeptiert nur 0/1 und keine Query-Arrays oder erratenen Wahrheitswerte.
+for summary in 'summary%5B%5D=1' 'summary=true' 'summary=2'; do
+  test "$(curl --insecure --silent --write-out '|%{http_code}' --cookie "$session_cookie=$force_token" \
+    "$base_url/api/units/1/divera?$summary")" = '{"error":"Zusammenfassungsoption ist ungültig"}|400'
+done
+# Die Zusammenfassungsabfrage liefert weiterhin Alarme und eine native leere Fahrzeugliste.
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units/1/divera?summary=1" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($data["alarms"])===2); assert($data["vehicles"]===[]);'
 test "$(grep --count '^GET /api/v2/alarms$' "$divera_log")" = 1
@@ -1301,7 +1565,7 @@ test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-characte
   einsatzberichte --execute="SELECT COUNT(*) FROM report_additional_vehicles WHERE report_id=$report_id_int AND vehicle='Zusatzfahrzeug'")" = 1
 
 # Apache kann zwei API-Anfragen gleichzeitig bearbeiten; der lokale PHP-Einzelprozess kann dies nicht.
-# Gesamtabgleich und Berichte mit echter Besatzung warten in beiden Startreihenfolgen ohne Deadlock auf Einsatz-/Mitgliedssperren.
+# Gesamtabgleich mit leerem JSON-Objekt und Berichte mit echter Besatzung warten in beiden Startreihenfolgen ohne Deadlock auf Einsatz-/Mitgliedssperren.
 # Die Zuordnung folgt InnoDB-Transaktions- und Sperr-IDs, nicht der Thread-/Schlüsseldarstellung impliziter Insertsperren.
 if [[ -n "${TEST_BASE_URL:-}" ]]; then
   REPORT_ID="$imported_report_id" INCIDENT_ID="$imported_incident_id" REPORT_PAYLOAD="$import_report_payload" \
@@ -1313,7 +1577,7 @@ if [[ -n "${TEST_BASE_URL:-}" ]]; then
     $start=function(string $path, array $payload, string $cookie, string $method): array {
       $process=proc_open(["curl","--insecure","--silent","--show-error","--max-time","20",
         "--write-out","\n%{http_code}","--cookie",$cookie,"--header","Content-Type: application/json",
-        "--request",$method,"--data",json_encode($payload,JSON_THROW_ON_ERROR),getenv("API_BASE_URL").$path],
+        "--request",$method,"--data",json_encode($payload ?: new stdClass(),JSON_THROW_ON_ERROR),getenv("API_BASE_URL").$path],
         [0=>["pipe","r"],1=>["pipe","w"],2=>["pipe","w"]],$pipes);
       if(!is_resource($process)) throw new RuntimeException("Parallele Anfrage konnte nicht gestartet werden");
       fclose($pipes[0]);
@@ -1500,7 +1764,7 @@ curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_u
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/units/1/members" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($data)===1); assert($data[0]["active"]===1);'
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$incident_id/reports" |
-  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(in_array("Bernd Beispiel",array_column(json_decode($data[0]["crew"],true,512,JSON_THROW_ON_ERROR),"name"),true));'
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(in_array("Bernd Beispiel",array_column($data[0]["crew"],"name"),true));'
 
 inactive_member_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT m.id FROM members m JOIN member_units mu ON mu.member_id=m.id WHERE mu.unit_id=1 AND mu.active=0 AND m.divera_id='m2'")
@@ -1524,6 +1788,76 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request POST \
   "$base_url/api/units/1/divera/sync")" = 403
+
+# Namens- und Zeitgleichstände werden über IDs stabil aufgelöst; Qualifikationen und sämtliche JSON-Felder bleiben deterministisch und nativ.
+API_BASE_URL="$base_url" COOKIE="$session_cookie=$session_token" SECOND_UNIT_ID="$second_unit_id" \
+  SESSION_COOKIE="$session_cookie" php -r '
+  require "support.php";
+  $unitId=(int)getenv("SECOND_UNIT_ID");
+  $token=str_repeat("c1",32);
+  $call=function(string $path, ?string $cookie=null): mixed {
+    $args=["curl","--insecure","--silent","--show-error","--fail","--cookie",$cookie ?? getenv("COOKIE"),getenv("API_BASE_URL").$path];
+    $process=proc_open($args,[0=>["pipe","r"],1=>["pipe","w"],2=>["pipe","w"]],$pipes);
+    fclose($pipes[0]); $body=stream_get_contents($pipes[1]); stream_get_contents($pipes[2]); fclose($pipes[1]); fclose($pipes[2]);
+    if(proc_close($process)!==0) throw new RuntimeException("Sortiertest nicht erreichbar");
+    return json_decode($body,false,512,JSON_THROW_ON_ERROR);
+  };
+  $ids=fn($rows)=>array_values(array_map(fn($row)=>$row->id,array_filter($rows,fn($row)=>$row->id>=92001 && $row->id<=92002)));
+  transaction(function() use($unitId,$token) {
+    foreach([92002,92001] as $id) {
+      query("INSERT INTO users(id,organization_id,unit_id,name,email,password_hash,role) VALUES(?,1,1,?,?,?,?)",
+        [$id,"API gleicher Name","api-$id@example.test","kein-passwort-hash","fuehrungskraft"]);
+      query("INSERT INTO members(id,organization_id,divera_id,name) VALUES(?,1,?,?)",[$id,"api-$id","API gleicher Name"]);
+      query("INSERT INTO member_units(member_id,unit_id) VALUES(?,1)",[$id]);
+      query("INSERT INTO vehicles(id,unit_id,divera_id,name) VALUES(?,1,?,?)",[$id,"api-$id","API gleicher Name"]);
+      query("INSERT INTO qualifications(id,unit_id,divera_id,name,shortname) VALUES(?,1,?,?,?)",[$id,"api-$id","API gleicher Name",$id===92001 ? "Q1" : "Q2"]);
+      query("INSERT INTO incidents(id,organization_id,title,started_at,message,remark,patient,caller,consolidated_text) VALUES(?,1,?,?,?,?,?,?,?)",
+        [$id,"API gleicher Zeitpunkt","2026-08-22T18:00:00.000Z","","","","",""]);
+    }
+    query("INSERT INTO qualifications(id,unit_id,divera_id,name,shortname) VALUES(92003,1,?,?,?)",["api-92003","ZZ spätere Qualifikation","Q1"]);
+    query("INSERT INTO member_qualifications(member_id,qualification_id) VALUES(92001,92002),(92001,92001),(92001,92003)");
+    query("INSERT INTO user_units(user_id,unit_id) VALUES(92001,?),(92001,1),(92002,1)",[$unitId]);
+    query("INSERT INTO sessions(token,user_id,expires_at) VALUES(?,92001,UTC_TIMESTAMP()+INTERVAL 1 HOUR)",[hash("sha256",$token)]);
+    query("INSERT INTO incident_units(incident_id,unit_id,vehicles) VALUES(92001,?,JSON_ARRAY(?)),(92001,1,JSON_ARRAY(JSON_OBJECT(?,?,?,?)))",
+      [$unitId,"LF","id","opaque-id","name","HLF"]);
+    foreach([92002=>$unitId,92001=>1] as $id=>$unit) query(
+      "INSERT INTO reports(id,incident_id,unit_id,author_id,narrative,vehicles,personnel,classification,status,created_at) VALUES(?,92001,?,1,?,?,?,?,?,?)",
+      [$id,$unit,"Sortiertest","","","{}","wehr_review","2026-08-22 18:00:00"]);
+    foreach([92002,92001] as $id) query(
+      "INSERT INTO report_transitions(id,report_id,to_status,actor_id,actor_name,actor_role,comment,created_at) VALUES(?,92001,?,1,?,?,?,?)",
+      [$id,"wehr_review","Admin","wehrleitung",(string)$id,"2026-08-22 18:00:00"]);
+    query("INSERT INTO report_transitions(id,report_id,to_status,actor_id,actor_name,actor_role,created_at) VALUES(92003,92002,?,1,?,?,?)",
+      ["wehr_review","Admin","wehrleitung","2026-08-22 18:00:00"]);
+  });
+  try {
+    $users=$call("/api/users");
+    if($ids($users)!==[92001,92002] || $ids($call("/api/system")->users)!==[92001,92002]) throw new RuntimeException("Benutzergleichstand instabil");
+    $user=array_values(array_filter($users,fn($row)=>$row->id===92001))[0];
+    $expected=[1,$unitId]; sort($expected,SORT_NUMERIC);
+    if($user->unit_ids!==$expected || $call("/api/me",getenv("SESSION_COOKIE")."=$token")->unitIds!==$expected) throw new RuntimeException("Einheits-IDs unsortiert");
+    $resources=$call("/api/units/1/resources");
+    if($ids($resources->members)!==[92001,92002] || $ids($resources->vehicles)!==[92001,92002]) throw new RuntimeException("Ressourcengleichstand instabil");
+    $member=array_values(array_filter($resources->members,fn($row)=>$row->id===92001))[0];
+    if($member->qualifications!=="Q1, Q2") throw new RuntimeException("Qualifikationsaggregation instabil");
+    $incidents=$call("/api/incidents");
+    if($ids($incidents)!==[92002,92001]) throw new RuntimeException("Einsatzgleichstand instabil");
+    $incident=array_values(array_filter($incidents,fn($row)=>$row->id===92001))[0];
+    if(!is_array($incident->assignments) || !$incident->assignments[0]->vehicles[0] instanceof stdClass
+      || $incident->assignments[0]->vehicles[0]->id!=="opaque-id" || $incident->assignments[1]->vehicles!==["LF"]) {
+      throw new RuntimeException("Fahrzeugsnapshots sind nicht nativ oder wurden umgeschrieben");
+    }
+    $reports=$call("/api/incidents/92001/reports");
+    if($ids($reports)!==[92001,92002] || array_column($reports[0]->history,"comment")!==["92001","92002"]) throw new RuntimeException("Berichtszeitgleichstand instabil");
+    if(!$reports[0]->damaged_party instanceof stdClass || get_object_vars($reports[0]->damaged_party)!==[]
+      || !$reports[0]->classification instanceof stdClass || $reports[0]->crew!==[]) throw new RuntimeException("Historische Leerwerte sind keine nativen Objekte/Listen");
+  } finally {
+    query("DELETE FROM incidents WHERE id IN (92001,92002)");
+    query("DELETE FROM qualifications WHERE id IN (92001,92002,92003)");
+    query("DELETE FROM vehicles WHERE id IN (92001,92002)");
+    query("DELETE FROM members WHERE id IN (92001,92002)");
+    query("DELETE FROM users WHERE id IN (92001,92002)");
+  }
+'
 
 # Neu ausgestellte Wiederherstellungslinks verwenden UTC für die 30-Minuten-Gültigkeit und erhalten ihren Token bei sofortiger Wiederholung.
 if [[ -z "${TEST_BASE_URL:-}" ]]; then

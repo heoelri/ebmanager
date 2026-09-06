@@ -1,5 +1,63 @@
 # Security Review
 
+## API-Vertrag und Eingabevalidierung vom 6. September 2026 (#92)
+
+Der gezielte Integrationsreview umfasst JSON-Eingaben, lokale IDs, optionale
+Berichtsdaten, native Antwortstrukturen, bekannte Unique-Konflikte und die
+zugehörigen Browseraufrufe. Er ersetzt keinen vollständigen Penetrationstest.
+Schema, Rollenmodell und erfasste personenbezogene Daten bleiben unverändert.
+
+Schreibende Anfragen werden vor fachlichen Änderungen als JSON-Objekt
+eingelesen. Verschachtelte Objekte bleiben von Listen unterscheidbar;
+falsch typisierte Kontakte, Klassifikationen oder Besatzungseinträge werden
+nicht mehr in leere Werte oder andere IDs umgewandelt. Die bestehenden
+Größen-, Origin-, Rollen- und Mandantengrenzen bleiben erhalten. Die
+Revisions- und Sperrreihenfolge aus #86 wird nicht verändert. Auch eine
+erst innerhalb der Transaktion erkannte ungültige Besatzung nimmt die
+Berichtsanlage und Revisionsänderungen vollständig zurück.
+
+Lokale IDs müssen ohne Rundung als PHP-Integer und JavaScript-Integer
+darstellbar sein; Boolesche Werte, Fließkommazahlen, Suffixe, führende Nullen
+und Überläufe sind keine IDs. Opake DIVERA-IDs bleiben Texte.
+Allgemeine Textskalare behalten die ausdrücklich dokumentierte
+Kompatibilitätskonvertierung. Passwörter werden dagegen nur als Strings
+angenommen und nicht getrimmt; NUL-Zeichen werden abgewiesen.
+Zulässige optionale Leerwerte und bisher unterstützte ein- oder zweistellige
+Sekundenbruchteile bleiben erhalten.
+
+Bekannte Eindeutigkeitsverletzungen werden anhand von schreibender Tabelle
+und Constraint einer fachlichen HTTP-409-Meldung zugeordnet. Unbekannte
+Datenbankfehler bleiben HTTP 500 mit `Interner Fehler`. Allgemeine Fehlerlogs
+enthalten nur Fehlerklasse beziehungsweise SQLSTATE und numerischen
+Fehlercode, nicht die PDO-Rohmeldung, SQL-Parameter oder sensible Inhalte.
+
+Die Rollenprojektionen ändern sich durch native Listen und Objekte nicht.
+PDFs verwenden dieselben sichtbaren Daten weiter. Der Browser prüft die
+erwarteten Strukturtypen; alte doppelt kodierte Antworten führen zu einer
+sichtbaren Meldung statt zu geleerten Bearbeitungsformularen. Es gibt keine
+automatischen Wiederholungen oder zusätzlichen gespeicherten Entwurfskopien.
+
+Die vorhandenen Regressionen decken ungültige Wurzel-/Feldtypen, Grenz-IDs,
+unveränderte Daten nach HTTP 400, fachliche und unbekannte Unique-Konflikte,
+native Antworttypen, Zeitformate, Sortierungsgleichstände und die bisherigen
+fünf echten Parallelitätsszenarien ab. Die vollständigen isolierten
+HTTP-/SMTP- und Apache-/MySQL-Suiten bestanden im Implementierungsreview.
+Nach der Kompatibilitätsnacharbeit bestand die Apache-/MySQL-Suite erneut
+mit frischem Volume und aktivierten PHP-Assertions. PHP-/JavaScript-Syntax
+und die erweiterten nativen Browser-Regressionsfälle bestanden ebenfalls.
+Produktive oder bestehende Entwicklungsdaten wurden dafür nicht verwendet.
+Die CI-Nacharbeit entfernt außerdem die zweite JSON-Dekodierung im separaten
+Demo-Seed-Check; dessen vollständiger Lauf bestätigt die weiterhin
+rollenbegrenzte Ausgabe der Verfasser. Objekt-Typfehler benennen nach dem
+Copilot-Hinweis die betroffene Gruppe statt eines darin enthaltenen Felds.
+HTTP-Regressionen prüfen diese Meldungen und den unveränderten Datenstand.
+
+Die Formatierung alter `DATETIME`-Werte korrigiert keine früheren
+Zeitzonenfehler; #87 bleibt offen. Die Umstellung verlangt einen gemeinsamen
+PHP-/Browserstand im Wartungsfenster, aber keine neue Migration. Die
+verbindlichen Schritte einschließlich Rollback stehen unter
+[API-Vertrag umstellen](docs/WEBSPACE-DEPLOYMENT.md#json-antworttypen-und-eingabevalidierung-umstellen-92).
+
 ## Revisionsschutz für Berichte vom 6. September 2026 (#86)
 
 Die Änderung schützt sensible Berichtsinhalte vor verlorenen parallelen

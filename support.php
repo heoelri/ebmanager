@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+const MAX_API_INTEGER = 9_007_199_254_740_991;
+
 final class ApiError extends RuntimeException
 {
     public function __construct(public int $status, string $message) { parent::__construct($message); }
@@ -8,11 +10,22 @@ final class ApiError extends RuntimeException
 
 function respond(int $status, mixed $value): never
 {
+    assertResponseIntegers($value);
     http_response_code($status);
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store');
     echo json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
     exit;
+}
+
+function assertResponseIntegers(mixed $value): void
+{
+    if (is_int($value) && ($value > MAX_API_INTEGER || $value < -MAX_API_INTEGER)) {
+        throw new RuntimeException('Ganzzahl außerhalb des sicheren JSON-Bereichs');
+    }
+    if (is_array($value) || $value instanceof stdClass) {
+        foreach ($value as $item) assertResponseIntegers($item);
+    }
 }
 
 function pdfEncode(string $text): string
@@ -153,7 +166,24 @@ function db(): PDO
 function query(string $sql, array $params = []): PDOStatement
 {
     $statement = db()->prepare($sql);
-    $statement->execute($params);
+    try {
+        $statement->execute($params);
+    } catch (PDOException $error) {
+        // Only constraints of the table being written are user-facing conflicts.
+        if ((int)($error->errorInfo[1] ?? 0) === 1062
+            && preg_match('/^\s*(?:INSERT\s+INTO|UPDATE)\s+(units|users|reports)\b/i', $sql, $table)
+            && preg_match("/for key ['`](?:[^'`]+\\.)?([^'`]+)['`]$/", $error->errorInfo[2] ?? '', $key)) {
+            $messages = [
+                'units.units_org_name' => 'Eine Einheit mit diesem Namen existiert bereits in dieser Organisation',
+                'users.email' => 'Diese E-Mail-Adresse wird bereits verwendet',
+                'reports.reports_incident_unit' => 'Für diese Einheit existiert bereits ein Einsatzbericht',
+                'reports.reports_unit_year_number' => 'Diese laufende Nummer wird in dieser Einheit und diesem Kalenderjahr bereits verwendet'
+            ];
+            $message = $messages[strtolower($table[1]) . '.' . $key[1]] ?? null;
+            if ($message !== null) throw new ApiError(409, $message);
+        }
+        throw $error;
+    }
     return $statement;
 }
 
@@ -178,18 +208,20 @@ function transaction(callable $work): mixed
 
 function input(): array
 {
+    static $data;
+    if ($data !== null) return $data;
     $length = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
     if ($length > 1_000_000) throw new ApiError(413, 'Anfrage zu groß');
     $raw = file_get_contents('php://input', false, null, 0, 1_000_001);
     if ($raw === false || strlen($raw) > 1_000_000) throw new ApiError(413, 'Anfrage zu groß');
     try {
-        $data = json_decode($raw ?: '{}', true, 512, JSON_THROW_ON_ERROR);
+        $decoded = json_decode($raw === '' ? '{}' : $raw, false, 512, JSON_THROW_ON_ERROR);
     } catch (JsonException) {
         throw new ApiError(400, 'Ungültiges JSON');
     }
 
-    if (!is_array($data)) throw new ApiError(400, 'Ungültiges JSON');
-    return $data;
+    if (!$decoded instanceof stdClass) throw new ApiError(400, 'Die Anfrage muss ein JSON-Objekt sein');
+    return $data = get_object_vars($decoded);
 }
 
 function requestIsHttps(): bool
@@ -237,16 +269,66 @@ function textLength(string $value): int
 
 function required(mixed $value, string $name, int $max = 10_000): string
 {
-    $text = trim(is_scalar($value) ? (string)$value : '');
+    if (!is_scalar($value)) throw new ApiError(400, "$name ist ungültig");
+    $text = trim((string)$value);
     if ($text === '' || textLength($text) > $max) throw new ApiError(400, "$name ist ungültig");
     return $text;
 }
 
 function optional(mixed $value, string $name, int $max = 10_000): string
 {
-    $text = trim(is_scalar($value) ? (string)$value : '');
+    if ($value !== null && !is_scalar($value)) throw new ApiError(400, "$name ist ungültig");
+    $text = trim((string)$value);
     if (textLength($text) > $max) throw new ApiError(400, "$name ist zu lang");
     return $text;
+}
+
+function objectInput(mixed $value, string $name): array
+{
+    if (!$value instanceof stdClass) throw new ApiError(400, "$name muss ein Objekt sein");
+    return get_object_vars($value);
+}
+
+function listInput(mixed $value, string $name): array
+{
+    if (!is_array($value) || !array_is_list($value)) throw new ApiError(400, "$name muss eine Liste sein");
+    return $value;
+}
+
+function positiveId(mixed $value, string $name = 'ID'): int
+{
+    $maximum = (string)min(PHP_INT_MAX, MAX_API_INTEGER);
+    if ((!is_int($value) && !is_string($value))
+        || !preg_match('/^[1-9][0-9]*$/D', (string)$value)
+        || strlen((string)$value) > strlen($maximum)
+        || (strlen((string)$value) === strlen($maximum) && strcmp((string)$value, $maximum) > 0)) {
+        throw new ApiError(400, "$name muss eine positive ganze Zahl sein");
+    }
+    return (int)$value;
+}
+
+function idList(mixed $value, string $name): array
+{
+    $ids = array_values(array_unique(array_map(fn($id) => positiveId($id, $name), listInput($value, $name))));
+    sort($ids, SORT_REGULAR);
+    return $ids;
+}
+
+function passwordInput(mixed $value, bool $allowEmpty = false): string
+{
+    if (!is_string($value) || (!$allowEmpty && $value === '') || textLength($value) > 200 || str_contains($value, "\0")) {
+        throw new ApiError(400, 'Passwort ist ungültig');
+    }
+    return $value;
+}
+
+function storedJson(mixed $value, bool $object = false): array|stdClass
+{
+    $decoded = $value === null ? ($object ? new stdClass() : []) : json_decode($value, false, 512, JSON_THROW_ON_ERROR);
+    if ($object ? !$decoded instanceof stdClass : !is_array($decoded)) {
+        throw new RuntimeException('Ungültiger gespeicherter JSON-Typ');
+    }
+    return $decoded;
 }
 
 function emailAddress(mixed $value): string

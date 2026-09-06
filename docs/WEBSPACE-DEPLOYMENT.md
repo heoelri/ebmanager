@@ -293,6 +293,31 @@ des neuen Codes nach Schreibzugriffen mit altem Code zunächst im Wartungsfenste
 neu laden lassen. Revisionen niemals auf 1 zurücksetzen und Migration 004
 nicht erneut ausführen.
 
+### JSON-Antworttypen und Eingabevalidierung umstellen (#92)
+
+Diese Änderung benötigt keine zusätzliche Migration und ändert keine
+gespeicherten Berichts- oder Stammdaten. Der
+[API-Vertrag](API.md) und der Browserclient ändern sich jedoch gemeinsam.
+
+1. Die bisherigen Anwendungsdateien und die Datenbank sichern. Andere
+   API-Clients anhand der Referenz auf native Listen/Objekte und die
+   dokumentierten Eingabeformen vorbereiten.
+2. Vor dem Codewechsel ein Wartungsfenster mit Schreibsperre sicherstellen.
+   Bei automatischem Deployment muss dies vor dem Merge nach `main` geschehen.
+   Die Sperre muss den Upload überleben; eine nur in der ausgelieferten
+   `.htaccess` eingerichtete Sperre wird vom bisherigen SFTP-Workflow
+   überschrieben. Offene, ungespeicherte Formulare vor dem Neuladen sichern.
+3. PHP- und Browserdateien desselben Releases vollständig gemeinsam
+   ausliefern. Keine Mischung aus altem und neuem API-Vertrag freigeben.
+4. `/api/bootstrap` aufrufen und Browser vollständig neu laden. Verwaltung,
+   vorhandene Einsatzberichte und deren Bearbeitungsdialoge sowie die
+   Fahrzeug-/Besatzungsansichten müssen die vorhandenen Werte unverändert
+   darstellen. Erst danach die Schreibsperre aufheben.
+
+Rollback auf den Stand unmittelbar vor #92: PHP- und Browserdateien gemeinsam
+im Wartungsfenster zurückspielen und Browser neu laden. Keine Tabellen oder
+Migrationsvermerke verändern; der Revisionsschutz aus #86 bleibt erhalten.
+
 ## 11. Rollback
 
 1. Vor jeder Aktualisierung eine Datenbanksicherung und eine Kopie der bisherigen Anwendungsdateien erstellen.
