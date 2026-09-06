@@ -1,5 +1,112 @@
 # Security Review
 
+## Revisionsschutz für Berichte vom 6. September 2026 (#86)
+
+Die Änderung schützt sensible Berichtsinhalte vor verlorenen parallelen
+Bearbeitungen und vor wiederholten Workflowaktionen nach einem vollständigen
+Statuszyklus. Monotone ganzzahlige Revisionen ersetzen dabei keine
+Berechtigungsprüfung: Mandant, Rolle, Autor und Einheitszuordnung werden weiter
+serverseitig geprüft. Einsatzrevision und Gesamttext werden nur der Wehrführung
+ausgegeben; sichtbare Einheitsberichte enthalten ausschließlich ihre eigene
+Revision. Geheimnisse und zusätzliche personenbezogene Daten werden nicht
+erfasst oder protokolliert.
+
+Bearbeitung, Erstellung, Workflow, Konsolidierung und Import sperren zuerst
+den Einsatz und danach Berichte. Die Versionsprüfung erfolgt unter diesen
+Sperren vor Text-/Besatzungs-/Fahrzeugänderungen oder Historienschreibzugriffen.
+Die Konsolidierung prüft neben dem Gesamtstand die vollständige Menge der
+geladenen Quellberichts-IDs und -Revisionen. Rückgaben, erneute Übergaben,
+neue Berichte, zusätzliche Einheiten und Neuimporte widerrufen alte Stände.
+Konflikte rollen vollständig zurück und lösen keine Workflow-Mail aus.
+DIVERA bleibt ausschließlich per GET lesend angebunden.
+
+Die unabhängige Nachprüfung fand einen Deadlock im ersten Revisionsstand:
+Der Vollabgleich hielt eine Mitgliedssperre und wartete auf den Einsatz,
+während eine Berichtsspeicherung den Einsatz hielt und für ihre Besatzung
+auf dasselbe Mitglied wartete. Der Vollabgleich führt deshalb jetzt alle
+Alarmimporte in stabiler DIVERA-ID-Reihenfolge **vor** dem Mitglieder- und
+Fahrzeugabgleich aus. Die vorhandenen Upserts sperren dabei auch gleichzeitig
+neu angelegte Einsätze; die Lösung verlässt sich nicht auf eine ungesicherte
+Bestandsliste. Ein Stammdatenfehler rollt weiterhin die gesamte Transaktion
+einschließlich Alarmimporten und Revisionserhöhungen zurück. Es werden keine
+Deadlocks abgefangen, als Erfolg ausgegeben oder pauschal wiederholt.
+
+Die neue Apache-Regression startet echte parallele API-Anfragen mit Besatzung
+und kontrollierter MySQL-Mitgliedssperre. Sie verlangt anhand konkreter
+Transaktions-, Sperr- und Datensatz-IDs die Warteketten auf `members.PRIMARY` und
+`incidents.PRIMARY`. Startet das Speichern zuerst, gelingen Speicherung und
+Vollabgleich; startet der Vollabgleich zuerst, erhält der veraltete Editor
+HTTP 409. Beide Reihenfolgen werden zusätzlich mit einer neuen
+Berichtserstellung geprüft, die jeweils erfolgreich bleibt. Eine weitere
+Warteprobe legt einen noch nicht sichtbaren Alarm parallel an: Während der
+Vollabgleich auf dessen eindeutigen Einsatzschlüssel wartet, kann ein Bericht
+zu einem anderen Einsatz mit demselben Mitglied erfolgreich entstehen.
+Damit deckt der Test auch die Lücke einer bloßen Vorabfrage bestehender
+Einsatz-IDs ab. Die Regression läuft im vorhandenen Apache-/HTTPS-Test;
+der lokale einzelne PHP-Testserver
+kann keine zwei HTTP-Anfragen gleichzeitig bearbeiten.
+
+Die CI-Nachprüfung reproduzierte unter MySQL 8.4.11 eine unzuverlässige
+Metadatenannahme im Test, keinen erneuten Laufzeit-Deadlock: Bei der Umwandlung
+einer impliziten Insertsperre konnte `BLOCKING_THREAD_ID` auf den wartenden
+Thread zeigen, obwohl `BLOCKING_ENGINE_TRANSACTION_ID` weiterhin korrekt den
+Einfüger bezeichnete. Ein offener Lese-Snapshot hielt zudem einen alten
+Indexeintrag zurück; dann wartete der Upsert auf dessen gemeinsame
+Duplikatprüfsperre statt auf eine exklusive Sperre des neuen Indexeintrags.
+
+Der Test bestimmt die eigene Transaktion deshalb über eine explizite
+Tabellenabsichtssperre und verfolgt danach die exakten InnoDB-Transaktions-
+und Sperr-IDs beider Seiten der Wartebeziehung. Er verlangt weiterhin
+wartende Datensatzsperren auf gehaltenen Sperren der bekannten Transaktion
+und der richtigen Tabelle/Indizes. Beim parallelen Insert berührt diese
+Transaktion nur den ausdrücklich geprüften Test-Einsatzschlüssel; der Test
+vergleicht dessen gerenderte zusammengesetzte `LOCK_DATA` nicht mehr mit
+einem fest kodierten Text. Die unabhängige Besatzungserstellung muss weiterhin
+vor Freigabe der Insertsperre erfolgreich sein. Zeitlimits bleiben unverändert.
+Fehlerdiagnosen enthalten nur Sperrmetadaten dieser Transaktion in der isolierten
+Testdatenbank, keine SQL-Texte, Zugangsdaten oder Berichtsinhalt.
+Die unveränderten fünf Parallelitätsszenarien liefen mit dieser Korrektur sowohl
+normal als auch mit einem separat offengehaltenen Lese-Snapshot erfolgreich.
+Danach bestand die vollständige Apache-/HTTPS-Smoke-Suite erneut mit einem
+frischen isolierten MySQL-8.4.11-Volume; Shellsyntax und `git diff --check`
+waren ebenfalls erfolgreich. Die Sperr- und Fachlogik der Anwendung wurde
+hierfür nicht geändert. Eine zusätzliche Review-Korrektur formuliert den
+HTTP-409-Hinweis kontextneutral für den geladenen Stand; Statuscode,
+Versionsprüfung und Erhalt ungespeicherter Eingaben bleiben unverändert.
+
+Der Browser bewahrt Texte, Rückgabekommentare und Ressourcenauswahl bei HTTP 409
+im geöffneten Formular; er lädt nicht automatisch nach und versendet keinen
+automatischen zweiten Versuch. Die Wiederherstellung ist ausdrücklich manuell.
+Sensible Entwürfe werden nicht in Local Storage oder weiteren Inhaltskopien
+persistiert.
+
+Die Regressionen prüfen zwei Bearbeiter einschließlich unveränderter
+Besatzung/Zusatzfahrzeuge, echte MySQL-Wartebeziehungen auf den primären
+Einsatzdatensatz, alle vier Workflowaktionen nach ABA-Zyklen, parallele
+Gesamttexte, veraltete Quellen trotz aktueller Einsatzrevision, Pflichtrevisionen,
+Import-/Zuordnungsinvalidierung und Bootstrap ohne neue Spalten.
+Der vorhandene Migrationscheck prüft Bestandsdaten und den Erhalt bereits
+erhöhter Revisionen bei wiederholten Läufen. Browserchecks prüfen die
+gesendeten Vorbedingungen und den Erhalt offener Formulare.
+
+Rollout-Voraussetzung ist Migration 004 vor gemeinsamem PHP-/Browserdeployment
+im Wartungsfenster; alter PHP-Code pflegt keine Revisionen. Die verbindlichen
+Schritte einschließlich Rollback stehen in `docs/WEBSPACE-DEPLOYMENT.md`.
+
+Validierung: PHP-8.2-Syntax, JavaScript-Syntax, `node test/frontend.mjs`,
+Shellsyntax und `git diff --check` sind erfolgreich. Der bestehende
+Migrationscheck lief in seinem frischen Compose-Projekt erfolgreich.
+Die vollständige Smoke-Suite lief sowohl gegen Apache/HTTPS als auch mit
+lokalen PHP-/SMTP-Testservern unter PHP 8.5 und MySQL 8.4 erfolgreich, jeweils
+mit neu angelegtem isoliertem Datenbankvolume. PHP-Assertions waren aktiviert;
+Produktivsysteme und bestehende Entwicklungsdatenbanken wurden nicht verwendet.
+
+Die Sperrreihenfolge-Nacharbeit wurde erneut mit der vollständigen
+Apache-/HTTPS-Smoke-Suite auf einem frischen isolierten MySQL-8.4-Volume
+erfolgreich geprüft, einschließlich aller fünf neuen Parallelitätsszenarien
+und Rücknahme bereits ausgeführter Importe bei einem Stammdatenfehler.
+PHP-8.2-Syntax, Shellsyntax und `git diff --check` waren ebenfalls erfolgreich.
+
 ## Einmallinks und konsolidierte Texte vom 6. September 2026
 
 Der erneute Vollreview bestätigte zwei vorbestehende Schwachstellen hoher

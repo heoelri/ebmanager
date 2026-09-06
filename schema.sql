@@ -80,6 +80,7 @@ CREATE TABLE incidents (
   caller TEXT NOT NULL,
   consolidated_text TEXT NOT NULL,
   consolidated_at DATETIME,
+  revision INT UNSIGNED NOT NULL DEFAULT 1,
   UNIQUE KEY incidents_org_divera (organization_id, divera_id),
   CONSTRAINT incidents_org_fk FOREIGN KEY (organization_id) REFERENCES organizations(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -175,6 +176,7 @@ CREATE TABLE reports (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   released_at DATETIME,
+  revision INT UNSIGNED NOT NULL DEFAULT 1,
   UNIQUE KEY reports_incident_unit (incident_id, unit_id),
   UNIQUE KEY reports_unit_year_number (unit_id, report_year, running_number),
   CONSTRAINT reports_incident_fk FOREIGN KEY (incident_id) REFERENCES incidents(id) ON DELETE CASCADE,
@@ -222,4 +224,5 @@ CREATE TABLE schema_migrations (
 INSERT INTO schema_migrations(name,applied_at) VALUES
   ('001-report-workflow-and-vehicles.sql',UTC_TIMESTAMP()),
   ('002-inactive-unit-members.sql',UTC_TIMESTAMP()),
-  ('003-report-additional-vehicles.sql',UTC_TIMESTAMP());
+  ('003-report-additional-vehicles.sql',UTC_TIMESTAMP()),
+  ('004-report-revisions.sql',UTC_TIMESTAMP());

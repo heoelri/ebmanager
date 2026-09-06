@@ -20,6 +20,37 @@ incident_status() {
   curl --insecure --silent --fail --cookie "$session_cookie=$1" "$base_url/api/incidents" |
     INCIDENT_ID="$2" php -r '$items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $matches=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID"))); assert(count($matches)===1); echo $matches[0]["reportStatus"]["key"];'
 }
+# Bearbeitungen verlangen genau einen sichtbaren Bericht und verwenden dessen zuvor geladene Revision.
+report_data() {
+  local payload=$1 token=${2:-$force_token} incident=${3:-$incident_id} report=${4:-$report_id}
+  curl --insecure --silent --fail --cookie "$session_cookie=$token" "$base_url/api/incidents/$incident/reports" |
+    REPORT_ID="$report" PAYLOAD="$payload" php -r '
+      $reports=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+      $matches=array_values(array_filter($reports,fn($row)=>$row["id"]===(int)getenv("REPORT_ID")));
+      if(count($matches)!==1) throw new RuntimeException("Genau ein sichtbarer Testbericht ist erforderlich");
+      $report=$matches[0];
+      assert(is_int($report["revision"]) && $report["revision"]>0);
+      $data=json_decode(getenv("PAYLOAD"),true,512,JSON_THROW_ON_ERROR);
+      $data["revision"]=$report["revision"];
+      echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);
+    '
+}
+# Die Konsolidierung verlangt genau einen sichtbaren Einsatz und bindet seinen Gesamtstand sowie sämtliche geladenen Quellberichte.
+consolidation_data() {
+  local text=$1 incident=${2:-$incident_id} snapshot reports
+  snapshot=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents")
+  reports=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$incident/reports")
+  SNAPSHOT="$snapshot" REPORTS="$reports" INCIDENT_ID="$incident" TEXT="$text" php -r '
+    $items=json_decode(getenv("SNAPSHOT"),true,512,JSON_THROW_ON_ERROR);
+    $matches=array_values(array_filter($items,fn($row)=>$row["id"]===(int)getenv("INCIDENT_ID")));
+    if(count($matches)!==1) throw new RuntimeException("Genau ein sichtbarer Testeinsatz ist erforderlich");
+    $incident=$matches[0];
+    assert(is_int($incident["revision"]) && $incident["revision"]>0);
+    $reports=json_decode(getenv("REPORTS"),true,512,JSON_THROW_ON_ERROR);
+    echo json_encode(["text"=>getenv("TEXT"),"revision"=>$incident["revision"],
+      "reportVersions"=>array_map(fn($row)=>["id"=>$row["id"],"revision"=>$row["revision"]],$reports)],JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);
+  '
+}
 assert_pdf() {
   local token=$1 path=$2 expected=$3 forbidden=${4:-}
   local body="${TMPDIR:-/tmp}/export-$$.pdf" headers="${TMPDIR:-/tmp}/export-$$.headers"
@@ -62,6 +93,25 @@ if mysql --help 2>&1 | grep -- '--ssl-mode' >/dev/null; then
 elif mysql --help 2>&1 | grep -- '--skip-ssl' >/dev/null; then
   mysql_tls_args=(--skip-ssl)
 fi
+
+# Revisionshelfer brechen bei fehlenden oder doppelten Treffern ab; genau ein Treffer liefert die erwarteten Vorbedingungen.
+(
+  session_token='test-helper'
+  curl() { printf '%s' "$fixture"; }
+  for fixture in '[]' '[{"id":7,"revision":3},{"id":7,"revision":4}]'; do
+    if report_data '{}' test-helper 7 7 >/dev/null 2>&1; then
+      echo "Berichtshelfer akzeptiert fehlende oder doppelte Treffer" >&2
+      exit 1
+    fi
+    if consolidation_data 'Test' 7 >/dev/null 2>&1; then
+      echo "Konsolidierungshelfer akzeptiert fehlende oder doppelte Treffer" >&2
+      exit 1
+    fi
+  done
+  fixture='[{"id":7,"revision":3}]'
+  test "$(report_data '{}' test-helper 7 7)" = '{"revision":3}'
+  test "$(consolidation_data 'Test' 7)" = '{"text":"Test","revision":3,"reportVersions":[{"id":7,"revision":3}]}'
+)
 
 # Fehlende Datenbankkonfiguration wird bei Root-, Unterverzeichnis- und authentifizierten Anfragen gemeldet.
 DB_DSN='' REQUEST_METHOD=GET REQUEST_URI=/api/bootstrap php api.php | grep --quiet '"error":"Datenbankzugang ist nicht konfiguriert'
@@ -253,6 +303,15 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' "$base_url/api/bootstrap")" = 503
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="ALTER TABLE member_units ADD COLUMN active BOOLEAN NOT NULL DEFAULT TRUE AFTER unit_id"
+
+# Fehlende Einsatz- oder Berichtsrevisionen werden schon beim Bootstrap als unvollständige Migration gemeldet.
+for revision_table in incidents reports; do
+  MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" einsatzberichte \
+    --execute="ALTER TABLE $revision_table DROP COLUMN revision"
+  test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' "$base_url/api/bootstrap")" = 503
+  MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" einsatzberichte \
+    --execute="ALTER TABLE $revision_table ADD COLUMN revision INT UNSIGNED NOT NULL DEFAULT 1"
+done
 
 # Führungskräfte ohne Wehrleitungsrolle dürfen weder Systemübersicht noch Nutzerverwaltung aufrufen.
 regular_token='dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
@@ -624,6 +683,83 @@ test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-characte
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT CONCAT(COALESCE(foreign_id,''),'|',COALESCE(divera_id,'')) FROM incidents WHERE id=$incident_id")" = '|'
 
+# Zwei geladene Editoren: Der erste speichert, der zweite darf weder Text noch Besatzung oder Zusatzfahrzeuge überschreiben.
+editor_one=$(report_data "$report_with_additional_vehicle")
+editor_two=$(report_data "${base_report_payload/Ursprünglich/Veralteter Text}")
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' \
+  --request PUT --data "$editor_one" "$base_url/api/reports/$report_id" >/dev/null
+saved_report=$(curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$incident_id/reports")
+EDITOR_ONE="$editor_one" SAVED_REPORT="$saved_report" php -r '
+  $loaded=json_decode(getenv("EDITOR_ONE"),true,512,JSON_THROW_ON_ERROR);
+  $saved=json_decode(getenv("SAVED_REPORT"),true,512,JSON_THROW_ON_ERROR)[0];
+  assert($saved["revision"]===$loaded["revision"]+1);
+  assert($saved["narrative"]==="Ursprünglich");
+  assert($saved["additionalVehicles"]===["Zusatzfahrzeug"]);
+  assert(json_decode($saved["crew"],true,512,JSON_THROW_ON_ERROR)[0]["memberId"]===100);
+'
+# Eine veraltete Berichtsrevision meldet HTTP 409 mit einem kontextneutralen Hinweis auf den geladenen Stand.
+test "$(curl --insecure --silent --write-out '|%{http_code}' --cookie "$session_cookie=$force_token" \
+  --header 'Content-Type: application/json' --request PUT --data "$editor_two" "$base_url/api/reports/$report_id")" = '{"error":"Der geladene Stand wurde inzwischen geändert."}|409'
+test "$(curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$incident_id/reports")" = "$saved_report"
+
+# Eine wartende Bearbeitung sperrt zuerst den Einsatz und prüft die Revision erst nach dem konkurrierenden Commit erneut.
+REPORT_ID="$report_id" INCIDENT_ID="$incident_id" COOKIE="$session_cookie=$force_token" \
+  PAYLOAD="$(report_data "$base_report_payload")" API_BASE_URL="$base_url" php -r '
+  require "support.php";
+  $reportId=(int)getenv("REPORT_ID");
+  $incidentId=(int)getenv("INCIDENT_ID");
+  db()->beginTransaction();
+  query("SELECT id FROM incidents WHERE id=? FOR UPDATE",[$incidentId]);
+  $process=proc_open(["curl","--insecure","--silent","--show-error","--max-time","15","--output","/dev/null","--write-out","%{http_code}",
+    "--cookie",getenv("COOKIE"),"--header","Content-Type: application/json","--request","PUT","--data",getenv("PAYLOAD"),
+    getenv("API_BASE_URL")."/api/reports/$reportId"],[0=>["pipe","r"],1=>["pipe","w"],2=>["pipe","w"]],$pipes);
+  if(!is_resource($process)) throw new RuntimeException("Parallele Bearbeitung konnte nicht gestartet werden");
+  fclose($pipes[0]);
+  try {
+    $waiting=null;
+    $deadline=microtime(true)+5;
+    while(microtime(true)<$deadline) {
+      $waiting=one("SELECT l.OBJECT_NAME AS table_name,l.INDEX_NAME AS index_name
+        FROM performance_schema.data_lock_waits w
+        JOIN performance_schema.data_locks l ON l.ENGINE=w.ENGINE AND l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+        JOIN performance_schema.threads t ON t.THREAD_ID=w.BLOCKING_THREAD_ID
+        WHERE t.PROCESSLIST_ID=CONNECTION_ID() AND l.OBJECT_SCHEMA=DATABASE()");
+      if($waiting) break;
+      usleep(100000);
+    }
+    if(!$waiting || $waiting["table_name"]!=="incidents" || $waiting["index_name"]!=="PRIMARY") throw new RuntimeException("Bearbeitung wartet nicht auf den primären Einsatzdatensatz");
+    query("UPDATE reports SET revision=revision+1 WHERE id=?",[$reportId]);
+    query("UPDATE incidents SET revision=revision+1 WHERE id=?",[$incidentId]);
+    db()->commit();
+    if(stream_get_contents($pipes[1])!=="409") throw new RuntimeException("Wartende Bearbeitung hat die veraltete Revision akzeptiert");
+    $saved=one("SELECT narrative,revision FROM reports WHERE id=?",[$reportId]);
+    $loaded=json_decode(getenv("PAYLOAD"),true,512,JSON_THROW_ON_ERROR);
+    assert($saved["narrative"]==="Ursprünglich" && (int)$saved["revision"]===$loaded["revision"]+1);
+    assert((int)query("SELECT COUNT(*) FROM report_crew WHERE report_id=?",[$reportId])->fetchColumn()===1);
+    assert((int)query("SELECT COUNT(*) FROM report_additional_vehicles WHERE report_id=?",[$reportId])->fetchColumn()===1);
+  } finally {
+    if(db()->inTransaction()) db()->rollBack();
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    proc_close($process);
+  }
+'
+saved_report=$(curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$incident_id/reports")
+
+# Fehlende und ungültige Revisionen werden vor jeder fachlichen Mutation abgewiesen.
+for invalid_revision in null 0 -1 1.5 true '"1"' '[]' '{}' 4294967296; do
+  invalid_payload=$(PAYLOAD="$report_with_additional_vehicle" REVISION="$invalid_revision" php -r '
+    $data=json_decode(getenv("PAYLOAD"),true,512,JSON_THROW_ON_ERROR);
+    $data["revision"]=json_decode(getenv("REVISION"),true,512,JSON_THROW_ON_ERROR);
+    echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);
+  ')
+  test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" \
+    --header 'Content-Type: application/json' --request PUT --data "$invalid_payload" "$base_url/api/reports/$report_id")" = 400
+done
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" \
+  --header 'Content-Type: application/json' --request PUT --data "$report_with_additional_vehicle" "$base_url/api/reports/$report_id")" = 400
+test "$(curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$incident_id/reports")" = "$saved_report"
+
 # Zusätzliche Fahrzeuge stammen aus dem aktuellen Stamm der Berichtseinheit, sind Besatzungsziele und für fremde Rollen sowie Einheiten gesperrt.
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT CONCAT((SELECT GROUP_CONCAT(vehicle) FROM report_additional_vehicles WHERE report_id=$report_id_int),'|',(SELECT vehicle FROM report_crew WHERE report_id=$report_id_int AND member_id=100))")" = 'Zusatzfahrzeug|Zusatzfahrzeug'
@@ -631,9 +767,10 @@ curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_u
   php -r '$reports=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($reports[0]["additionalVehicles"]===["Zusatzfahrzeug"]);'
 assert_pdf "$force_token" "/api/reports/$report_id/pdf" 'Zusätzliche Fahrzeuge: Zusatzfahrzeug|Zusatzfahrzeug | Maschinist: Person 100'
 foreign_vehicle_payload="${report_payload/\"crew\":[]/\"additionalVehicles\":[\"Fremdfahrzeug\"],\"crew\":[]}"
+# Eine aktuelle Revision umgeht nicht die Fremdfahrzeugprüfung.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
-  --data "$foreign_vehicle_payload" "$base_url/api/reports/$report_id")" = 400
+  --data "$(report_data "$foreign_vehicle_payload")" "$base_url/api/reports/$report_id")" = 400
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$other_force_token" --header 'Content-Type: application/json' --request PUT \
   --data "$report_with_additional_vehicle" "$base_url/api/reports/$report_id")" = 403
@@ -643,51 +780,58 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
   --execute="DELETE FROM vehicles WHERE unit_id=1 AND divera_id='manual-extra';
     INSERT INTO members(id,organization_id,divera_id,name) VALUES(99,1,'test-99','Person 99');
     INSERT INTO member_units(member_id,unit_id) VALUES(99,1)"
+# Die geladene Revision erlaubt den Erhalt der historischen Fahrzeugzuordnung.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
-  --data "$report_with_additional_vehicle" "$base_url/api/reports/$report_id")" = 200
+  --data "$(report_data "$report_with_additional_vehicle")" "$base_url/api/reports/$report_id")" = 200
 historical_new_assignment=$(printf '%s' "$report_with_additional_vehicle" | php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $data["crew"][0]["memberId"]=99; echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);')
+# Auch mit aktueller Revision bleibt eine neue historische Fahrzeugzuordnung unzulässig.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
-  --data "$historical_new_assignment" "$base_url/api/reports/$report_id")" = 400
+  --data "$(report_data "$historical_new_assignment")" "$base_url/api/reports/$report_id")" = 400
 
 # Ein zusätzliches Fahrzeug kann erst entfernt werden, nachdem seine Besatzung im selben Speichervorgang entfernt wurde.
 vehicle_removed_with_crew=$(printf '%s' "$report_with_additional_vehicle" | php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $data["additionalVehicles"]=[]; echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);')
+# Die aktuelle Revision ersetzt nicht die Prüfung verbliebener Besatzung.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
-  --data "$vehicle_removed_with_crew" "$base_url/api/reports/$report_id")" = 400
+  --data "$(report_data "$vehicle_removed_with_crew")" "$base_url/api/reports/$report_id")" = 400
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="DELETE FROM members WHERE id=99"
 
 # Wird das Zusatzfahrzeug später von DIVERA alarmiert, wird der doppelte Berichtseintrag beim Speichern entfernt, ohne die Besatzung zu blockieren.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE incident_units SET vehicles=JSON_ARRAY(JSON_OBJECT('id','manual-extra','name','Zusatzfahrzeug','own',TRUE)) WHERE incident_id=$incident_id AND unit_id=1"
+# Mit aktueller Revision kann das inzwischen alarmierte Zusatzfahrzeug bereinigt werden.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
-  --data "$report_with_additional_vehicle" "$base_url/api/reports/$report_id")" = 200
+  --data "$(report_data "$report_with_additional_vehicle")" "$base_url/api/reports/$report_id")" = 200
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT COUNT(*) FROM report_additional_vehicles WHERE report_id=$report_id_int")" = 0
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE incident_units SET vehicles=JSON_ARRAY() WHERE incident_id=$incident_id AND unit_id=1;
     INSERT INTO vehicles(unit_id,divera_id,name) VALUES(1,'manual-extra','Zusatzfahrzeug')"
+# Das erneut verfügbare Zusatzfahrzeug wird mit aktueller Revision gespeichert.
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
-  --data "$report_with_additional_vehicle" "$base_url/api/reports/$report_id" >/dev/null
+  --data "$(report_data "$report_with_additional_vehicle")" "$base_url/api/reports/$report_id" >/dev/null
 
 report_payload=$(printf '%s' "$base_report_payload" | php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $data["additionalVehicles"]=["Zusatzfahrzeug"]; echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);')
+# Eine aktuelle Bearbeitung darf die Besatzung entfernen und das Zusatzfahrzeug behalten.
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
-  --data "$report_payload" "$base_url/api/reports/$report_id" >/dev/null
+  --data "$(report_data "$report_payload")" "$base_url/api/reports/$report_id" >/dev/null
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="DELETE FROM members WHERE id=100"
 
 # Ausrücke- und Eintreffzeit können bei einem abgebrochenen Einsatz geleert werden.
 report_without_travel_times="${report_payload/\"departedAt\":\"2026-08-22T18:05:00.000Z\",\"arrivedAt\":\"2026-08-22T18:10:00.000Z\"/\"departedAt\":null,\"arrivedAt\":null}"
+# Auch das Leeren optionaler Zeiten verlangt die aktuelle Berichtsrevision.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" \
   --header 'Content-Type: application/json' \
   --request PUT \
-  --data "$report_without_travel_times" \
+  --data "$(report_data "$report_without_travel_times")" \
   "$base_url/api/reports/$report_id")" = 200
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT departed_at IS NULL AND arrived_at IS NULL FROM reports WHERE id=$report_id_int")" = 1
@@ -715,6 +859,16 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/incidents/900/pdf")" = 404
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/reports/900/pdf")" = 404
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/incidents/900/consolidation/pdf")" = 404
+
+# Versionsangaben eröffnen weder fremde Mandanten noch zusätzliche Rollenrechte auf schreibende Berichtswege.
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' --request PUT --data '{"revision":1}' "$base_url/api/reports/900")" = 404
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' --request POST --data '{"revision":1,"comment":"Unzulässig"}' "$base_url/api/reports/900/return-to-unit")" = 404
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' --request PUT --data '{"revision":1,"reportVersions":[{"id":900,"revision":1}],"text":"Unzulässig"}' "$base_url/api/incidents/900/consolidation")" = 404
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" \
+  --header 'Content-Type: application/json' --request PUT --data '{"revision":1,"reportVersions":[],"text":"Unzulässig"}' "$base_url/api/incidents/$incident_id/consolidation")" = 403
 
 # Besatzungsmitglieder werden unabhängig von der Einfügereihenfolge stabil sortiert ausgegeben.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
@@ -749,54 +903,77 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --request PUT \
   --data "${report_payload/Ursprünglich/Manipuliert}" \
   "$base_url/api/reports/$report_id")" = 403
+# Der Autor kann den Entwurf mit seiner geladenen Revision bearbeiten.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" \
   --header 'Content-Type: application/json' \
   --request PUT \
-  --data "${report_payload/Ursprünglich/Manipuliert}" \
+  --data "$(report_data "${report_payload/Ursprünglich/Manipuliert}")" \
   "$base_url/api/reports/$report_id")" = 200
+# Die erste Übergabe verwendet die nach dem Speichern neu geladene Revision.
+stale_author_submit=$(report_data '{}')
+stale_author_edit=$(report_data "${report_payload/Ursprünglich/Veralteter Autorenstand}")
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$force_token" \
   --header 'Content-Type: application/json' \
-  --request POST --data '{}' \
+  --request POST --data "$stale_author_submit" \
   "$base_url/api/reports/$report_id/submit-to-unit" >/dev/null
+# Ein bereits geöffneter Autoreneditor erhält auch nach einer Übergabe einen Konflikt statt den Prüfstand zu überschreiben.
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" \
+  --header 'Content-Type: application/json' --request PUT --data "$stale_author_edit" "$base_url/api/reports/$report_id")" = 409
 test "$(incident_status "$force_token" "$incident_id")" = submitted
 test "$(incident_status "$other_force_token" "$incident_id")" = report_exists
 test "$(incident_status "$leader_token" "$incident_id")" = review_required
 assert_pdf "$leader_token" "/api/reports/$report_id/pdf" 'Einzelbericht|Einheitsleitung Eins|Rolle: Einheitsführung|Manipuliert'
+# Auch mit aktueller Revision ist die wiederholte Übergabe im falschen Status ein Konflikt.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" \
   --header 'Content-Type: application/json' \
-  --request POST --data '{}' \
+  --request POST --data "$(report_data '{}')" \
   "$base_url/api/reports/$report_id/submit-to-unit")" = 409
+# Eine gültige Revision ersetzt nicht den Pflichtkommentar bei einer Rückgabe.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$leader_token" \
   --header 'Content-Type: application/json' \
-  --request POST --data '{}' \
+  --request POST --data "$(report_data '{}')" \
   "$base_url/api/reports/$report_id/return-to-author")" = 400
 
 # Die Rückgabe verlangt eine weiterhin bestehende Autorenzuordnung und bleibt in der Historie sichtbar.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="DELETE uu FROM user_units uu JOIN users u ON u.id=uu.user_id WHERE u.email='fuehrungskraft@example.test' AND uu.unit_id=1"
+# Die Einheitsführung kann trotz aktueller Revision nicht an einen nicht mehr zugeordneten Autor zurückgeben.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$leader_token" \
   --header 'Content-Type: application/json' \
-  --request POST --data '{"comment":"Bitte ergänzen"}' \
+  --request POST --data "$(report_data '{"comment":"Bitte ergänzen"}' "$leader_token")" \
   "$base_url/api/reports/$report_id/return-to-author")" = 409
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="INSERT INTO user_units(user_id,unit_id) SELECT id,1 FROM users WHERE email='fuehrungskraft@example.test'"
+# Nach Wiederherstellung der Zuordnung gelingt die Rückgabe mit aktueller Revision.
+stale_author_return=$(report_data '{"comment":"Bitte ergänzen"}')
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$leader_token" \
   --header 'Content-Type: application/json' \
-  --request POST --data '{"comment":"Bitte ergänzen"}' \
+  --request POST --data "$stale_author_return" \
   "$base_url/api/reports/$report_id/return-to-author" >/dev/null
 curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_url/api/incidents/$incident_id/reports" |
   php -r '$reports=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($reports[0]["status"]==="author_draft"); assert($reports[0]["editable"]===false); assert(end($reports[0]["history"])["comment"]==="Bitte ergänzen");'
+# Nach author_draft → unit_review → author_draft scheitert die alte Übergabe trotz identischem Status.
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" \
+  --header 'Content-Type: application/json' --request POST --data "$stale_author_submit" "$base_url/api/reports/$report_id/submit-to-unit")" = 409
+# Der Autor reicht die zurückgegebene neue Revision erneut ein.
 curl --insecure --silent --fail \
-  --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request POST --data '{}' \
+  --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request POST --data "$(report_data '{}')" \
   "$base_url/api/reports/$report_id/submit-to-unit" >/dev/null
+# Die alte Rückgabe an den Autor bleibt nach der erneuten Einreichung gesperrt; ohne Revision geht es ebenfalls nicht.
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$leader_token" \
+  --header 'Content-Type: application/json' --request POST --data "$stale_author_return" "$base_url/api/reports/$report_id/return-to-author")" = 409
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$leader_token" \
+  --header 'Content-Type: application/json' --request POST --data '{}' "$base_url/api/reports/$report_id/submit-to-command")" = 400
+# Die Einheitsführung übergibt genau den geladenen Berichtsstand an die Wehrführung.
+stale_command_submit=$(report_data '{}')
 curl --insecure --silent --fail \
-  --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request POST --data '{}' \
+  --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request POST --data "$stale_command_submit" \
   "$base_url/api/reports/$report_id/submit-to-command" >/dev/null
 
 # In der Wehrführungsprüfung ist der Bericht für frühere Prüfstufen unveränderlich und nur noch lesbar.
@@ -821,9 +998,22 @@ curl --insecure --silent --fail \
   "$base_url/api/incidents/$incident_id/reports" >/dev/null
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
   INCIDENT_ID="$incident_id" php -r '$items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $incident=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")))[0]; assert($incident["reportStatus"]["key"]==="ready");'
+# Zwei Wehrführungseditoren dürfen einen neueren Gesamttext nicht mit derselben geladenen Revision überschreiben.
+stale_consolidation=$(consolidation_data 'Veralteter Gesamttext')
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request PUT \
-  --data '{"text":"Konsolidiert: Nicht freigegebene Angaben der anderen Einheit"}' "$base_url/api/incidents/$incident_id/consolidation" >/dev/null
+  --data "$(consolidation_data 'Konsolidiert: Nicht freigegebene Angaben der anderen Einheit')" "$base_url/api/incidents/$incident_id/consolidation" >/dev/null
+saved_consolidation=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents")
+# Derselbe Konflikthinweis passt auch zu einer veralteten Einsatz-/Gesamtstandsrevision und erhält HTTP 409.
+test "$(curl --insecure --silent --write-out '|%{http_code}' --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' --request PUT --data "$stale_consolidation" "$base_url/api/incidents/$incident_id/consolidation")" = '{"error":"Der geladene Stand wurde inzwischen geändert."}|409'
+test "$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents")" = "$saved_consolidation"
+# Die Quellenrevisionen sind zusätzlich zur Gesamtstandsrevision verpflichtend.
+missing_sources=$(consolidation_data 'Ohne Quellen' | php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); unset($data["reportVersions"]); echo json_encode($data,JSON_THROW_ON_ERROR);')
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' --request PUT --data "$missing_sources" "$base_url/api/incidents/$incident_id/consolidation")" = 400
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' --request PUT --data '{"text":"Ohne Revision"}' "$base_url/api/incidents/$incident_id/consolidation")" = 400
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE incidents SET consolidated_at='2026-08-24 09:00:00' WHERE id=$incident_id"
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
@@ -834,9 +1024,14 @@ assert_pdf "$session_token" "/api/incidents/$incident_id/consolidation/pdf" 'Abg
 assert_consolidated_visibility "$incident_id"
 
 # Eine Rückgabe durch die Wehrführung invalidiert die Konsolidierung bis zur erneuten Übergabe.
+stale_command_return=$(report_data '{"comment":"Bitte durch die Einheit prüfen"}')
+before_return_consolidation=$(consolidation_data 'Veraltete Quellen')
 curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
-  --data '{"comment":"Bitte durch die Einheit prüfen"}' "$base_url/api/reports/$report_id/return-to-unit" >/dev/null
+  --data "$stale_command_return" "$base_url/api/reports/$report_id/return-to-unit" >/dev/null
+# Nach unit_review → wehr_review → unit_review ist die alte Übergabe ohne jede Mutation ein Konflikt.
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$leader_token" \
+  --header 'Content-Type: application/json' --request POST --data "$stale_command_submit" "$base_url/api/reports/$report_id/submit-to-command")" = 409
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
   INCIDENT_ID="$incident_id" php -r '$items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $incident=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")))[0]; assert($incident["reportStatus"]["key"]==="reports_pending"); assert($incident["reportStatus"]["pendingUnits"]===["Löschzug"]);'
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$incident_id/consolidation/pdf")" = 409
@@ -849,10 +1044,30 @@ assert_consolidated_visibility "$incident_id"
 # Solange der zurückgegebene Bericht noch nicht erneut freigegeben wurde, bleibt die Konsolidierung gesperrt.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request PUT \
-  --data '{"text":"Zu früh"}' "$base_url/api/incidents/$incident_id/consolidation")" = 409
+  --data "$(consolidation_data 'Zu früh')" "$base_url/api/incidents/$incident_id/consolidation")" = 409
+# Die Einheitsführung überarbeitet die zurückgegebene Quelle; ein alter Gesamtstand darf diese Änderung nicht übergehen.
+curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request PUT \
+  --data "$(report_data "${report_payload/Ursprünglich/Manipuliert – neue Quellenfassung}" "$leader_token")" "$base_url/api/reports/$report_id" >/dev/null
+# Erst die aktuelle Berichtsrevision darf wieder an die Wehrführung übergeben werden.
 curl --insecure --silent --fail \
-  --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request POST --data '{}' \
+  --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request POST --data "$(report_data '{}')" \
   "$base_url/api/reports/$report_id/submit-to-command" >/dev/null
+
+# Auch die alte Wehrführungsrückgabe scheitert nach einem vollständigen ABA-Zyklus.
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' --request POST --data "$stale_command_return" "$base_url/api/reports/$report_id/return-to-unit")" = 409
+# Weder alte Gesamtstände noch alte Quellen mit einer nachgeladenen Gesamtstandsrevision dürfen konsolidieren.
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' --request PUT --data "$before_return_consolidation" "$base_url/api/incidents/$incident_id/consolidation")" = 409
+mixed_consolidation=$(consolidation_data 'Veraltete Quellen' | OLD="$before_return_consolidation" php -r '
+  $current=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+  $old=json_decode(getenv("OLD"),true,512,JSON_THROW_ON_ERROR);
+  $current["reportVersions"]=$old["reportVersions"];
+  echo json_encode($current,JSON_THROW_ON_ERROR);
+')
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' --request PUT --data "$mixed_consolidation" "$base_url/api/incidents/$incident_id/consolidation")" = 409
+assert_consolidated_visibility "$incident_id"
 
 # Frühere Prüfstufen behalten nach Rückgabe und erneuter Übergabe ihre Leserechte.
 for previous_reviewer_token in "$force_token" "$leader_token"; do
@@ -884,20 +1099,23 @@ notification_report_response=$(curl --insecure --silent --fail \
   --data "$notification_report_payload" \
   "$base_url/api/incidents/$notification_incident_id/reports")
 notification_report_id=$(printf '%s' "$notification_report_response" | php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
+# Benachrichtigungen werden erst nach einer erfolgreichen revisionierten Übergabe versendet.
 notification_submit_response=$(curl --insecure --silent --fail \
   --cookie "$session_cookie=$force_token" \
   --header 'Content-Type: application/json' \
-  --request POST --data '{}' \
+  --request POST --data "$(report_data '{}' "$force_token" "$notification_incident_id" "$notification_report_id")" \
   "$base_url/api/reports/$notification_report_id/submit-to-unit")
+# Auch die Wehrführungsübergabe verwendet die aktuelle Revision.
 notification_command_response=$(curl --insecure --silent --fail \
   --cookie "$session_cookie=$leader_token" \
   --header 'Content-Type: application/json' \
-  --request POST --data '{}' \
+  --request POST --data "$(report_data '{}' "$force_token" "$notification_incident_id" "$notification_report_id")" \
   "$base_url/api/reports/$notification_report_id/submit-to-command")
+# Eine kommentierte Rückgabe mit aktueller Revision benachrichtigt die zuständige Einheitsführung.
 notification_return_response=$(curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" \
   --header 'Content-Type: application/json' \
-  --request POST --data '{"comment":"Rückfrage"}' \
+  --request POST --data "$(report_data '{"comment":"Rückfrage"}' "$force_token" "$notification_incident_id" "$notification_report_id")" \
   "$base_url/api/reports/$notification_report_id/return-to-unit")
 if [[ -z "${TEST_BASE_URL:-}" ]]; then
   printf '%s\n%s\n%s\n%s\n%s\n' "$notification_incident_response" "$notification_report_response" "$notification_submit_response" "$notification_command_response" "$notification_return_response" |
@@ -1004,6 +1222,9 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
   --execute="DELETE FROM units WHERE organization_id=1 AND name='Dritte Einheit'"
 
 # Eine nachträglich importierte Einheitenzuordnung invalidiert einen bestehenden Gesamtbericht.
+imported_incident_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT id FROM incidents WHERE organization_id=1 AND divera_id='alarm-1'")
+before_assignment=$(consolidation_data 'Vor zusätzlicher Einheit' "$imported_incident_id")
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE incidents SET consolidated_at=UTC_TIMESTAMP() WHERE divera_id='alarm-1'"
 curl --insecure --silent --fail \
@@ -1014,6 +1235,42 @@ curl --insecure --silent --fail \
   --data '{"id":"alarm-1"}' "$base_url/api/units/$second_unit_id/divera/import" >/dev/null
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT consolidated_at IS NULL FROM incidents WHERE divera_id='alarm-1'")" = 1
+# Die zusätzliche Zuordnung erhöht die Einsatzrevision genau einmal.
+after_assignment=$(consolidation_data 'Nach zusätzlicher Einheit' "$imported_incident_id")
+BEFORE="$before_assignment" AFTER="$after_assignment" php -r '
+  $before=json_decode(getenv("BEFORE"),true,512,JSON_THROW_ON_ERROR);
+  $after=json_decode(getenv("AFTER"),true,512,JSON_THROW_ON_ERROR);
+  assert($after["revision"]===$before["revision"]+1);
+'
+# Der alte Gesamtstand bleibt nach einer zusätzlichen Einheitenzuordnung ungültig, auch bevor deren Bericht existiert.
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' --request PUT --data "$before_assignment" "$base_url/api/incidents/$imported_incident_id/consolidation")" = 409
+
+# Ein bestehender Bericht erhält durch jeden Neuimport neue Quellen- und Berichtsrevisionen, ohne seinen Inhalt zu ersetzen.
+import_report_payload="${base_report_payload/69\/2026/86\/2026}"
+imported_report_id=$(curl --insecure --silent --fail --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' \
+  --data "$import_report_payload" "$base_url/api/incidents/$imported_incident_id/reports" |
+  php -r 'echo json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR)["id"];')
+before_import=$(report_data "$import_report_payload" "$force_token" "$imported_incident_id" "$imported_report_id")
+before_import_consolidation=$(consolidation_data 'Vor Neuimport' "$imported_incident_id")
+BEFORE="$after_assignment" AFTER="$before_import_consolidation" REPORT="$before_import" php -r '
+  $before=json_decode(getenv("BEFORE"),true,512,JSON_THROW_ON_ERROR);
+  $after=json_decode(getenv("AFTER"),true,512,JSON_THROW_ON_ERROR);
+  $report=json_decode(getenv("REPORT"),true,512,JSON_THROW_ON_ERROR);
+  assert($report["revision"]===1 && $after["revision"]===$before["revision"]+1);
+'
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' \
+  --data '{"id":"alarm-1"}' "$base_url/api/units/1/divera/import" >/dev/null
+after_import=$(report_data "$import_report_payload" "$force_token" "$imported_incident_id" "$imported_report_id")
+BEFORE="$before_import" AFTER="$after_import" php -r '
+  $before=json_decode(getenv("BEFORE"),true,512,JSON_THROW_ON_ERROR);
+  $after=json_decode(getenv("AFTER"),true,512,JSON_THROW_ON_ERROR);
+  assert($after["revision"]===$before["revision"]+1);
+'
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" \
+  --header 'Content-Type: application/json' --request PUT --data "$before_import" "$base_url/api/reports/$imported_report_id")" = 409
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' --request PUT --data "$before_import_consolidation" "$base_url/api/incidents/$imported_incident_id/consolidation")" = 409
 
 # Der Gesamtabgleich lädt jede Quelle einmal, ersetzt Stammdaten und importiert alle Einsätze idempotent.
 : > "$divera_log"
@@ -1021,6 +1278,9 @@ sync_response=$(curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
   "$base_url/api/units/1/divera/sync")
 printf '%s' "$sync_response" | php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($data["members"]===2); assert($data["qualifications"]===2); assert($data["vehicles"]===2); assert($data["incidentsCreated"]===1); assert($data["incidentsUpdated"]===1); assert($data["assignmentsCreated"]===1);'
+# Auch der Gesamtabgleich widerruft die vor ihm geladene Berichtsrevision.
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" \
+  --header 'Content-Type: application/json' --request PUT --data "$after_import" "$base_url/api/reports/$imported_report_id")" = 409
 test "$(grep --count '^GET /api/v2/pull/all$' "$divera_log")" = 1
 test "$(grep --count '^GET /api/v2/alarms$' "$divera_log")" = 1
 ! grep --extended-regexp --quiet '^(POST|PUT|PATCH|DELETE) ' "$divera_log"
@@ -1040,7 +1300,182 @@ test "$(grep --count '^GET /api/v2/alarms$' "$divera_log")" = 1
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT COUNT(*) FROM report_additional_vehicles WHERE report_id=$report_id_int AND vehicle='Zusatzfahrzeug'")" = 1
 
+# Apache kann zwei API-Anfragen gleichzeitig bearbeiten; der lokale PHP-Einzelprozess kann dies nicht.
+# Gesamtabgleich und Berichte mit echter Besatzung warten in beiden Startreihenfolgen ohne Deadlock auf Einsatz-/Mitgliedssperren.
+# Die Zuordnung folgt InnoDB-Transaktions- und Sperr-IDs, nicht der Thread-/Schlüsseldarstellung impliziter Insertsperren.
+if [[ -n "${TEST_BASE_URL:-}" ]]; then
+  REPORT_ID="$imported_report_id" INCIDENT_ID="$imported_incident_id" REPORT_PAYLOAD="$import_report_payload" \
+    UNRELATED_INCIDENT_ID="$duplicate_incident_id" FORCE_COOKIE="$session_cookie=$force_token" \
+    COMMAND_COOKIE="$session_cookie=$session_token" API_BASE_URL="$base_url" php -r '
+    require "support.php";
+    $memberId=(int)one("SELECT id FROM members WHERE organization_id=1 AND divera_id=?",["m1"])["id"];
+    $creationIncidentId=(int)one("SELECT id FROM incidents WHERE organization_id=1 AND divera_id=?",["alarm-2"])["id"];
+    $start=function(string $path, array $payload, string $cookie, string $method): array {
+      $process=proc_open(["curl","--insecure","--silent","--show-error","--max-time","20",
+        "--write-out","\n%{http_code}","--cookie",$cookie,"--header","Content-Type: application/json",
+        "--request",$method,"--data",json_encode($payload,JSON_THROW_ON_ERROR),getenv("API_BASE_URL").$path],
+        [0=>["pipe","r"],1=>["pipe","w"],2=>["pipe","w"]],$pipes);
+      if(!is_resource($process)) throw new RuntimeException("Parallele Anfrage konnte nicht gestartet werden");
+      fclose($pipes[0]);
+      return ["process"=>$process,"pipes"=>$pipes];
+    };
+    // Explicit table intention locks reliably identify the owner, unlike converted implicit record locks.
+    $ownTransaction=function(): string {
+      $lock=one("SELECT l.ENGINE_TRANSACTION_ID AS transaction_id
+        FROM performance_schema.data_locks l JOIN performance_schema.threads t ON t.THREAD_ID=l.THREAD_ID
+        WHERE t.PROCESSLIST_ID=CONNECTION_ID() AND l.OBJECT_SCHEMA=DATABASE()
+          AND l.LOCK_TYPE=? AND l.LOCK_MODE=? AND l.LOCK_STATUS=? LIMIT 1",["TABLE","IX","GRANTED"]);
+      if(!$lock) throw new RuntimeException("Explizite Tabellensperre der Testtransaktion fehlt");
+      return (string)$lock["transaction_id"];
+    };
+    $lockWaits=function(string $blockingTransaction): array {
+      return query("SELECT w.REQUESTING_ENGINE_TRANSACTION_ID AS requesting_trx,w.BLOCKING_ENGINE_TRANSACTION_ID AS blocking_trx,
+        w.BLOCKING_THREAD_ID AS reported_blocking_thread,
+        l.ENGINE_LOCK_ID AS requested_lock,l.OBJECT_NAME AS requested_table,l.INDEX_NAME AS requested_index,
+        l.LOCK_TYPE AS requested_type,l.LOCK_STATUS AS requested_status,l.LOCK_MODE AS requested_mode,l.LOCK_DATA AS requested_key,
+        held.ENGINE_LOCK_ID AS held_lock,held.OBJECT_NAME AS held_table,held.INDEX_NAME AS held_index,
+        held.LOCK_TYPE AS held_type,held.LOCK_STATUS AS held_status,held.LOCK_MODE AS held_mode,held.LOCK_DATA AS held_key
+        FROM performance_schema.data_lock_waits w
+        JOIN performance_schema.data_locks l ON l.ENGINE=w.ENGINE AND l.ENGINE_LOCK_ID=w.REQUESTING_ENGINE_LOCK_ID
+          AND l.ENGINE_TRANSACTION_ID=w.REQUESTING_ENGINE_TRANSACTION_ID
+        JOIN performance_schema.data_locks held ON held.ENGINE=w.ENGINE AND held.ENGINE_LOCK_ID=w.BLOCKING_ENGINE_LOCK_ID
+          AND held.ENGINE_TRANSACTION_ID=w.BLOCKING_ENGINE_TRANSACTION_ID
+        WHERE w.BLOCKING_ENGINE_TRANSACTION_ID=? AND l.OBJECT_SCHEMA=DATABASE() AND held.OBJECT_SCHEMA=DATABASE()",
+        [$blockingTransaction])->fetchAll();
+    };
+    $wait=function(string $blockingTransaction, string $table, int $rowId, bool $inserted=false) use ($lockWaits,$ownTransaction): string {
+      if($inserted) {
+        assert($blockingTransaction===$ownTransaction());
+        assert($table==="incidents" && (int)query("SELECT COUNT(*) FROM incidents WHERE id=? AND organization_id=1 AND divera_id=?",
+          [$rowId,"alarm-2"])->fetchColumn()===1);
+      }
+      $deadline=microtime(true)+5;
+      $observed=[];
+      while(microtime(true)<$deadline) {
+        $observed=$lockWaits($blockingTransaction);
+        foreach($observed as $waiting) {
+          if($waiting["requested_table"]!==$table || $waiting["held_table"]!==$table
+            || $waiting["requested_index"]!==$waiting["held_index"]
+            || $waiting["requested_type"]!=="RECORD" || $waiting["held_type"]!=="RECORD"
+            || $waiting["requested_status"]!=="WAITING" || $waiting["held_status"]!=="GRANTED"
+            || !in_array($waiting["held_mode"],$inserted ? ["S","S,REC_NOT_GAP","X","X,REC_NOT_GAP"] : ["X","X,REC_NOT_GAP"],true)) continue;
+          // Only this incident key is inserted: duplicate checks may hold S on its delete-marked predecessor.
+          if($inserted
+            ? (in_array($waiting["held_index"],["PRIMARY","incidents_org_divera"],true)
+              && in_array($waiting["requested_mode"],["X","X,REC_NOT_GAP"],true))
+            : ($waiting["held_index"]==="PRIMARY" && $waiting["held_key"]===(string)$rowId)) {
+            return (string)$waiting["requesting_trx"];
+          }
+        }
+        usleep(50000);
+      }
+      fwrite(STDERR,"Sperrdiagnose der Testtransaktion $blockingTransaction: ".json_encode($observed,JSON_THROW_ON_ERROR)."\n");
+      throw new RuntimeException("Erwartete Wartebeziehung auf $table für Testdatensatz $rowId fehlt");
+    };
+    $finish=function(array $request, int $expected): array {
+      $output=stream_get_contents($request["pipes"][1]);
+      $error=stream_get_contents($request["pipes"][2]);
+      fclose($request["pipes"][1]);
+      fclose($request["pipes"][2]);
+      $exit=proc_close($request["process"]);
+      if($exit!==0 || substr($output,-3)!==(string)$expected) {
+        throw new RuntimeException("Parallele Anfrage: erwartet HTTP $expected, erhalten ".substr($output,-3).", curl=$exit $error");
+      }
+      return json_decode(substr($output,0,-4),true,512,JSON_THROW_ON_ERROR);
+    };
+    foreach(["save","create"] as $action) foreach(["report","sync"] as $first) {
+      $incidentId=$action==="save" ? (int)getenv("INCIDENT_ID") : $creationIncidentId;
+      $reportId=(int)getenv("REPORT_ID");
+      $before=one("SELECT narrative,revision FROM reports WHERE id=?",[$reportId]);
+      $payload=json_decode(getenv("REPORT_PAYLOAD"),true,512,JSON_THROW_ON_ERROR);
+      $payload["narrative"]="Parallel geprüft: $action/$first";
+      $payload["crew"]=[["memberId"=>$memberId,"vehicle"=>"","role"=>"besatzung"]];
+      if($action==="save") {
+        $payload["revision"]=(int)$before["revision"];
+        $path="/api/reports/$reportId";
+      } else {
+        $payload["runningNumber"]="87/2026";
+        $payload["departedAt"]=$payload["arrivedAt"]=null;
+        $payload["endedAt"]="2026-08-22T21:00:00.000Z";
+        $path="/api/incidents/$incidentId/reports";
+      }
+      $requests=[];
+      db()->beginTransaction();
+      query("SELECT id FROM members WHERE id=? FOR UPDATE",[$memberId]);
+      $blockingTransaction=$ownTransaction();
+      try {
+        $reportRequest=fn()=>$start($path,$payload,getenv("FORCE_COOKIE"),$action==="save" ? "PUT" : "POST");
+        $syncRequest=fn()=>$start("/api/units/1/divera/sync",[],getenv("COMMAND_COOKIE"),"POST");
+        $requests[$first]=$first==="report" ? $reportRequest() : $syncRequest();
+        $firstTransaction=$wait($blockingTransaction,"members",$memberId);
+        $second=$first==="report" ? "sync" : "report";
+        $requests[$second]=$second==="report" ? $reportRequest() : $syncRequest();
+        $wait($firstTransaction,"incidents",$incidentId);
+        db()->commit();
+        $expected=$action==="create" ? 201 : ($first==="report" ? 200 : 409);
+        $saved=$finish($requests["report"],$expected);
+        unset($requests["report"]);
+        $synced=$finish($requests["sync"],200);
+        unset($requests["sync"]);
+        assert($synced["incidentsUpdated"]===2 && $synced["incidentsCreated"]===0);
+        if($action==="create") $reportId=(int)$saved["id"];
+        $stored=one("SELECT narrative,revision FROM reports WHERE id=?",[$reportId]);
+        $expectedNarrative=$expected===409 ? $before["narrative"] : $payload["narrative"];
+        $expectedRevision=$action==="create" ? ($first==="report" ? 2 : 1) : (int)$before["revision"]+($first==="report" ? 2 : 1);
+        assert($stored["narrative"]===$expectedNarrative && (int)$stored["revision"]===$expectedRevision);
+        assert((int)query("SELECT COUNT(*) FROM report_crew WHERE report_id=? AND member_id=? AND vehicle=? AND role=?",
+          [$reportId,$memberId,"","besatzung"])->fetchColumn()===1);
+        if($action==="create") query("DELETE FROM reports WHERE id=? AND incident_id=?",[$reportId,$incidentId]);
+      } finally {
+        if(db()->inTransaction()) db()->rollBack();
+        foreach($requests as $request) {
+          if(is_resource($request["process"])) proc_terminate($request["process"]);
+          foreach($request["pipes"] as $pipe) if(is_resource($pipe)) fclose($pipe);
+          if(is_resource($request["process"])) proc_close($request["process"]);
+        }
+      }
+    }
+
+    // Ein gleichzeitig angelegter Alarm muss vor Mitgliedern gesperrt werden, auch wenn er in einer Bestandsabfrage noch fehlt.
+    assert((int)query("SELECT COUNT(*) FROM reports WHERE incident_id=?",[$creationIncidentId])->fetchColumn()===0);
+    query("DELETE FROM incidents WHERE id=? AND organization_id=1",[$creationIncidentId]);
+    db()->beginTransaction();
+    query("INSERT INTO incidents(organization_id,divera_id,title,started_at,message,remark,patient,caller,consolidated_text)
+      VALUES(1,?,?,?,?,?,?,?,?)",["alarm-2","Paralleler Import","2026-08-22T19:00:00.000Z","","","","",""]);
+    $createdIncidentId=(int)db()->lastInsertId();
+    query("INSERT INTO incident_units(incident_id,unit_id,vehicles) VALUES(?,1,?)",[$createdIncidentId,"[]"]);
+    $blockingTransaction=$ownTransaction();
+    $requests=[];
+    try {
+      $requests["sync"]=$start("/api/units/1/divera/sync",[],getenv("COMMAND_COOKIE"),"POST");
+      $wait($blockingTransaction,"incidents",$createdIncidentId,true);
+      $payload["runningNumber"]="88/2026";
+      $payload["narrative"]="Bericht während paralleler Alarmanlage";
+      unset($payload["revision"]);
+      $unrelatedIncidentId=(int)getenv("UNRELATED_INCIDENT_ID");
+      $requests["report"]=$start("/api/incidents/$unrelatedIncidentId/reports",$payload,getenv("FORCE_COOKIE"),"POST");
+      $created=$finish($requests["report"],201);
+      unset($requests["report"]);
+      $wait($blockingTransaction,"incidents",$createdIncidentId,true);
+      db()->commit();
+      $synced=$finish($requests["sync"],200);
+      unset($requests["sync"]);
+      assert($synced["incidentsUpdated"]===2 && $synced["incidentsCreated"]===0);
+      assert((int)query("SELECT COUNT(*) FROM report_crew WHERE report_id=? AND member_id=?",[$created["id"],$memberId])->fetchColumn()===1);
+      query("DELETE FROM reports WHERE id=? AND incident_id=?",[$created["id"],$unrelatedIncidentId]);
+    } finally {
+      if(db()->inTransaction()) db()->rollBack();
+      foreach($requests as $request) {
+        if(is_resource($request["process"])) proc_terminate($request["process"]);
+        foreach($request["pipes"] as $pipe) if(is_resource($pipe)) fclose($pipe);
+        if(is_resource($request["process"])) proc_close($request["process"]);
+      }
+    }
+  '
+fi
+
 # Fehlerhafte DIVERA-Antworten brechen den Abgleich ab, ohne bestehende Stammdaten zu verändern.
+before_failed_sync=$(consolidation_data 'Unverändert' "$imported_incident_id")
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE units SET divera_access_key='malformed' WHERE id=1"
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
@@ -1048,6 +1483,8 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   "$base_url/api/units/1/divera/sync")" = 502
 test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT CONCAT((SELECT COUNT(*) FROM vehicles WHERE unit_id=1),'|',(SELECT COUNT(*) FROM member_units WHERE unit_id=1))")" = '2|4'
+# Auch die bereits vor den Stammdaten ausgeführten Importe und Revisionserhöhungen werden bei einem Abgleichfehler zurückgerollt.
+test "$(consolidation_data 'Unverändert' "$imported_incident_id")" = "$before_failed_sync"
 
 # Nicht mehr gelieferte Mitglieder werden inaktiv, bleiben in historischen Berichten und sind nicht neu auswählbar.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
@@ -1072,9 +1509,10 @@ inactive_member_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --def
 inactive_reassignment="${report_without_travel_times/\"crew\":[]/\"crew\":[{\"memberId\":$inactive_member_id,\"vehicle\":\"HLF 20\",\"role\":\"besatzung\"}]}"
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE reports SET status='unit_review' WHERE id=$report_id_int"
+# Die aktuelle Revision erlaubt keine manipulierte Umordnung eines inaktiven Mitglieds.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request PUT \
-  --data "$inactive_reassignment" "$base_url/api/reports/$report_id")" = 400
+  --data "$(report_data "$inactive_reassignment")" "$base_url/api/reports/$report_id")" = 400
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE reports SET status='wehr_review' WHERE id=$report_id_int"
 

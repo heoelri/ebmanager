@@ -72,6 +72,7 @@
 - Frühere Prüfstufen behalten nach einer Rückgabe Leserechte. Bearbeiten darf nur der ursprüngliche Autor in `author_draft` beziehungsweise die zuständige Einheitsführung in `unit_review`; in `wehr_review` ist der Einheitsbericht unveränderlich.
 - Eine Rückgabe durch die Wehrführung oder die nachträgliche Zuordnung einer weiteren Einheit leert `incidents.consolidated_at`, erhält den bisherigen Text aber als Arbeitsstand. Wiederholte oder veraltete Statusübergänge liefern HTTP 409.
 - Die Wehrführung darf erst konsolidieren, wenn jede alarmierte Einheit einen Bericht in `wehr_review` hat. Führungskräfte sehen nach dem Absenden dessen Zeitpunkt, den aktuellen Status und einen ausdrücklichen Nur-Lese-Hinweis.
+- `reports.revision` schützt Bearbeitungen und alle Workflowaktionen; `incidents.revision` schützt den Gesamtstand einschließlich Quellberichte und Zuordnungen. Schreibende Clients müssen ihre geladenen Revisionen mitsenden, bei Konsolidierung zusätzlich alle Quellberichts-IDs und -Revisionen. Alle beteiligten Schreibpfade sperren zuerst den Einsatz, dann die Berichte und erhöhen die betroffenen Revisionen atomar; Neuimporte erhöhen auch bei gleichen Quelldaten die Einsatz- und Berichtsrevisionen. Veraltete Vorbedingungen liefern HTTP 409 ohne Änderungen. Der Browser bewahrt ungespeicherte Eingaben im offenen Formular, ohne automatisches Neuladen, Wiederholen oder persistente Inhaltskopien.
 - `patient`, `caller`, Geschädigte, Schädiger und Berichtstexte sind sensible, mandantengebundene Einsatzdaten. Protokolliere sie nicht.
 - Die erste Statistikansicht ist ausschließlich für Einheitsführungen verfügbar und aggregiert nur deren aktuell zugeordnete Einheit. Alarmierte Fahrzeuge der eigenen Einheit stammen aus `incident_units.vehicles`; dort als fremd markierte Fahrzeuge werden nicht gezählt. Tatsächliche Beteiligung stammt aus `report_crew` und zusätzliche Fahrzeuge aus `report_additional_vehicles`; Zeitkategorien werden mit den Grenzen aus `constants.php` in `Europe/Berlin` berechnet.
 
@@ -102,6 +103,7 @@
 - Ein DIVERA-Einsatz ist innerhalb einer Organisation über `divera_id` eindeutig. Wiederholter Import aktualisiert Einsatz und `incident_units`, statt sie zu duplizieren.
 - Führungskräfte dürfen für ihre Einheiten Einsätze erkennen und einzeln importieren. Nur Einheits- und Wehrführung dürfen Access-Keys ändern oder Mitglieder, Qualifikationen und Fahrzeuge synchronisieren.
 - „Alles synchronisieren“ ruft `pull/all` und `alarms` je höchstens einmal ab, ersetzt die Stammdaten und importiert beziehungsweise aktualisiert alle gelieferten Einsätze.
+- Der vollständige Abgleich führt alle Alarm-Upserts in stabiler DIVERA-ID-Reihenfolge vor dem Mitglieder-/Fahrzeugabgleich in derselben Transaktion aus. Damit werden bestehende und gleichzeitig angelegte Einsätze vor Mitgliedern/Ressourcen gesperrt; eine reine Vorabfrage bestehender Einsatz-IDs ersetzt diese Sperren nicht.
 
 ## Oberfläche und Barrierefreiheit
 
