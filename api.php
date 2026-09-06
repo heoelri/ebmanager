@@ -1169,6 +1169,8 @@ try {
         $data = input();
         $email = emailAddress($data['email'] ?? null);
         mailSettings();
+        // Expiry cleanup finishes before account locks are acquired.
+        query('DELETE FROM password_resets WHERE expires_at<=UTC_TIMESTAMP()');
         $request = transaction(function () use ($email) {
             $reference = one('SELECT id FROM users WHERE email=?', [$email]);
             if (!$reference) return null;

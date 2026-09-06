@@ -20,6 +20,10 @@ vermieden, damit parallele Adressänderungen keinen umgekehrten
 Index-Sperrpfad erzeugen. Ein nachträglich
 fehlgeschlagener Mailversuch entfernt nur seinen eigenen Token-Hash.
 Die Neueinladung behält ihr Rollback bei fehlgeschlagener Mailannahme.
+Abgelaufene Token werden weiterhin bereinigt. Diese separate
+Autocommit-Anweisung läuft vor der Benutzertransaktion, damit keine
+Benutzersperre während einer kontenübergreifenden Bereinigung gehalten
+wird. Nicht abgelaufene Links werden dabei nicht verändert.
 
 Die Einsatzliste verwendet eine explizite Spaltenprojektion.
 `consolidated_text` wird ausschließlich für `wehrleitung` abgefragt.
@@ -35,6 +39,14 @@ Bestätigungen sowie die Sicht beider niedrigeren Rollen auf abgeschlossene
 und invalidierte Mehr-Einheiten-Gesamtberichte. Für diese Korrekturen werden
 keine weiteren personenbezogenen Daten, Geheimnisprotokolle oder
 Abhängigkeiten eingeführt.
+
+Die Review-Nacharbeit ergänzt die Bereinigung abgelaufener Token bei
+gleichzeitigem Erhalt gültiger Links. Der Parallelitätstest übernimmt die
+explizit konfigurierte `DB_DSN` unverändert; ohne Vorgabe berücksichtigt
+der gemeinsame Standard den `TEST_DB_HOST` des Compose-Betriebs.
+Die vollständige HTTP-/MySQL-/SMTP-Suite wurde zusätzlich mit expliziter
+PDO-Verbindung zu einem isolierten MySQL auf Port 3307 erfolgreich
+ausgeführt; die Apache-/HTTPS-Suite verwendet weiterhin den Standard.
 
 Die vorhandene HTTP-/MySQL-Suite einschließlich SMTP-Szenarien und die
 Apache-/HTTPS-Suite wurden in getrennten, frisch erstellten lokalen

@@ -2,7 +2,7 @@
 set -euo pipefail
 trap 'echo "Smoke-Test fehlgeschlagen in Zeile $LINENO" >&2' ERR
 
-export DB_DSN="${DB_DSN:-mysql:host=127.0.0.1;port=3306;dbname=einsatzberichte;charset=utf8mb4}"
+export DB_DSN="${DB_DSN:-mysql:host=${TEST_DB_HOST:-127.0.0.1};port=3306;dbname=einsatzberichte;charset=utf8mb4}"
 export DB_USER="${DB_USER:-root}"
 export DB_PASSWORD="${DB_PASSWORD:-test-password}"
 export SETUP_TOKEN="${SETUP_TOKEN:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
@@ -377,8 +377,8 @@ for change in profile password email both; do
   fi
 done
 
-# Gleichzeitig gestartete Tokenanforderungen und Bestätigungen warten auf Kontoänderungen und verwenden danach keine veralteten Links oder Adressen.
-DB_DSN="mysql:host=$db_host;dbname=einsatzberichte;charset=utf8mb4" CREDENTIAL_USER_ID="$credential_user_id" CREDENTIAL_TOKEN="$credential_token" API_BASE_URL="$base_url" php -r '
+# Parallele Tokenzugriffe verwenden die konfigurierte Datenbank, warten auf Kontoänderungen und verwenden danach keine veralteten Links oder Adressen.
+CREDENTIAL_USER_ID="$credential_user_id" CREDENTIAL_TOKEN="$credential_token" API_BASE_URL="$base_url" php -r '
   require "support.php";
   $id=(int)getenv("CREDENTIAL_USER_ID");
   $token=getenv("CREDENTIAL_TOKEN");
@@ -1102,7 +1102,7 @@ test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-characte
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="DELETE FROM password_resets WHERE user_id=(SELECT id FROM users WHERE email='admin@example.test')"
 
-# Abgelaufene und unbekannte Reset-Tokens werden abgelehnt; ein gültiges Token ist einmalig und beendet bestehende Sitzungen.
+# Abgelaufene Reset-Tokens geben keinen Zugriff auf den Wiederherstellungskontext.
 reset_token='bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 reset_hash=$(php -r "echo hash('sha256', '$reset_token');")
 expired_token='cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
@@ -1113,8 +1113,20 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --header 'Content-Type: application/json' \
   --data "{\"token\":\"$expired_token\"}" \
   "$base_url/api/password-reset/context")" = 400
+
+# Reset-Anforderungen entfernen abgelaufene Token anderer Konten, erhalten gültige Links und verraten auch bei unbekannten Adressen keine Konten.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
-  --execute="DELETE FROM password_resets WHERE token_hash='$expired_hash'"
+  --execute="INSERT INTO password_resets(user_id,token_hash,expires_at) SELECT id,'$reset_hash',UTC_TIMESTAMP()+INTERVAL 30 MINUTE FROM users WHERE email='fuehrungskraft@example.test'"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --header 'Content-Type: application/json' \
+  --data '{"email":"nicht-registriert@example.test"}' \
+  "$base_url/api/password-reset/request")" = 202
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
+  --execute="SELECT CONCAT((SELECT COUNT(*) FROM password_resets WHERE token_hash='$expired_hash'),'|',(SELECT COUNT(*) FROM password_resets WHERE token_hash='$reset_hash'))")" = '0|1'
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DELETE FROM password_resets WHERE token_hash='$reset_hash'"
+
+# Unbekannte Token werden abgelehnt; ein gültiger Link ist einmalig und beendet bestehende Sitzungen.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="INSERT INTO password_resets(user_id,token_hash,expires_at) SELECT id,'$reset_hash',UTC_TIMESTAMP()+INTERVAL 30 MINUTE FROM users WHERE email='admin@example.test'"
 curl --insecure --silent --fail \
