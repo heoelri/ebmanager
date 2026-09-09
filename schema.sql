@@ -83,6 +83,7 @@ CREATE TABLE incidents (
   revision INT UNSIGNED NOT NULL DEFAULT 1,
   report_data_frozen TINYINT(1) NOT NULL DEFAULT 0,
   deleted_at DATETIME,
+  is_exercise BOOLEAN NOT NULL DEFAULT FALSE,
   UNIQUE KEY incidents_org_divera (organization_id, divera_id),
   CONSTRAINT incidents_org_fk FOREIGN KEY (organization_id) REFERENCES organizations(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -230,6 +231,20 @@ CREATE TABLE incident_deletions (
   CONSTRAINT incident_deletions_actor_fk FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE incident_exercise_changes (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  incident_id BIGINT UNSIGNED NOT NULL,
+  old_value BOOLEAN NOT NULL,
+  new_value BOOLEAN NOT NULL,
+  actor_id BIGINT UNSIGNED,
+  actor_name VARCHAR(200) NOT NULL,
+  actor_role ENUM('wehrleitung','einheitsleitung','fuehrungskraft') NOT NULL,
+  created_at DATETIME NOT NULL,
+  KEY incident_exercise_changes_incident_time (incident_id, created_at, id),
+  CONSTRAINT incident_exercise_changes_incident_fk FOREIGN KEY (incident_id) REFERENCES incidents(id),
+  CONSTRAINT incident_exercise_changes_actor_fk FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE schema_migrations (
   name VARCHAR(255) PRIMARY KEY,
   applied_at DATETIME NOT NULL
@@ -241,4 +256,5 @@ INSERT INTO schema_migrations(name,applied_at) VALUES
   ('003-report-additional-vehicles.sql',UTC_TIMESTAMP()),
   ('004-report-revisions.sql',UTC_TIMESTAMP()),
   ('005-historical-report-snapshots.sql',UTC_TIMESTAMP()),
-  ('006-incident-soft-delete.sql',UTC_TIMESTAMP());
+  ('006-incident-soft-delete.sql',UTC_TIMESTAMP()),
+  ('007-incident-exercises.sql',UTC_TIMESTAMP());

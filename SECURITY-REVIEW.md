@@ -1,5 +1,28 @@
 # Security Review
 
+## Gemeinsame Übungskennzeichnung vom 9. September 2026 (#115)
+
+Der neue Schreibpfad sperrt den aktiven Einsatz im Mandanten des angemeldeten
+Benutzers und prüft anschließend die geladene Einsatzrevision. Wehrführungen
+dürfen organisationsweit ändern; Einheitsführungen und Führungskräfte nur,
+wenn eine aktuelle `user_units`-Zuordnung mindestens eine beteiligte
+`incident_units`-Einheit schneidet. Bei Mehrfacheinheiten-Einsätzen gilt die
+Änderung bewusst für den gesamten Einsatz. Fremde Mandanten und nicht
+zugeordnete Einsätze bleiben als nicht gefunden beziehungsweise verboten
+abgegrenzt.
+
+`incident_exercise_changes` speichert ausschließlich alten/neuen Boolean,
+optionale Benutzer-ID, unveränderlichen Namen, Rolle und UTC-Zeitpunkt. Es
+werden keine Patienten-, Kontakt-, Adress-, Berichts- oder DIVERA-Inhalte
+protokolliert. Identische Werte erzeugen weder Revision noch Auditzeile;
+veraltete Revisionen liefern HTTP 409 ohne Änderung. DIVERA-Importe schreiben
+das lokale Feld nicht und können die Kennzeichnung daher nicht zurücksetzen.
+Berichtsrevisionen und Workflowstatus bleiben unberührt.
+
+Die Regressionen prüfen strikte Booleans, alle drei Rollen,
+Mehrfacheinheitenwirkung, Mandanten-/Einheitsgrenzen, Revision und No-op,
+Akteurssnapshots, DIVERA-Einzel-/Vollimport, Statistik, Filter und PDF-Ausgabe.
+
 ## Revisionssicheres Einsatz-Soft-Delete vom 9. September 2026 (#112)
 
 Der Löschpfad ist auf authentifizierte Wehr- und Einheitsführungen begrenzt

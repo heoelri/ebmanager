@@ -275,6 +275,32 @@ nicht. Bereits ausgeblendete Einsätze werden vom alten Code wieder sichtbar.
 Ist das unerwünscht, Rollback abbrechen und vorwärts korrigieren. Audit-Einträge
 oder Einsatzdaten nicht löschen.
 
+### Einsätze als Übung kennzeichnen (#115)
+
+1. Datenbank und bisherige Anwendungsdateien sichern.
+2. Prüfen, dass Migrationen 001 bis 006 angewendet und in
+   `schema_migrations` vermerkt sind.
+3. `migrations/007-incident-exercises.sql` mit einem DDL-berechtigten
+   Administrationskonto vollständig ausführen.
+4. Prüfen, dass `incidents.is_exercise` und die Tabelle
+   `incident_exercise_changes` vorhanden sind. Danach einmalig vermerken:
+
+   ```sql
+   INSERT INTO schema_migrations(name,applied_at)
+   VALUES('007-incident-exercises.sql',UTC_TIMESTAMP());
+   ```
+
+   Lokal übernimmt `docker/migrate.sh` den Vermerk automatisch.
+5. Erst danach PHP-, Browser- und Stylesheet-Dateien gemeinsam bereitstellen.
+   `/api/bootstrap` darf keinen Schemafehler melden. Mit einem manuellen und
+   einem DIVERA-Einsatz Rollen, Revision, Filter, Verlauf, PDF und Statistik
+   prüfen.
+
+**Rollback von 007:** Den vorherigen Anwendungscode wiederherstellen. Spalte
+und Historientabelle können im Schema verbleiben; alter Code ignoriert beide.
+Gesetzte Kennzeichnungen sind im alten Browser nicht sichtbar, bleiben aber
+gespeichert. Historieneinträge nicht löschen.
+
 ### Revisionen für Einheits- und Gesamtberichte einführen (#86)
 
 1. Ein Wartungsfenster vereinbaren und Schreibzugriffe während Migration und
