@@ -12,9 +12,9 @@ function databaseConfigurationError(): ?string
             "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN
              ('organizations','units','users','user_units','sessions','login_history','password_resets','incidents','incident_units',
               'divera_imports','members','member_units','qualifications','member_qualifications','vehicles','reports','report_transitions','report_crew',
-              'report_additional_vehicles')"
+              'report_additional_vehicles','incident_deletions')"
         )->fetchColumn();
-        if ((int)$tables !== 19) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
+        if ((int)$tables !== 20) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
         $reportColumns = db()->query(
             "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='reports'
              AND column_name IN ('report_year','running_number','damaged_party','damaging_party','incident_command')"
@@ -36,6 +36,11 @@ function databaseConfigurationError(): ?string
                OR (table_name='incidents' AND column_name='report_data_frozen'))"
         )->fetchColumn();
         if ((int)$nameColumns !== 3) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
+        $deletionColumns = db()->query(
+            "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE()
+             AND table_name='incidents' AND column_name='deleted_at'"
+        )->fetchColumn();
+        if ((int)$deletionColumns !== 1) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
     } catch (PDOException $error) {
         error_log('Datenbankprüfung fehlgeschlagen: SQLSTATE=' . $error->getCode() . ' code=' . (int)($error->errorInfo[1] ?? 0));
         return 'Datenbankverbindung fehlgeschlagen. Prüfen Sie DSN, Benutzername, Passwort und Erreichbarkeit.';
@@ -69,7 +74,7 @@ function sendWorkflowNotification(string $event, int $incidentId, array $unitIds
     if (!isset($events[$event])) throw new LogicException('Unbekanntes Benachrichtigungsereignis');
 
     try {
-        $incident = one('SELECT * FROM incidents WHERE id=? AND organization_id=?', [$incidentId, $actor['organization_id']]);
+        $incident = one('SELECT * FROM incidents WHERE id=? AND organization_id=? AND deleted_at IS NULL', [$incidentId, $actor['organization_id']]);
         if (!$incident) throw new RuntimeException('Einsatz nicht gefunden');
         $placeholders = implode(',', array_fill(0, count($unitIds), '?'));
         $unitNames = query(
@@ -171,12 +176,12 @@ function unit(int $id, int $organizationId): ?array
 
 function incident(int $id, int $organizationId): ?array
 {
-    return one('SELECT * FROM incidents WHERE id=? AND organization_id=?', [$id, $organizationId]);
+    return one('SELECT * FROM incidents WHERE id=? AND organization_id=? AND deleted_at IS NULL', [$id, $organizationId]);
 }
 
 function report(int $id, int $organizationId): ?array
 {
-    return one('SELECT r.* FROM reports r JOIN incidents i ON i.id=r.incident_id WHERE r.id=? AND i.organization_id=?', [$id, $organizationId]);
+    return one('SELECT r.* FROM reports r JOIN incidents i ON i.id=r.incident_id WHERE r.id=? AND i.organization_id=? AND i.deleted_at IS NULL', [$id, $organizationId]);
 }
 
 function currentUser(): ?array
@@ -297,7 +302,7 @@ function unitStatistics(array $user, mixed $fromValue, mixed $toValue): array
          FROM incident_units iu
          JOIN incidents i ON i.id=iu.incident_id
          LEFT JOIN reports r ON r.incident_id=i.id AND r.unit_id=iu.unit_id
-         WHERE iu.unit_id=? AND i.organization_id=? AND i.started_at>=? AND i.started_at<?
+         WHERE iu.unit_id=? AND i.organization_id=? AND i.deleted_at IS NULL AND i.started_at>=? AND i.started_at<?
          ORDER BY i.started_at,i.id',
         $params
     )->fetchAll();
@@ -433,13 +438,23 @@ function reportVisibilitySql(array $user, string $alias = 'r'): array
 function visibleIncident(int $incidentId, array $user): ?array
 {
     if ($user['role'] === 'wehrleitung') {
-        return one('SELECT * FROM incidents WHERE id=? AND organization_id=?', [$incidentId, $user['organization_id']]);
+        return one('SELECT * FROM incidents WHERE id=? AND organization_id=? AND deleted_at IS NULL', [$incidentId, $user['organization_id']]);
     }
     return one(
-        'SELECT i.* FROM incidents i WHERE i.id=? AND i.organization_id=?
+        'SELECT i.* FROM incidents i WHERE i.id=? AND i.organization_id=? AND i.deleted_at IS NULL
          AND EXISTS(SELECT 1 FROM incident_units iu JOIN user_units uu ON uu.unit_id=iu.unit_id WHERE iu.incident_id=i.id AND uu.user_id=?)',
         [$incidentId, $user['organization_id'], $user['id']]
     );
+}
+
+function canDeleteIncident(array $incident, array $user): bool
+{
+    if ($incident['divera_id'] !== null) return false;
+    if ($user['role'] === 'wehrleitung') return true;
+    return $user['role'] === 'einheitsleitung'
+        && (int)$incident['assignment_count'] === 1
+        && (int)$incident['report_count'] === 0
+        && in_array((int)$incident['only_unit_id'], $user['unitIds'], true);
 }
 
 function visibleIncidentReports(int $incidentId, array $user): array
@@ -453,7 +468,7 @@ function visibleIncidentReports(int $incidentId, array $user): array
          JOIN incidents i ON i.id=r.incident_id
          JOIN users u ON u.id=r.author_id AND u.organization_id=i.organization_id
          JOIN units un ON un.id=r.unit_id AND un.organization_id=i.organization_id
-         WHERE r.incident_id=? AND i.organization_id=?$where ORDER BY r.created_at,r.id",
+         WHERE r.incident_id=? AND i.organization_id=? AND i.deleted_at IS NULL$where ORDER BY r.created_at,r.id",
         $params
     )->fetchAll();
     $crew = [];
@@ -461,7 +476,7 @@ function visibleIncidentReports(int $incidentId, array $user): array
         "SELECT rc.report_id reportId,rc.member_id memberId,rc.member_name name,rc.vehicle,rc.role
          FROM report_crew rc JOIN members m ON m.id=rc.member_id JOIN reports r ON r.id=rc.report_id
          JOIN incidents i ON i.id=r.incident_id AND m.organization_id=i.organization_id
-         WHERE r.incident_id=? AND i.organization_id=?$where ORDER BY rc.report_id,rc.member_id",
+         WHERE r.incident_id=? AND i.organization_id=? AND i.deleted_at IS NULL$where ORDER BY rc.report_id,rc.member_id",
         $params
     )->fetchAll() as $person) {
         $reportId = (int)$person['reportId'];
@@ -619,7 +634,7 @@ function reportReferenceForExport(int $reportId, array $user): ?array
     [$visibility, $params] = reportVisibilitySql($user);
     return one(
         "SELECT r.incident_id FROM reports r JOIN incidents i ON i.id=r.incident_id
-         WHERE r.id=? AND i.organization_id=? AND $visibility",
+         WHERE r.id=? AND i.organization_id=? AND i.deleted_at IS NULL AND $visibility",
         array_merge([$reportId, $user['organization_id']], $params)
     );
 }
@@ -649,13 +664,13 @@ function transitionReport(int $reportId, string $action, array $user, string $co
     $pdo->beginTransaction();
     try {
         $reference = one(
-            'SELECT r.incident_id,i.organization_id FROM reports r JOIN incidents i ON i.id=r.incident_id WHERE r.id=?',
+            'SELECT r.incident_id,i.organization_id FROM reports r JOIN incidents i ON i.id=r.incident_id WHERE r.id=? AND i.deleted_at IS NULL',
             [$reportId]
         );
         if (!$reference || (int)$reference['organization_id'] !== (int)$user['organization_id']) throw new ApiError(404, 'Bericht nicht gefunden');
         query('SELECT id FROM incidents WHERE id=? FOR UPDATE', [$reference['incident_id']]);
         $report = one(
-            'SELECT r.*,i.organization_id,i.title incident_title FROM reports r JOIN incidents i ON i.id=r.incident_id WHERE r.id=? FOR UPDATE',
+            'SELECT r.*,i.organization_id,i.title incident_title FROM reports r JOIN incidents i ON i.id=r.incident_id WHERE r.id=? AND i.deleted_at IS NULL FOR UPDATE',
             [$reportId]
         );
         if (!$report || (int)$report['organization_id'] !== (int)$user['organization_id']) throw new ApiError(404, 'Bericht nicht gefunden');
@@ -1129,7 +1144,7 @@ function persistDiveraAlarm(array $alarm, int $unitId, array $user): array
     $incidentId = (int)db()->lastInsertId();
     $newIncident = $saved->rowCount() === 1;
     // The first report sets this marker under the same parent lock, also across concurrent inserts.
-    $current = one('SELECT * FROM incidents WHERE id=? AND organization_id=? FOR UPDATE', [$incidentId, $user['organization_id']]);
+    $current = one('SELECT * FROM incidents WHERE id=? AND organization_id=? AND deleted_at IS NULL FOR UPDATE', [$incidentId, $user['organization_id']]);
     $frozen = (bool)$current['report_data_frozen'];
     $different = false;
     foreach ($fields as $key => $value) {
@@ -1581,15 +1596,34 @@ try {
 
     if ($method === 'GET' && $path === '/api/incidents') {
         $where = $user['role'] === 'wehrleitung'
-            ? 'i.organization_id=?'
-            : 'i.organization_id=? AND EXISTS(SELECT 1 FROM incident_units x JOIN user_units uu ON uu.unit_id=x.unit_id WHERE x.incident_id=i.id AND uu.user_id=?)';
+            ? 'i.organization_id=? AND i.deleted_at IS NULL'
+            : 'i.organization_id=? AND i.deleted_at IS NULL AND EXISTS(SELECT 1 FROM incident_units x JOIN user_units uu ON uu.unit_id=x.unit_id WHERE x.incident_id=i.id AND uu.user_id=?)';
         $params = $user['role'] === 'wehrleitung' ? [$user['organization_id']] : [$user['organization_id'], $user['id']];
-        $consolidatedText = $user['role'] === 'wehrleitung' ? ',i.consolidated_text,i.revision' : '';
+        $additionalFields = $user['role'] === 'wehrleitung'
+            ? ',i.consolidated_text,i.revision'
+            : ($user['role'] === 'einheitsleitung' ? ',i.revision' : '');
+        $rowParams = array_merge([$user['organization_id'], $user['organization_id']], $params);
         $rows = query(
             "SELECT i.id,i.organization_id,i.divera_id,i.foreign_id,i.divera_date,i.title,i.started_at,
-             i.message,i.address,i.lat,i.lng,i.remark,i.patient,i.caller,i.consolidated_at$consolidatedText
-             FROM incidents i WHERE $where ORDER BY i.started_at DESC,i.id DESC",
-            $params
+             i.message,i.address,i.lat,i.lng,i.remark,i.patient,i.caller,i.consolidated_at$additionalFields,
+             COALESCE(deletion_assignments.assignment_count,0) assignment_count,
+             deletion_assignments.only_unit_id,
+             COALESCE(deletion_reports.report_count,0) report_count
+             FROM incidents i
+             LEFT JOIN (
+                 SELECT iu.incident_id,COUNT(*) assignment_count,MIN(iu.unit_id) only_unit_id
+                 FROM incidents scoped_i JOIN incident_units iu ON iu.incident_id=scoped_i.id
+                 WHERE scoped_i.organization_id=? AND scoped_i.deleted_at IS NULL
+                 GROUP BY iu.incident_id
+             ) deletion_assignments ON deletion_assignments.incident_id=i.id
+             LEFT JOIN (
+                 SELECT r.incident_id,COUNT(*) report_count
+                 FROM incidents scoped_i JOIN reports r ON r.incident_id=scoped_i.id
+                 WHERE scoped_i.organization_id=? AND scoped_i.deleted_at IS NULL
+                 GROUP BY r.incident_id
+             ) deletion_reports ON deletion_reports.incident_id=i.id
+             WHERE $where ORDER BY i.started_at DESC,i.id DESC",
+            $rowParams
         )->fetchAll();
         $assignments = [];
         $membershipJoin = $user['role'] === 'wehrleitung'
@@ -1654,6 +1688,7 @@ try {
             $unitNames = array_column($relevant, 'unitName');
             sort($unitNames, SORT_NATURAL | SORT_FLAG_CASE);
             $row['units'] = implode(', ', $unitNames);
+            $row['canDelete'] = canDeleteIncident($row, $user);
             foreach ($relevant as &$assignment) {
                 if (!$assignment['reportAuthorName']
                     || $user['role'] !== 'fuehrungskraft'
@@ -1667,6 +1702,7 @@ try {
             if ($row['consolidated_at'] !== null) $row['consolidated_at'] = utcString(new DateTimeImmutable($row['consolidated_at'], new DateTimeZone('UTC')));
             foreach (['id', 'organization_id', 'divera_date'] as $key) if ($row[$key] !== null) $row[$key] = (int)$row[$key];
             if (isset($row['revision'])) $row['revision'] = (int)$row['revision'];
+            unset($row['assignment_count'], $row['only_unit_id'], $row['report_count']);
             foreach (['lat', 'lng'] as $key) if ($row[$key] !== null) $row[$key] = (float)$row[$key];
         }
         unset($row);
@@ -1694,6 +1730,46 @@ try {
         });
         $warning = sendWorkflowNotification('incident_created', $id, $unitIds, $user);
         respond(201, ['id' => $id] + ($warning ? ['warning' => $warning] : []));
+    }
+
+    if ($method === 'DELETE' && preg_match('#^/api/incidents/(\d+)$#', $path, $match)) {
+        assertRole($user, 'wehrleitung', 'einheitsleitung');
+        $incidentId = (int)$match[1];
+        $data = input();
+        transaction(function () use ($incidentId, $data, $user) {
+            $foundIncident = one(
+                'SELECT * FROM incidents WHERE id=? AND organization_id=? FOR UPDATE',
+                [$incidentId, $user['organization_id']]
+            );
+            if (!$foundIncident) throw new ApiError(404, 'Einsatz nicht gefunden');
+            if ($foundIncident['deleted_at'] !== null) throw new ApiError(409, 'Der Einsatz wurde bereits gelöscht');
+            assertRevision($data['revision'] ?? null, (int)$foundIncident['revision']);
+            if ($foundIncident['divera_id'] !== null) throw new ApiError(409, 'DIVERA-Einsätze können nicht gelöscht werden');
+            if ($user['role'] === 'einheitsleitung') {
+                $assignments = one(
+                    'SELECT COUNT(*) assignment_count,MIN(unit_id) only_unit_id FROM incident_units WHERE incident_id=?',
+                    [$incidentId]
+                );
+                if ((int)$assignments['assignment_count'] !== 1
+                    || !in_array((int)$assignments['only_unit_id'], $user['unitIds'], true)) {
+                    throw new ApiError(403, 'Die Einheitsführung darf nur Einsätze ihrer allein zugeordneten Einheit löschen');
+                }
+                if (one('SELECT id FROM reports WHERE incident_id=? LIMIT 1', [$incidentId])) {
+                    throw new ApiError(409, 'Einsätze mit Berichten können nur durch die Wehrführung gelöscht werden');
+                }
+            }
+            query(
+                'INSERT INTO incident_deletions(incident_id,actor_id,actor_name,actor_role,created_at)
+                 VALUES(?,?,?,?,UTC_TIMESTAMP())',
+                [$incidentId, $user['id'], $user['name'], $user['role']]
+            );
+            $deleted = query(
+                'UPDATE incidents SET deleted_at=UTC_TIMESTAMP(),revision=revision+1 WHERE id=? AND deleted_at IS NULL',
+                [$incidentId]
+            );
+            if ($deleted->rowCount() !== 1) throw new ApiError(409, 'Der Einsatz wurde bereits gelöscht');
+        });
+        respond(200, ['ok' => true]);
     }
 
     if ($method === 'GET' && preg_match('#^/api/incidents/(\d+)/pdf$#', $path, $match)) {
@@ -1752,7 +1828,7 @@ try {
         if (!one('SELECT incident_id FROM incident_units WHERE incident_id=? AND unit_id=?', [$incidentId, $unitId])) throw new ApiError(400, 'Einheit wurde nicht alarmiert');
         if (one('SELECT id FROM reports WHERE incident_id=? AND unit_id=?', [$incidentId, $unitId])) throw new ApiError(409, 'Für diese Einheit existiert bereits ein Einsatzbericht');
         $id = transaction(function () use ($data, $incidentId, $unitId, $user) {
-            $foundIncident = one('SELECT * FROM incidents WHERE id=? AND organization_id=? FOR UPDATE', [$incidentId, $user['organization_id']]);
+            $foundIncident = one('SELECT * FROM incidents WHERE id=? AND organization_id=? AND deleted_at IS NULL FOR UPDATE', [$incidentId, $user['organization_id']]);
             if (!$foundIncident) throw new ApiError(404, 'Einsatz nicht gefunden');
             if (one('SELECT id FROM reports WHERE incident_id=? AND unit_id=? FOR UPDATE', [$incidentId, $unitId])) {
                 throw new ApiError(409, 'Für diese Einheit existiert bereits ein Einsatzbericht');
@@ -1797,7 +1873,7 @@ try {
         }
         $data = input();
         transaction(function () use ($data, $foundReport, $user) {
-            $foundIncident = one('SELECT * FROM incidents WHERE id=? AND organization_id=? FOR UPDATE', [$foundReport['incident_id'], $user['organization_id']]);
+            $foundIncident = one('SELECT * FROM incidents WHERE id=? AND organization_id=? AND deleted_at IS NULL FOR UPDATE', [$foundReport['incident_id'], $user['organization_id']]);
             if (!$foundIncident) throw new ApiError(404, 'Einsatz nicht gefunden');
             $lockedReport = one('SELECT * FROM reports WHERE id=? FOR UPDATE', [$foundReport['id']]);
             if (!$lockedReport) throw new ApiError(409, 'Der Bericht wurde bereits geändert');
@@ -1838,7 +1914,7 @@ try {
         $incidentId = (int)$match[1];
         $data = input();
         transaction(function () use ($incidentId, $data, $user) {
-            $foundIncident = one('SELECT id,revision FROM incidents WHERE id=? AND organization_id=? FOR UPDATE', [$incidentId, $user['organization_id']]);
+            $foundIncident = one('SELECT id,revision FROM incidents WHERE id=? AND organization_id=? AND deleted_at IS NULL FOR UPDATE', [$incidentId, $user['organization_id']]);
             if (!$foundIncident) throw new ApiError(404, 'Einsatz nicht gefunden');
             assertRevision($data['revision'] ?? null, (int)$foundIncident['revision']);
             $reports = query(

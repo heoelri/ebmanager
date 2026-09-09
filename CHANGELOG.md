@@ -6,6 +6,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Added
 
+- Einheits- und Wehrführungen können manuell angelegte Einsätze revisionsgeschützt dauerhaft ausblenden. Die fachlichen Daten bleiben erhalten; ein unveränderlicher Audit-Eintrag speichert Akteur und UTC-Zeitpunkt (#112).
 - Das Projekt steht unter der PolyForm Noncommercial License 1.0.0. Feuerwehren, öffentliche Sicherheitsorganisationen und Kommunen dürfen die Software unabhängig von ihrer Finanzierung nutzen, ändern und weitergeben; kommerzielle Nutzung benötigt eine gesonderte Zustimmung (#96).
 - Eine kompakte [API-Referenz](docs/API.md) beschreibt Endpunkte, Rollen, Eingaben, native Antworttypen, optionale Werte, UTC-Zeitformate und Konfliktvorbedingungen (#92).
 - Einheitsführungen erhalten einen eigenen Bereich „Statistik“ mit Zeitraumfilter, Fahrzeug- und Mitgliederhäufigkeiten, zeitlichen Verteilungen sowie der durchschnittlichen Besatzungsstärke ihrer Einheit.
@@ -47,6 +48,14 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 - Die Einsatzlisten-API liefert konsolidierte Berichtstexte einschließlich zurückbehaltener Arbeitsstände ausschließlich an die Wehrführung. Führungskräfte und Einheitsführungen erhalten weiterhin ihre zulässigen Einsatz- und Statusdaten (#100).
 
 ### Breaking Changes
+
+**#112 benötigt Migration 006 vor dem neuen Anwendungscode.** Sie ergänzt
+`incidents.deleted_at` und die Audit-Tabelle `incident_deletions`; fachliche
+Bestandsdaten werden nicht verändert. Verbindliche Reihenfolge: Sicherung,
+Migration 006 und Ledger-Vermerk, Schemaprüfung, danach gemeinsamer PHP-/
+Browserwechsel und Funktionsprüfung. Die manuellen Schritte und der Rollback
+stehen unter
+[Deployment: Einsatz-Soft-Delete](docs/WEBSPACE-DEPLOYMENT.md#manuelle-einsätze-dauerhaft-ausblenden-112).
 
 **#89 benötigt Migration 005 und eine neue ausdrückliche Betreiberbestätigung
 vor einem Merge nach `main`; frühere Freigaben für 004/#92 gelten nicht dafür.**

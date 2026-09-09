@@ -82,6 +82,7 @@ CREATE TABLE incidents (
   consolidated_at DATETIME,
   revision INT UNSIGNED NOT NULL DEFAULT 1,
   report_data_frozen TINYINT(1) NOT NULL DEFAULT 0,
+  deleted_at DATETIME,
   UNIQUE KEY incidents_org_divera (organization_id, divera_id),
   CONSTRAINT incidents_org_fk FOREIGN KEY (organization_id) REFERENCES organizations(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -219,6 +220,16 @@ CREATE TABLE report_additional_vehicles (
   CONSTRAINT report_additional_vehicles_report_fk FOREIGN KEY (report_id) REFERENCES reports(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE incident_deletions (
+  incident_id BIGINT UNSIGNED PRIMARY KEY,
+  actor_id BIGINT UNSIGNED,
+  actor_name VARCHAR(200) NOT NULL,
+  actor_role ENUM('wehrleitung','einheitsleitung') NOT NULL,
+  created_at DATETIME NOT NULL,
+  CONSTRAINT incident_deletions_incident_fk FOREIGN KEY (incident_id) REFERENCES incidents(id),
+  CONSTRAINT incident_deletions_actor_fk FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE schema_migrations (
   name VARCHAR(255) PRIMARY KEY,
   applied_at DATETIME NOT NULL
@@ -229,4 +240,5 @@ INSERT INTO schema_migrations(name,applied_at) VALUES
   ('002-inactive-unit-members.sql',UTC_TIMESTAMP()),
   ('003-report-additional-vehicles.sql',UTC_TIMESTAMP()),
   ('004-report-revisions.sql',UTC_TIMESTAMP()),
-  ('005-historical-report-snapshots.sql',UTC_TIMESTAMP());
+  ('005-historical-report-snapshots.sql',UTC_TIMESTAMP()),
+  ('006-incident-soft-delete.sql',UTC_TIMESTAMP());

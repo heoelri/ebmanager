@@ -515,6 +515,30 @@ for (const me of [
 }
 assert.match(html, /data-action="download" data-href="api\/incidents\/\$\{id\}\/pdf">Einsatzakte als PDF/);
 assert.match(html, /item\.consolidated_at\?`<p><button type="button" data-action="download" data-href="api\/incidents\/\$\{id\}\/consolidation\/pdf">Gesamtbericht als PDF/);
+assert.match(html, /item\.canDelete\?` <button type="button" class="secondary" data-action="deleteIncident"/);
+const deleteIncidentSource = javascript.match(/async function deleteIncident[^\n]+/)?.[0];
+assert(deleteIncidentSource, 'deleteIncident fehlt');
+const deletionCalls = [];
+let deletionPrompt = '';
+const deleteIncident = new Function(
+  'incidents', 'confirm', 'api', 'load', 'navigate', 'announcer',
+  `${deleteIncidentSource}; return deleteIncident;`
+)(
+  [{id: 7, revision: 3, canDelete: true}],
+  prompt => (deletionPrompt = prompt, true),
+  async (...args) => deletionCalls.push(args),
+  async () => deletionCalls.push(['load']),
+  async (...args) => deletionCalls.push(['navigate', ...args]),
+  {textContent: ''}
+);
+await deleteIncident(7);
+assert.match(deletionPrompt, /dauerhaft ausblenden/);
+assert.match(deletionPrompt, /nicht wiederhergestellt/);
+assert.deepEqual(deletionCalls, [
+  ['/api/incidents/7', {method: 'DELETE', body: '{"revision":3}'}],
+  ['load'],
+  ['navigate', 'home']
+]);
 const downloadFileSource = javascript.match(/async function downloadFile[^\n]+/)?.[0];
 assert(downloadFileSource, 'downloadFile fehlt');
 let response = {ok: false, status: 422, headers: {get: () => 'application/json'}, text: async () => '{"error":"PDF-Zeichen nicht darstellbar"}'};

@@ -1,5 +1,26 @@
 # Security Review
 
+## Revisionssicheres Einsatz-Soft-Delete vom 9. September 2026 (#112)
+
+Der Löschpfad ist auf authentifizierte Wehr- und Einheitsführungen begrenzt
+und prüft Organisation, Rolle, Einheitszuordnung, Herkunft des Einsatzes sowie
+die geladene Einsatzrevision serverseitig unter einer Einsatzsperre.
+Einheitsführungen dürfen ausschließlich einen allein ihrer Einheit zugeordneten
+manuellen Einsatz ohne Bericht ausblenden; Wehrführungen dürfen dies innerhalb
+der eigenen Organisation auch bei vorhandenen Berichten. DIVERA-Einsätze und
+fremde Mandanten bleiben ausgeschlossen.
+
+Die Operation löscht keine fachlichen oder personenbezogenen Daten. Sie setzt
+`incidents.deleted_at` mit `UTC_TIMESTAMP()` und speichert in
+`incident_deletions` ausschließlich Benutzer-ID, unveränderlichen Namen,
+Rolle und UTC-Zeitpunkt, keine Einsatzinhalte. Normale Listen, Statistiken,
+Berichts- und PDF-Pfade filtern gelöschte Einsätze zentral als nicht vorhanden.
+Wiederholte und veraltete Löschversuche liefern HTTP 409 ohne weitere Änderung.
+
+Die Regressionen prüfen Rollen- und Mandantengrenzen, vorhandene Berichte,
+Mehrfacheinheiten, DIVERA-Herkunft, Revisionen, Datenbewahrung, Audit-Snapshot
+und Ausschluss aus Listen, Statistiken sowie direkten Bericht/PDF-Zugriffen.
+
 ## Historische Berichtsdaten vom 6. September 2026 (#89)
 
 Der gezielte Integrationsreview umfasst Import-/Berichtstransaktionen,

@@ -731,6 +731,124 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE incident_units SET vehicles=JSON_ARRAY(JSON_OBJECT('id','foreign-secret','name','Fremdfahrzeug','own',TRUE)) WHERE incident_id=$incident_id AND unit_id=$second_unit_id"
 
+# Manuelle Einsätze werden nur rollen-, mandanten- und revisionsgerecht ausgeblendet; Daten, Audit und alle übrigen Sichtbarkeitsgrenzen bleiben erhalten.
+deletable_incident_id=$(curl --insecure --silent --fail \
+  --cookie "$session_cookie=$leader_token" \
+  --header 'Content-Type: application/json' \
+  --data '{"title":"Löschbarer Einsatz","startedAt":"2027-01-05T12:00:00.000Z","address":"","unitIds":[1]}' \
+  "$base_url/api/incidents" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
+deletable_revision=$(curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_url/api/incidents" |
+  INCIDENT_ID="$deletable_incident_id" php -r '
+    $items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+    $matches=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")));
+    assert(count($matches)===1 && $matches[0]["canDelete"]===true && is_int($matches[0]["revision"]));
+    echo $matches[0]["revision"];
+  ')
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents" |
+  INCIDENT_ID="$deletable_incident_id" php -r '
+    $items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+    $matches=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")));
+    assert(count($matches)===1 && $matches[0]["canDelete"]===false && !isset($matches[0]["revision"]));
+  '
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request DELETE \
+  --data "{\"revision\":$deletable_revision}" "$base_url/api/incidents/$deletable_incident_id")" = 403
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request DELETE \
+  --data '{"revision":999999}' "$base_url/api/incidents/$deletable_incident_id")" = 409
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request DELETE \
+  --data "{\"revision\":$deletable_revision}" "$base_url/api/incidents/$deletable_incident_id")" = 200
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request DELETE \
+  --data "{\"revision\":$deletable_revision}" "$base_url/api/incidents/$deletable_incident_id")" = 409
+for token in "$session_token" "$leader_token" "$force_token"; do
+  curl --insecure --silent --fail --cookie "$session_cookie=$token" "$base_url/api/incidents" |
+    INCIDENT_ID="$deletable_incident_id" php -r '
+      $items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+      assert(!array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")));
+    '
+done
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$leader_token" "$base_url/api/incidents/$deletable_incident_id/reports")" = 404
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$deletable_incident_id/pdf")" = 404
+curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_url/api/statistics?from=2027-01-05&to=2027-01-05" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($data["totals"]["incidents"]===0);'
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte --execute="
+  SELECT CONCAT(
+    (SELECT CONCAT(revision,':',deleted_at IS NOT NULL,':',title='Löschbarer Einsatz') FROM incidents WHERE id=$deletable_incident_id),'|',
+    (SELECT COUNT(*) FROM incident_units WHERE incident_id=$deletable_incident_id),'|',
+    (SELECT CONCAT(actor_name,':',actor_role,':',actor_id IS NOT NULL,':',ABS(TIMESTAMPDIFF(SECOND,created_at,UTC_TIMESTAMP()))<=5) FROM incident_deletions WHERE incident_id=$deletable_incident_id)
+  )")" = '2:1:1|1|Einheitsleitung Eins:einheitsleitung:1:1'
+
+reported_incident_id=$(curl --insecure --silent --fail \
+  --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' \
+  --data '{"title":"Löschen mit Bericht","startedAt":"2027-01-06T12:00:00.000Z","address":"","unitIds":[1]}' \
+  "$base_url/api/incidents" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
+reported_report_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte --execute="
+  SET @leader_id=(SELECT id FROM users WHERE email='leitung1@example.test');
+  INSERT INTO reports(incident_id,unit_id,author_id,author_name,narrative,vehicles,personnel,classification,status)
+  VALUES($reported_incident_id,1,@leader_id,'Einheitsleitung Eins','Historischer Bericht','','',JSON_OBJECT(),'wehr_review');
+  SELECT LAST_INSERT_ID();")
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request DELETE \
+  --data '{"revision":1}' "$base_url/api/incidents/$reported_incident_id")" = 409
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request DELETE \
+  --data '{"revision":1}' "$base_url/api/incidents/$reported_incident_id")" = 200
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" "$base_url/api/reports/$reported_report_id/pdf")" = 404
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
+  --execute="SELECT CONCAT(COUNT(*),':',MAX(narrative='Historischer Bericht')) FROM reports WHERE id=$reported_report_id")" = '1:1'
+
+multi_incident_id=$(curl --insecure --silent --fail \
+  --cookie "$session_cookie=$session_token" \
+  --header 'Content-Type: application/json' \
+  --data "{\"title\":\"Mehrere Einheiten löschen\",\"startedAt\":\"2027-01-07T12:00:00.000Z\",\"address\":\"\",\"unitIds\":[1,$second_unit_id]}" \
+  "$base_url/api/incidents" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request DELETE \
+  --data '{"revision":1}' "$base_url/api/incidents/$multi_incident_id")" = 403
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request DELETE \
+  --data '{"revision":1}' "$base_url/api/incidents/$multi_incident_id")" = 200
+
+divera_delete_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte --execute="
+  INSERT INTO incidents(organization_id,divera_id,title,started_at,message,remark,patient,caller,consolidated_text)
+  VALUES(1,'not-deletable','DIVERA bleibt','2027-01-08 12:00:00','','','','','');
+  SET @incident_id=LAST_INSERT_ID();
+  INSERT INTO incident_units(incident_id,unit_id,vehicles) VALUES(@incident_id,1,JSON_ARRAY());
+  SELECT @incident_id;")
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request DELETE \
+  --data '{"revision":1}' "$base_url/api/incidents/$divera_delete_id")" = 409
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents" |
+  INCIDENT_ID="$divera_delete_id" php -r '
+    $items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+    $matches=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")));
+    assert(count($matches)===1 && $matches[0]["canDelete"]===false);
+  '
+
+foreign_delete_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte --execute="
+  INSERT INTO organizations(name) VALUES('Fremde Löschwehr'); SET @organization_id=LAST_INSERT_ID();
+  INSERT INTO units(organization_id,name) VALUES(@organization_id,'Fremde Löscheinheit'); SET @unit_id=LAST_INSERT_ID();
+  INSERT INTO incidents(organization_id,title,started_at,message,remark,patient,caller,consolidated_text)
+  VALUES(@organization_id,'Fremder Löscheinsatz','2027-01-09 12:00:00','','','','',''); SET @incident_id=LAST_INSERT_ID();
+  INSERT INTO incident_units(incident_id,unit_id,vehicles) VALUES(@incident_id,@unit_id,JSON_ARRAY());
+  SELECT @incident_id;")
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request DELETE \
+  --data '{"revision":1}' "$base_url/api/incidents/$foreign_delete_id")" = 404
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DELETE FROM incidents WHERE id=$foreign_delete_id;
+    DELETE FROM units WHERE organization_id=(SELECT id FROM organizations WHERE name='Fremde Löschwehr');
+    DELETE FROM organizations WHERE name='Fremde Löschwehr'"
+
 # Die Einheitsstatistik wahrt Rollen und Mandanten und ordnet lokale Zeitgrenzen sowie tatsächliche Beteiligung korrekt zu.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="SET @leader_id=(SELECT id FROM users WHERE email='leitung1@example.test');
