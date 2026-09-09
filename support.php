@@ -31,7 +31,7 @@ function assertResponseIntegers(mixed $value): void
 function pdfEncode(string $text): string
 {
     if (!function_exists('iconv')) throw new ApiError(503, 'PDF-Export ist auf diesem Server nicht verfügbar');
-    // ponytail: WinAnsi hält den Renderer abhängigkeitsfrei; bei häufigen Ablehnungen eine Unicode-Schrift einbetten.
+    // WinAnsi hält den Renderer abhängigkeitsfrei; bei häufigen Ablehnungen eine Unicode-Schrift einbetten.
     $encoded = @iconv('UTF-8', 'Windows-1252', str_replace(["\r\n", "\r", "\t"], ["\n", "\n", '    '], $text));
     if ($encoded === false) throw new ApiError(422, 'Der PDF-Export enthält Zeichen, die nicht verlustfrei dargestellt werden können');
     return preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $encoded) ?? '';
