@@ -69,8 +69,14 @@ try {
     $lock = new PDO($config['dsn'], $config['user'], $config['password'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
     $lock->beginTransaction();
     $lock->query('SELECT id FROM auth_cleanup_state WHERE id=1 FOR UPDATE')->fetch();
-    db()->exec('SET SESSION innodb_lock_wait_timeout=1');
-    cleanupAuthenticationData();
+    $originalLockWaitTimeout = (int)one('SELECT @@session.innodb_lock_wait_timeout AS timeout')['timeout'];
+    try {
+        db()->exec('SET SESSION innodb_lock_wait_timeout=1');
+        cleanupAuthenticationData();
+    } finally {
+        db()->exec("SET SESSION innodb_lock_wait_timeout=$originalLockWaitTimeout");
+    }
+    assert((int)one('SELECT @@session.innodb_lock_wait_timeout AS timeout')['timeout'] === $originalLockWaitTimeout);
     assert((int)one('SELECT COUNT(*) AS n FROM sessions WHERE user_id IN (?,?)', $users)['n'] === 2);
     assert(one('SELECT last_run_at FROM auth_cleanup_state WHERE id=1')['last_run_at'] === $times['due']);
     $lock->rollBack();
