@@ -36,7 +36,7 @@ assert.match(deployment, /put "public\/styles\.css" "public\/styles\.css"/);
 assert.match(deployment, /put "public\/app\.js" "public\/app\.js"/);
 assert.match(screenshotsWorkflow, /pull_request:\s*\n\s*paths:\s*\n\s*- public\/\*\*/);
 assert.doesNotMatch(screenshotsWorkflow, /pull_request_target/);
-assert.match(screenshotsWorkflow, /actions\/upload-artifact@v4/);
+assert.match(screenshotsWorkflow, /actions\/upload-artifact@v7/);
 assert.match(screenshotsWorkflow, /playwright@1\.55\.0/);
 assert.match(screenshotsWorkflow, /mcr\.microsoft\.com\/playwright:v1\.55\.0-noble/);
 assert.match(screenshotsWorkflow, /--network "\$network"/);
@@ -46,7 +46,7 @@ assert.doesNotMatch(screenshotsWorkflow, /uploads\.github\.com|user-attachments/
 assert.match(screenshotCommentWorkflow, /workflow_run:/);
 assert.doesNotMatch(screenshotCommentWorkflow, /pull_request_target|secrets\.[A-Z_]*TOKEN/);
 assert.match(screenshotCommentWorkflow, /head_repository\.full_name == github\.repository/);
-assert.match(screenshotCommentWorkflow, /actions\/download-artifact@v5/);
+assert.match(screenshotCommentWorkflow, /actions\/download-artifact@v8/);
 assert.match(screenshotCommentWorkflow, /gh_2\.99\.0_linux_amd64/);
 assert.doesNotMatch(screenshotCommentWorkflow, /--attach|uploads\.github\.com|user-attachments/);
 assert.match(screenshotCommentWorkflow, /filename="\$\(basename "\$file"\)"/);
