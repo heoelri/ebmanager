@@ -48,8 +48,16 @@ assert.doesNotMatch(screenshotCommentWorkflow, /pull_request_target|secrets\.[A-
 assert.match(screenshotCommentWorkflow, /head_repository\.full_name == github\.repository/);
 assert.match(screenshotCommentWorkflow, /actions\/download-artifact@v5/);
 assert.match(screenshotCommentWorkflow, /gh_2\.99\.0_linux_amd64/);
-assert.match(screenshotCommentWorkflow, /--attach "\$file"/);
-assert.match(screenshotCommentWorkflow, /test "\$\{#files\[@\]\}" -eq 16/);
+assert.doesNotMatch(screenshotCommentWorkflow, /--attach|uploads\.github\.com|user-attachments/);
+assert.match(screenshotCommentWorkflow, /filename="\$\(basename "\$file"\)"/);
+assert.match(screenshotCommentWorkflow, /git\/blobs/);
+assert.match(screenshotCommentWorkflow, /git\/trees/);
+assert.match(screenshotCommentWorkflow, /git\/commits/);
+assert.match(screenshotCommentWorkflow, /refs\/heads\/\$screenshot_branch/);
+assert.match(screenshotCommentWorkflow, /raw\.githubusercontent\.com\/\$GITHUB_REPOSITORY\/\$screenshot_commit/);
+assert.doesNotMatch(screenshotCommentWorkflow, /Workflow-Artefakt herunterladen/);
+assert.match(screenshotCommentWorkflow, /expected_files=\([\s\S]*?01-anmeldung\.png[\s\S]*?30-wehrfuehrung-verwaltung\.png/);
+assert.match(screenshotCommentWorkflow, /test "\$\(basename "\$\{files\[\$index\]\}"\)" = "\$\{expected_files\[\$index\]\}"/);
 assert.match(screenshotCommentWorkflow, /contains\(\\"\$marker\\"\)/);
 assert.match(screenshotCommentWorkflow, /commits\/\$HEAD_SHA\/pulls/);
 assert.match(screenshotCommentWorkflow, /concurrency:[\s\S]*?cancel-in-progress: true/);
