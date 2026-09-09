@@ -16,8 +16,11 @@ for _ in {1..60}; do
 done
 "${compose[@]}" exec -T db mysql --host=127.0.0.1 --user=root -ptest-password einsatzberichte --execute="SELECT 1" >/dev/null
 
-# Eine Altinstallation erhält Workflow, Stammdaten, Revisionen und historische Namens-Snapshots genau einmal.
+# Eine Altinstallation erhält Workflow, Stammdaten, Revisionen, historische Namens-Snapshots und Soft-Delete genau einmal.
 "${compose[@]}" exec -T db mysql --default-character-set=utf8mb4 --user=root -ptest-password einsatzberichte --execute="
+  DROP TABLE incident_deletions;
+  ALTER TABLE incidents DROP COLUMN deleted_at;
+  DELETE FROM schema_migrations WHERE name='006-incident-soft-delete.sql';
   ALTER TABLE reports DROP COLUMN author_name;
   ALTER TABLE report_crew DROP COLUMN member_name;
   ALTER TABLE incidents DROP COLUMN report_data_frozen;
@@ -73,13 +76,16 @@ result="$("${compose[@]}" exec -T db mysql --user=root -ptest-password --batch -
     (SELECT COUNT(*) FROM schema_migrations WHERE name='002-inactive-unit-members.sql'),'|',
     (SELECT COUNT(*) FROM schema_migrations WHERE name='003-report-additional-vehicles.sql'),'|',
     (SELECT COUNT(*) FROM schema_migrations WHERE name='004-report-revisions.sql'),'|',
+    (SELECT COUNT(*) FROM schema_migrations WHERE name='006-incident-soft-delete.sql'),'|',
     (SELECT GROUP_CONCAT(revision ORDER BY id) FROM reports WHERE id BETWEEN 10 AND 13),'|',
     (SELECT GROUP_CONCAT(revision ORDER BY id) FROM incidents WHERE id BETWEEN 10 AND 13),'|',
     (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='report_additional_vehicles'),'|',
     (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='member_units' AND column_name='active'),'|',
-    (SELECT CONCAT(COUNT(*),':',COALESCE(MAX(active),9)) FROM member_units WHERE member_id=10 AND unit_id=10)
+    (SELECT CONCAT(COUNT(*),':',COALESCE(MAX(active),9)) FROM member_units WHERE member_id=10 AND unit_id=10),'|',
+    (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='incidents' AND column_name='deleted_at'),'|',
+    (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='incident_deletions')
   )")"
-test "$result" = '1|1|author_draft,unit_review,wehr_review,wehr_review|4|1|1|1|1|7,2,2,2|9,2,2,2|1|1|1:0'
+test "$result" = '1|1|author_draft,unit_review,wehr_review,wehr_review|4|1|1|1|1|1|7,2,2,2|9,2,2,2|1|1|1:0|1|1'
 
 # Migration 005 bewahrt heutige Namen, synchronisiert Zusammenfassungen und übernimmt keine Namen aus Fremdmandanten.
 test "$("${compose[@]}" exec -T db mysql --default-character-set=utf8mb4 --user=root -ptest-password --batch --skip-column-names einsatzberichte --execute="

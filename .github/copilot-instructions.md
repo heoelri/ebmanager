@@ -80,6 +80,7 @@
 - `patient`, `caller`, Geschädigte, Schädiger und Berichtstexte sind sensible, mandantengebundene Einsatzdaten. Protokolliere sie nicht.
 - Die erste Statistikansicht ist ausschließlich für Einheitsführungen verfügbar und aggregiert nur deren aktuell zugeordnete Einheit. Alarmierte Fahrzeuge der eigenen Einheit stammen aus `incident_units.vehicles`; dort als fremd markierte Fahrzeuge werden nicht gezählt. Tatsächliche Beteiligung stammt aus `report_crew` und zusätzliche Fahrzeuge aus `report_additional_vehicles`; Zeitkategorien werden mit den Grenzen aus `constants.php` in `Europe/Berlin` berechnet.
 - Die Mitgliederstatistik zählt weiterhin je Mitglieds-ID; ihre Bezeichnung stammt aus dessen zeitlich letztem Einsatz im gewählten Zeitraum (bei gleicher Alarmzeit höchste Berichts-ID), nicht aus dem heutigen Stamm.
+- Manuell angelegte Einsätze können revisionsgeschützt dauerhaft ausgeblendet werden. Die Wehrleitung darf dies organisationsweit auch bei vorhandenen Berichten; die Einheitsführung nur bei ausschließlicher Zuordnung ihrer Einheit und ohne Bericht. DIVERA-Einsätze sind ausgeschlossen. Fachliche Daten bleiben erhalten, alle normalen Lese-/Statistik-/Exportpfade behandeln den Einsatz als nicht vorhanden und `incident_deletions` bewahrt Akteurssnapshot und UTC-Zeitpunkt.
 
 ## Mitglieder, Fahrzeuge und Besatzung
 
@@ -149,5 +150,5 @@
 
 ## Betrieb und Zurücksetzen
 
-- Es gibt keine Lösch- oder Reset-Funktion in der Oberfläche.
+- Es gibt keine physische Lösch- oder Reset-Funktion in der Oberfläche. Das Löschen manueller Einsätze ist ausschließlich ein dauerhaftes Soft-Delete ohne Wiederherstellung.
 - Ein vollständiger Reset löscht alle MySQL-Tabellen und importiert `schema.sql` neu. Dabei gehen alle Benutzer, Einsätze und Berichte endgültig verloren.

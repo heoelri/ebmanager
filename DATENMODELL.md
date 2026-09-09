@@ -67,6 +67,8 @@ erDiagram
     members ||--o{ member_qualifications : besitzt
     qualifications ||--o{ member_qualifications : wird_zugeordnet
     incidents ||--o{ reports : hat
+    incidents ||--o| incident_deletions : wird_ausgeblendet
+    users ||--o{ incident_deletions : startet
     units ||--o{ reports : verfasst
     users ||--o{ reports : erstellt
     reports ||--o{ report_transitions : durchlaeuft
@@ -197,6 +199,7 @@ ersten Umsetzung bewusst nicht persistiert.
 | `consolidated_at` | DATETIME, NULL | Zeitpunkt der Konsolidierung |
 | `revision` | INT UNSIGNED, NOT NULL, DEFAULT 1 | Monotoner Stand des Einsatzes einschließlich Gesamttext, Einheitenzuordnungen und Quellberichte; API-Ausgabe nur an die Wehrleitung |
 | `report_data_frozen` | TINYINT(1), NOT NULL, DEFAULT 0 | Ab der ersten erfolgreichen Berichtsanlage dauerhaft 1; schützt gemeinsame Einsatzdaten und bestehende Einheits-Fahrzeuglisten |
+| `deleted_at` | DATETIME, NULL | UTC-Zeitpunkt der dauerhaften Ausblendung; NULL für aktive Einsätze |
 
 Ein importierter Einsatz ist über `(organization_id, divera_id)` eindeutig.
 Vor dem ersten Bericht übernimmt ein erneuter Import echte Änderungen. Danach
@@ -208,6 +211,25 @@ gespeichert. Manuelle Einsätze haben keine
 und normalisiert. Beim Import sendet der Browser nur diese ID; alle kanonischen
 Einsatzfelder werden unmittelbar danach serverseitig erneut aus DIVERA
 gelesen.
+
+Manuelle Einsätze können revisionsgeschützt dauerhaft ausgeblendet werden.
+Dabei bleiben Einsatz, Zuordnungen, Berichte, Besatzung und bisherige
+Prüfverläufe erhalten. Alle normalen Listen, Statistiken, Detail- und
+Exportpfade behandeln einen gesetzten Löschzeitpunkt wie einen nicht
+vorhandenen Einsatz. DIVERA-Einsätze sind nicht löschbar.
+
+### `incident_deletions`
+
+Die Tabelle enthält genau einen unveränderlichen Audit-Eintrag je gelöschtem
+Einsatz. Sie speichert keine Einsatzinhalte.
+
+| Spalte | Typ | Bedeutung |
+|---|---|---|
+| `incident_id` | BIGINT UNSIGNED, PK/FK | Ausgeblendeter Einsatz |
+| `actor_id` | BIGINT UNSIGNED, FK, NULL | Auslösender Benutzer; wird bei späterer Benutzerlöschung NULL |
+| `actor_name` | VARCHAR(200), NOT NULL | Anzeigename zum Löschzeitpunkt |
+| `actor_role` | ENUM, NOT NULL | `wehrleitung` oder `einheitsleitung` zum Löschzeitpunkt |
+| `created_at` | DATETIME, NOT NULL | Löschzeitpunkt in UTC |
 
 ### `incident_units`
 

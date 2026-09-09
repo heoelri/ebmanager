@@ -99,8 +99,9 @@ Einheitsgrenzen. Antworten sind JSON, sofern nicht als PDF bezeichnet.
 | `POST /users` | W | `name, email, role, unitIds[]` (alternativ `unitId`) → 201 `{id}`; siebentägige Einladung, kein Startpasswort |
 | `PUT /users/:id` | W | `name, email, role, unitIds[]`, optional `password` → `{ok:true}`; letzte Wehrführung bleibt erhalten |
 | `POST /users/:id/invitation` | W, nicht eigener Zugang | `{}` → `{ok:true}`; siebentägige Neueinladung; Widerruf erst bei erfolgreicher Mailannahme |
-| `GET /incidents` | A | sichtbare Einsätze einschließlich `assignments:[]`, `units` (Anzeigetext), `reportStatus{}`; siehe unten |
+| `GET /incidents` | A | sichtbare Einsätze einschließlich `assignments:[]`, `units` (Anzeigetext), `reportStatus{}`, `canDelete`; E/W erhalten zusätzlich `revision`; siehe unten |
 | `POST /incidents` | A, erlaubte Einheiten | `title, startedAt, unitIds[]`, optional `address` → 201 `{id}`, ggf. `warning` |
+| `DELETE /incidents/:id` | W; E nur alleinige eigene Einheit ohne Bericht | `revision` → `{ok:true}`; nur manuelle Einsätze, dauerhaft ausgeblendet |
 | `GET /incidents/:id/reports` | A | Liste ausschließlich sichtbarer Berichte; siehe unten |
 | `POST /incidents/:id/reports` | A, alarmierte/erlaubte Einheit | Berichtseingabe plus `unitId` → 201 `{id}` |
 | `PUT /reports/:id` | Autor in `author_draft` / E in `unit_review` | vollständige Berichtseingabe plus `revision` → `{ok:true}` |
@@ -203,9 +204,11 @@ Antworten behalten die bestehenden Schlüsselnamen:
 - `incidents[].assignments`: Liste mit `unitId`, `vehicles` (Liste gespeicherter
   Fahrzeugtexte oder -objekte), `hasReport` (0/1), ggf. `reportAuthorName`
   für eine andere Führungskraft. Keine zusätzliche Einheitsprojektion für
-  nicht berechtigte Rollen. Nur W erhält `consolidated_text` und die
-  Einsatz-`revision`; `consolidated_at`/`reportStatus` bleiben rollenabhängig
-  verfügbare Zustandsdaten.
+  nicht berechtigte Rollen. `canDelete` wird ausschließlich serverseitig aus
+  Rolle, Herkunft, vollständiger Zuordnung und vorhandenen Berichten bestimmt.
+  E und W erhalten die Einsatz-`revision`; nur W erhält `consolidated_text`.
+  `consolidated_at`/`reportStatus` bleiben rollenabhängig verfügbare
+  Zustandsdaten.
 - Berichte: `crew` als Liste, `damaged_party`, `damaging_party`,
   `incident_command`, `classification` als Objekte; historische SQL-NULL-
   Kontakte werden `{}`. Neu gespeicherte leere Kontakte enthalten leere
@@ -222,6 +225,10 @@ Das Speicherschema der JSON-Spalten bleibt unverändert.
 ## Revisionen und Fehler
 
 Bearbeitungen und Übergänge benötigen die zuletzt geladene Berichtsrevision.
+Das Ausblenden eines manuellen Einsatzes benötigt die zuletzt geladene
+Einsatzrevision. Bereits gelöschte, veraltete oder aus DIVERA stammende
+Einsätze liefern 409 ohne Änderung. Gelöschte Einsätze erscheinen in normalen
+Listen, Statistiken, Berichts-, Detail- und PDF-Endpunkten nicht mehr.
 Die Konsolidierung benötigt die zuletzt geladene Einsatzrevision und genau
 alle aktuellen Quellberichte mit deren geladenen Revisionen; jede alarmierte
 Einheit muss in `wehr_review` sein. Fehlende/falsch typisierte Vorbedingungen:
@@ -261,6 +268,7 @@ Bekannte Unique-Konflikte erhalten genau diese 409-Meldungen:
 
 Weitere 409-Fälle umfassen abgeschlossene Ersteinrichtung, letzte Wehrführung,
 Zurücksetzen des eigenen Zugangs, fehlende Quellberichte, nicht abgeschlossene
-Gesamtberichte, veraltete Revisionen und wiederholte Übergaben.
+Gesamtberichte, veraltete Revisionen, wiederholte Übergaben und unzulässige
+beziehungsweise wiederholte Einsatzlöschungen.
 SQL, Constraint-Rohmeldungen und personenbezogene Fehlerwerte werden weder
 im Fehlervertrag noch in allgemeinen Fehlerlogs ausgegeben.

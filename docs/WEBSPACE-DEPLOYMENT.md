@@ -248,6 +248,33 @@ Wenn das automatische Deployment verwendet wird, müssen erforderliche Migration
 Für andere Ausgangs- oder Zielversionen gelten die jeweils datierten
 Upgrade-Hinweise im [Changelog](../CHANGELOG.md).
 
+### Manuelle Einsätze dauerhaft ausblenden (#112)
+
+1. Datenbank und bisherige Anwendungsdateien sichern.
+2. Prüfen, dass Migrationen 001 bis 005 angewendet und in
+   `schema_migrations` vermerkt sind.
+3. `migrations/006-incident-soft-delete.sql` mit einem DDL-berechtigten
+   Administrationskonto vollständig ausführen.
+4. Prüfen, dass `incidents.deleted_at` und die Tabelle
+   `incident_deletions` vorhanden sind. Danach einmalig vermerken:
+
+   ```sql
+   INSERT INTO schema_migrations(name,applied_at)
+   VALUES('006-incident-soft-delete.sql',UTC_TIMESTAMP());
+   ```
+
+   Lokal übernimmt `docker/migrate.sh` den Vermerk automatisch.
+5. Erst danach PHP- und Browserdateien gemeinsam bereitstellen. `/api/bootstrap`
+   darf keinen Schemafehler melden. Mit einem Testeinsatz die Rollenbegrenzung,
+   Revisionsprüfung, dauerhafte Ausblendung und den Audit-Eintrag prüfen.
+
+**Rollback von 006:** Den vorherigen Anwendungscode wiederherstellen. Die
+nullable Spalte und die leere beziehungsweise bereits befüllte Audit-Tabelle
+können im Schema verbleiben; sie verändern das Verhalten des alten Codes
+nicht. Bereits ausgeblendete Einsätze werden vom alten Code wieder sichtbar.
+Ist das unerwünscht, Rollback abbrechen und vorwärts korrigieren. Audit-Einträge
+oder Einsatzdaten nicht löschen.
+
 ### Revisionen für Einheits- und Gesamtberichte einführen (#86)
 
 1. Ein Wartungsfenster vereinbaren und Schreibzugriffe während Migration und
