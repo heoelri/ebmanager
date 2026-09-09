@@ -207,6 +207,37 @@ function transaction(callable $work): mixed
     }
 }
 
+function cleanupAuthenticationData(): void
+{
+    $state = one(
+        'SELECT last_run_at<=UTC_TIMESTAMP()-INTERVAL ? SECOND AS due FROM auth_cleanup_state WHERE id=1',
+        [AUTH_CLEANUP_INTERVAL_SECONDS]
+    );
+    if (!$state) throw new ApiError(503, 'Datenbankschema ist unvollständig. Der Zustand der Anmeldebereinigung fehlt.');
+    if (!$state['due']) return;
+
+    transaction(function () {
+        // A concurrent request must not wait for or repeat the same cleanup batch.
+        if (!one(
+            'SELECT id FROM auth_cleanup_state WHERE id=1 AND last_run_at<=UTC_TIMESTAMP()-INTERVAL ? SECOND FOR UPDATE SKIP LOCKED',
+            [AUTH_CLEANUP_INTERVAL_SECONDS]
+        )) return;
+        $cutoffs = one(
+            'SELECT UTC_TIMESTAMP() AS now,UTC_TIMESTAMP()-INTERVAL ? DAY AS history_cutoff',
+            [LOGIN_HISTORY_RETENTION_DAYS]
+        );
+        query(
+            'DELETE FROM sessions WHERE expires_at<=? ORDER BY expires_at,token LIMIT ' . AUTH_CLEANUP_BATCH_SIZE,
+            [$cutoffs['now']]
+        );
+        query(
+            'DELETE FROM login_history WHERE logged_in_at<? ORDER BY logged_in_at,id LIMIT ' . AUTH_CLEANUP_BATCH_SIZE,
+            [$cutoffs['history_cutoff']]
+        );
+        query('UPDATE auth_cleanup_state SET last_run_at=UTC_TIMESTAMP() WHERE id=1');
+    });
+}
+
 function input(): array
 {
     static $data;

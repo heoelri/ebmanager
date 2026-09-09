@@ -143,6 +143,9 @@ Beide Fremdschlüssel werden beim Löschen ihres Elternsatzes kaskadiert.
 | `expires_at` | DATETIME, NOT NULL | Ablaufzeitpunkt; Sitzungen gelten zwölf Stunden |
 
 Der Klartext-Sitzungswert existiert nur im Browsercookie. Sitzungen werden beim Löschen des Benutzers mitgelöscht.
+Ab `expires_at <= UTC_TIMESTAMP()` sind sie unabhängig von der physischen
+Bereinigung ungültig. Der anfragebasierte Bereinigungslauf entfernt höchstens
+500 abgelaufene Sitzungen je Stunde, älteste zuerst mit Token als Tie-Breaker.
 
 ### `login_history`
 
@@ -154,7 +157,40 @@ Speichert ausschließlich erfolgreiche Anmeldungen. IP-Adresse, Browserdaten und
 | `user_id` | BIGINT UNSIGNED, FK | Angemeldeter Benutzer |
 | `logged_in_at` | DATETIME, NOT NULL | Anmeldezeitpunkt in UTC |
 
-Die Verwaltung zeigt der Wehrleitung den neuesten Eintrag pro Benutzer. Beim Löschen eines Benutzers wird seine Login-Historie mitgelöscht.
+Die Aufbewahrungsfrist beträgt 90 Tage. Die Verwaltung zeigt der Wehrleitung
+nur den neuesten Eintrag mit `logged_in_at >= UTC_TIMESTAMP() - INTERVAL 90 DAY`;
+ohne solchen Eintrag ist `loginHistory` leer, auch wenn ein Bereinigungsrückstand
+noch ältere Zeilen enthält. Dies bedeutet nicht zwingend, dass der Benutzer
+noch nie angemeldet war. Beim Löschen eines Benutzers wird seine Login-Historie
+mitgelöscht.
+
+Der zusätzliche Index `login_history_time (logged_in_at, id)` unterstützt die
+zeitgeordnete Bereinigung. Ein Batch entfernt maximal 500 ältere Einträge,
+bei gleichem Zeitpunkt nach ID. Genau 90 Tage alte Einträge bleiben bis zur
+Überschreitung der Grenze erhalten.
+
+### `auth_cleanup_state`
+
+Installationsweiter technischer Steuerzustand ohne Benutzer-, Mandanten- oder
+Zugangsdaten. Er ist keine fachliche mandantenübergreifende Leseschnittstelle.
+
+| Spalte | Typ | Bedeutung |
+|---|---|---|
+| `id` | TINYINT UNSIGNED, PK, CHECK = 1 | Genau eine fest vorgegebene Steuerzeile |
+| `last_run_at` | DATETIME, NOT NULL | UTC-Zeitpunkt des letzten vollständig erfolgreichen Batches |
+
+Schema und Migration initialisieren den Zeitpunkt mit `1970-01-01 00:00:00`,
+damit der erste API-Zugriff einen Batch auslöst. Weitere Läufe benötigen
+mindestens 3600 Sekunden Abstand. Eine Zeilensperre mit `SKIP LOCKED` lässt
+konkurrierende Requests ohne zweiten Batch weiterlaufen. Sitzungs- und
+Historienbereinigung sowie Laufzeitpunkt werden gemeinsam committed; bei
+Fehlern bleibt der Lauf fällig. Sie erfolgen vor den fachlichen
+Schreibtransaktionen. Einmallinks werden von dieser Bereinigung nicht berührt.
+
+Ohne API-Nutzung und bei mehr als 500 fälligen Zeilen pro Tabelle verzögert
+sich die physische Löschung. Frist, Intervall und Batchgröße stehen zentral
+in `constants.php`. Betrieb und Migration:
+[Webspace-Deployment](docs/WEBSPACE-DEPLOYMENT.md#sitzungen-und-loginhistorie-bereinigen-17-97).
 
 ### `password_resets`
 

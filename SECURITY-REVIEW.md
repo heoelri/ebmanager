@@ -1,5 +1,45 @@
 # Security Review
 
+## Sitzungs- und Anmeldebereinigung vom 9. September 2026 (#17, Teil von #97)
+
+Die bestätigte Frist beträgt 90 Tage für erfolgreiche Anmeldungen. Erfasst
+werden keine zusätzlichen personenbezogenen Daten. Das API-Antwortformat
+bleibt gleich; die weiterhin ausschließlich der Wehrleitung zugängliche
+Benutzerverwaltung filtert zusätzlich auf diese Frist. Der Browser
+unterscheidet fehlende gespeicherte Werte von einer nie erfolgten Anmeldung.
+
+Die Bereinigung ist eine installationsweite technische Wartung ohne
+clientgesteuerte Parameter oder Datenrückgabe, kein neuer fachlicher
+mandantenübergreifender Zugriff. Sie entfernt ausschließlich bereits
+abgelaufene Sitzungen und ältere Login-Metadaten. Gültige Sitzungen,
+Passwort-/Einladungstoken, Benutzer, Einsätze, Berichte und Auditverläufe
+bleiben unberührt. Die bestehenden Sitzungsablauf- und Rollenprüfungen
+gelten unabhängig vom Zeitpunkt der physischen Bereinigung.
+
+`auth_cleanup_state` enthält nur einen UTC-Laufzeitpunkt. Eine kurze
+Transaktion sperrt die Steuerzeile mit `FOR UPDATE SKIP LOCKED` und prüft
+die Fälligkeit erneut. Pro Tabelle werden höchstens 500 Zeilen entfernt;
+frühestens nach 3600 Sekunden folgt ein weiterer Batch. Ein konkurrierender
+Request wartet nicht auf die Steuersperre und startet keinen zweiten Batch.
+Die beiden Löschungen und der Laufzeitpunkt werden atomar geschrieben.
+Alle Zeitgrenzen werden ausdrücklich mit `UTC_TIMESTAMP()` bestimmt.
+
+Die Wartung läuft vor fachlichen Schreibtransaktionen und ersetzt die
+bisherige unbegrenzte Sitzungsbereinigung innerhalb des Loginvorgangs.
+Fehler werden über den vorhandenen neutralen API-/SQL-Fehlerpfad sichtbar
+gemeldet, nicht verschluckt; nach Rollback bleibt die Wartung fällig.
+Es wird weder ein neuer öffentlicher Wartungsendpunkt noch ein Cronjob
+eingeführt. Ohne Verkehr bzw. bei Rückstand ist die physische Löschung
+später möglich; diese Grenze ist ausdrücklich dokumentiert.
+
+Die gezielten Regressionen prüfen UTC bei abweichender Sitzungszeitzone,
+Sekundengrenzen um 90 Tage/Sitzungsablauf, Batchobergrenzen, Stundendrossel,
+konkurrierende Worker, atomaren Rollback bei Löschfehlern, erhaltene
+Einmallinks und gültige Sitzungen, mehrere synthetische Organisationen,
+API-Auslösung ohne neuen Login sowie die leere Sicht auf alte Loginwerte.
+Dies ist ein fokussierter Integrationsreview, kein vollständiger Pentest.
+Die weiteren Sicherheits-/Betriebspakete aus #17/#97 bleiben separat.
+
 ## Gemeinsame Übungskennzeichnung vom 9. September 2026 (#115)
 
 Der neue Schreibpfad sperrt den aktiven Einsatz im Mandanten des angemeldeten

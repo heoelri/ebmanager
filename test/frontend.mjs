@@ -730,6 +730,9 @@ assert.match(css, /\.resource-section > summary:focus-visible\s*\{[\s\S]*?outlin
 
 const adminSource = html.match(/async function admin\(\)[\s\S]*?(?=\nfunction editUser)/)?.[0];
 assert(adminSource, 'Verwaltungsbereich fehlt');
+assert.match(adminSource, /Letzte gespeicherte Anmeldung:/);
+assert.match(adminSource, /keine im Aufbewahrungszeitraum/);
+assert.doesNotMatch(adminSource, /noch keine/);
 assert.match(adminSource, /<h2>Einheiten \(\$\{units\.length\}\)<\/h2>/);
 assert.match(adminSource, /units\.map\(unit=>`<p><b>\$\{esc\(unit\.name\)\}<\/b><\/p>`\)/);
 const systemOverviewSource = html.match(/async function systemOverview[\s\S]*?(?=\nfunction divera)/)?.[0];

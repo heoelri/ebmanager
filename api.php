@@ -12,9 +12,10 @@ function databaseConfigurationError(): ?string
             "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN
              ('organizations','units','users','user_units','sessions','login_history','password_resets','incidents','incident_units',
               'divera_imports','members','member_units','qualifications','member_qualifications','vehicles','reports','report_transitions','report_crew',
-              'report_additional_vehicles','incident_deletions','incident_exercise_changes')"
+              'report_additional_vehicles','incident_deletions','incident_exercise_changes','auth_cleanup_state')"
         )->fetchColumn();
-        if ((int)$tables !== 21) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
+        if ((int)$tables !== 22) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
+        if (!one('SELECT last_run_at FROM auth_cleanup_state WHERE id=1')) return 'Datenbankschema ist unvollständig. Der Zustand der Anmeldebereinigung fehlt.';
         $reportColumns = db()->query(
             "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='reports'
              AND column_name IN ('report_year','running_number','damaged_party','damaging_party','incident_command')"
@@ -1229,8 +1230,11 @@ try {
     if ($method === 'GET' && $path === '/api/bootstrap') {
         $databaseError = databaseConfigurationError();
         if ($databaseError) respond(503, ['error' => $databaseError]);
+        cleanupAuthenticationData();
         respond(200, ['needsSetup' => !one('SELECT id FROM users LIMIT 1')]);
     }
+
+    cleanupAuthenticationData();
 
     if ($method === 'POST' && $path === '/api/setup') {
         if (one('SELECT id FROM users LIMIT 1')) throw new ApiError(409, 'Einrichtung abgeschlossen');
@@ -1268,7 +1272,6 @@ try {
             if (password_needs_rehash($login['password_hash'], PASSWORD_DEFAULT)) {
                 query('UPDATE users SET password_hash=? WHERE id=?', [password_hash($password, PASSWORD_DEFAULT), $login['id']]);
             }
-            query('DELETE FROM sessions WHERE expires_at<=UTC_TIMESTAMP()');
             if (is_string($_COOKIE[$cookieName] ?? '') && preg_match('/^[a-f0-9]{64}$/', $_COOKIE[$cookieName] ?? '')) query('DELETE FROM sessions WHERE token=?', [hash('sha256', $_COOKIE[$cookieName])]);
             query('INSERT INTO sessions(token,user_id,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 12 HOUR)', [hash('sha256', $token), $login['id']]);
             query('INSERT INTO login_history(user_id,logged_in_at) VALUES(?,UTC_TIMESTAMP())', [$login['id']]);
@@ -1485,8 +1488,9 @@ try {
         $history = query(
             "SELECT h.user_id,DATE_FORMAT(MAX(h.logged_in_at),'%Y-%m-%dT%H:%i:%sZ') logged_in_at
              FROM login_history h JOIN users u ON u.id=h.user_id
-             WHERE u.organization_id=? GROUP BY h.user_id ORDER BY h.user_id",
-            [$user['organization_id']]
+             WHERE u.organization_id=? AND h.logged_in_at>=UTC_TIMESTAMP()-INTERVAL ? DAY
+             GROUP BY h.user_id ORDER BY h.user_id",
+            [$user['organization_id'], LOGIN_HISTORY_RETENTION_DAYS]
         )->fetchAll();
         $historyByUser = [];
         foreach ($history as $login) $historyByUser[(int)$login['user_id']][] = $login['logged_in_at'];

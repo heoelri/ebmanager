@@ -301,6 +301,80 @@ und Historientabelle können im Schema verbleiben; alter Code ignoriert beide.
 Gesetzte Kennzeichnungen sind im alten Browser nicht sichtbar, bleiben aber
 gespeichert. Historieneinträge nicht löschen.
 
+### Sitzungen und Loginhistorie bereinigen (#17, #97)
+
+Die bestätigte Aufbewahrungsfrist für erfolgreiche Anmeldungen beträgt
+**90 Tage**, ohne Ausnahme für die letzte Anmeldung eines Benutzers.
+Diese Produktentscheidung ist keine Aussage über gesetzliche
+Aufbewahrungsfristen fachlicher Berichte. Für Einsatzdaten, Mitglieder,
+Einmallinks und Sicherungen werden hier keine neuen Löschregeln eingeführt;
+die weiteren Betriebsentscheidungen aus #97 bleiben offen.
+
+1. Datenbank und bisherige Anwendungsdateien sichern. Die Aktivierung entfernt
+   später alte Login-Einträge endgültig; die Migration selbst löscht nichts.
+2. Prüfen, dass Migrationen 001 bis 007 vollständig ausgeführt und im
+   Migrationsledger registriert sind.
+3. `migrations/008-auth-retention.sql` mit dem Administrationskonto ausführen.
+   Sie ergänzt `login_history_time (logged_in_at, id)` sowie die Tabelle
+   `auth_cleanup_state` mit der Steuerzeile `id=1`.
+4. Index, Tabellendefinition und Steuerzeile prüfen; initial ist `last_run_at`
+   auf `1970-01-01 00:00:00` gesetzt. Erst nach vollständigem Erfolg registrieren:
+
+   ```sql
+   INSERT INTO schema_migrations(name,applied_at)
+   VALUES('008-auth-retention.sql',UTC_TIMESTAMP());
+   ```
+
+   Lokal übernimmt `docker/migrate.sh` die Registrierung. Bei einem
+   unterbrochenen DDL-Lauf nicht die gesamte Datei blind wiederholen:
+   vorhandenen Index, Tabelle und Steuerzeile mit den Definitionen der
+   Migration vergleichen und ausschließlich fehlende Anweisungen nachholen.
+   Einen bestehenden Laufzeitpunkt nicht zur vermeintlichen Reparatur
+   zurücksetzen.
+5. PHP- und Browserdateien gemeinsam ausliefern. `/api/bootstrap` prüft Tabelle
+   und Steuerzeile und löst den ersten begrenzten Batch aus. Gültige Anmeldung,
+   Benutzerverwaltung und erhaltene laufende Sitzungen prüfen.
+
+**Regelbetrieb:** Öffentliche API-Nutzung wie Bootstrap/Anmeldung und
+authentifizierte API-Aufrufe prüfen den Zustand vor der fachlichen
+Verarbeitung. Ein Batch läuft installationsweit höchstens einmal pro Stunde
+und entfernt je maximal 500 abgelaufene Sitzungen und 500 Login-Einträge
+älter als 90 Tage, jeweils die ältesten zuerst. Konkurrenzrequests
+überspringen einen gesperrten Batch. Gültige Sitzungen werden nicht verkürzt;
+abgelaufene Sitzungen sind auch ohne physische Löschung bereits ungültig.
+Die Verwaltung zeigt ältere Login-Einträge auch bei Rückstand nicht mehr an.
+
+Es ist **kein Cronjob erforderlich**. Ohne API-Zugriffe findet keine
+Bereinigung statt; der nächste geeignete Zugriff holt genau einen Batch
+nach. Größere Altbestände werden über mehrere Stunden mit Zugriffen abgebaut,
+nicht in einem langen Request. Die maximale Abbauleistung beträgt bei
+stündlichen Zugriffen 12.000 Zeilen je Tabelle und Tag. Übersteigen dauerhaft
+mehr Zeilen diese Grenze, muss der Betreiber das Datenbudget neu bewerten.
+
+Zur Kontrolle genügt eine nicht personenbezogene Abfrage über die geschützte
+Datenbankverwaltung:
+
+```sql
+SELECT last_run_at FROM auth_cleanup_state WHERE id=1;
+SELECT COUNT(*) AS expired_sessions
+FROM sessions WHERE expires_at<=UTC_TIMESTAMP();
+SELECT COUNT(*) AS old_logins
+FROM login_history WHERE logged_in_at<UTC_TIMESTAMP()-INTERVAL 90 DAY;
+```
+
+Ein Bereinigungsfehler rollt beide Löschungen und den Laufzeitpunkt zurück
+und erscheint als API-Fehler; das PHP-Fehlerlog enthält nur die vorhandenen
+neutralen SQL-Fehlercodes, keine Token oder Anmeldedaten. Der nächste Zugriff
+kann erneut versuchen. Die Bereinigung ist keine Datensicherung und ersetzt
+keinen Wiederherstellungsnachweis.
+
+**Rollback von 008:** PHP- und Browsercode gemeinsam zurücksetzen. Index und
+Steuertabelle dürfen unverändert bleiben; alter Code ignoriert sie und
+wendet die 90-Tage-Regel nicht mehr an. Bereits gelöschte Login-Einträge werden
+dadurch nicht wiederhergestellt. Keine vollständige Datenbanksicherung nur
+für diese technischen Altbestände über inzwischen neu geschriebene
+Einsatzberichte zurückspielen.
+
 ### Revisionen für Einheits- und Gesamtberichte einführen (#86)
 
 1. Ein Wartungsfenster vereinbaren und Schreibzugriffe während Migration und
