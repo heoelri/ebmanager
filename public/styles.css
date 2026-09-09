@@ -19,6 +19,8 @@
   --color-error: #8d0000;
   --color-error-surface: #ffe5e5;
   --color-drag-surface: #fff2f2;
+  --color-exercise: #9b7900;
+  --color-exercise-surface: #fff2b8;
   --radius-small: .35rem;
   --radius: .5rem;
   --radius-large: .6rem;
@@ -312,6 +314,16 @@ td {
   padding: var(--space-small);
   background: var(--color-summary);
   border-inline-start: 4px solid var(--color-secondary);
+  border-radius: var(--radius-small);
+}
+
+.incident-exercise {
+  display: inline-block;
+  margin: 0 0 var(--space-small);
+  padding: .2rem .55rem;
+  color: var(--color-text);
+  background: var(--color-exercise-surface);
+  border: 1px solid var(--color-exercise);
   border-radius: var(--radius-small);
 }
 

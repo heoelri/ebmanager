@@ -94,13 +94,15 @@ Einheitsgrenzen. Antworten sind JSON, sofern nicht als PDF bezeichnet.
 | `POST /units` | W | `name` → 201 `{id}` |
 | `GET /units/:id/members` | A, erlaubte Einheit | aktive Mitglieder: `id, name, divera_id, active` (0/1), `qualifications` (Anzeigetext) |
 | `GET /units/:id/resources` | A, erlaubte Einheit | `{members:[], vehicles:[]}`; Mitglieder auch inaktiv; Fahrzeuge `id, divera_id, name, shortname, fullname` |
-| `GET /statistics?from=…&to=…` | E | einschließlich beider Tage, nur aktuelle Einheit; Standard: Jahresanfang/heute in Europe/Berlin; aggregierte Statistik |
+| `GET /statistics?from=…&to=…` | E | einschließlich beider Tage, nur aktuelle Einheit; Gesamtzahl, reguläre Einsätze und Übungen separat; weitere Auswertungen gemeinsam |
 | `GET /users` | W | Liste `id, name, email, role, unit_ids:[], unit_names, loginHistory:[]`; höchstens neuester Login je Benutzer |
 | `POST /users` | W | `name, email, role, unitIds[]` (alternativ `unitId`) → 201 `{id}`; siebentägige Einladung, kein Startpasswort |
 | `PUT /users/:id` | W | `name, email, role, unitIds[]`, optional `password` → `{ok:true}`; letzte Wehrführung bleibt erhalten |
 | `POST /users/:id/invitation` | W, nicht eigener Zugang | `{}` → `{ok:true}`; siebentägige Neueinladung; Widerruf erst bei erfolgreicher Mailannahme |
-| `GET /incidents` | A | sichtbare Einsätze einschließlich `assignments:[]`, `units` (Anzeigetext), `reportStatus{}`, `canDelete`; E/W erhalten zusätzlich `revision`; siehe unten |
+| `GET /incidents` | A | sichtbare Einsätze einschließlich `assignments:[]`, `units`, `reportStatus{}`, `canDelete`, `is_exercise`, `revision`; siehe unten |
 | `POST /incidents` | A, erlaubte Einheiten | `title, startedAt, unitIds[]`, optional `address` → 201 `{id}`, ggf. `warning` |
+| `PUT /incidents/:id/exercise` | W organisationsweit; E/F bei beteiligter Einheit | `isExercise` (boolean), `revision` → `{ok:true}` |
+| `GET /incidents/:id/exercise-history` | A, sichtbarer Einsatz | chronologische Liste mit `old_value`, `new_value`, Akteurssnapshot und UTC-Zeitpunkt |
 | `DELETE /incidents/:id` | W; E nur alleinige eigene Einheit ohne Bericht | `revision` → `{ok:true}`; nur manuelle Einsätze, dauerhaft ausgeblendet |
 | `GET /incidents/:id/reports` | A | Liste ausschließlich sichtbarer Berichte; siehe unten |
 | `POST /incidents/:id/reports` | A, alarmierte/erlaubte Einheit | Berichtseingabe plus `unitId` → 201 `{id}` |
@@ -206,9 +208,10 @@ Antworten behalten die bestehenden Schlüsselnamen:
   für eine andere Führungskraft. Keine zusätzliche Einheitsprojektion für
   nicht berechtigte Rollen. `canDelete` wird ausschließlich serverseitig aus
   Rolle, Herkunft, vollständiger Zuordnung und vorhandenen Berichten bestimmt.
-  E und W erhalten die Einsatz-`revision`; nur W erhält `consolidated_text`.
-  `consolidated_at`/`reportStatus` bleiben rollenabhängig verfügbare
-  Zustandsdaten.
+  `is_exercise` ist ein boolean und gilt für den gesamten Einsatz.
+  Alle Rollen erhalten die Einsatz-`revision`; nur W erhält
+  `consolidated_text`. `consolidated_at`/`reportStatus` bleiben
+  rollenabhängig verfügbare Zustandsdaten.
 - Berichte: `crew` als Liste, `damaged_party`, `damaging_party`,
   `incident_command`, `classification` als Objekte; historische SQL-NULL-
   Kontakte werden `{}`. Neu gespeicherte leere Kontakte enthalten leere
@@ -225,6 +228,12 @@ Das Speicherschema der JSON-Spalten bleibt unverändert.
 ## Revisionen und Fehler
 
 Bearbeitungen und Übergänge benötigen die zuletzt geladene Berichtsrevision.
+Das Setzen oder Entfernen der gemeinsamen Übungskennzeichnung benötigt die
+zuletzt geladene Einsatzrevision, erhöht nur diese Revision und verändert
+weder Berichtsinhalte noch Berichtsrevisionen oder Workflowstatus. Ein
+identischer gewünschter Wert bleibt ohne neuen Verlaufseintrag unverändert.
+DIVERA-Einzel- und Vollimporte übernehmen oder überschreiben dieses lokale
+Merkmal nicht.
 Das Ausblenden eines manuellen Einsatzes benötigt die zuletzt geladene
 Einsatzrevision. Bereits gelöschte, veraltete oder aus DIVERA stammende
 Einsätze liefern 409 ohne Änderung. Gelöschte Einsätze erscheinen in normalen

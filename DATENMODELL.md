@@ -69,6 +69,8 @@ erDiagram
     incidents ||--o{ reports : hat
     incidents ||--o| incident_deletions : wird_ausgeblendet
     users ||--o{ incident_deletions : startet
+    incidents ||--o{ incident_exercise_changes : kennzeichnet
+    users ||--o{ incident_exercise_changes : startet
     units ||--o{ reports : verfasst
     users ||--o{ reports : erstellt
     reports ||--o{ report_transitions : durchlaeuft
@@ -197,9 +199,10 @@ ersten Umsetzung bewusst nicht persistiert.
 | `caller` | TEXT, NOT NULL | Sensible Angabe zur meldenden Person |
 | `consolidated_text` | TEXT, NOT NULL | Gesamtbericht der Wehrleitung; API-Ausgabe ausschließlich an die Wehrleitung, auch bei einem erhaltenen Arbeitsstand |
 | `consolidated_at` | DATETIME, NULL | Zeitpunkt der Konsolidierung |
-| `revision` | INT UNSIGNED, NOT NULL, DEFAULT 1 | Monotoner Stand des Einsatzes einschließlich Gesamttext, Einheitenzuordnungen und Quellberichte; API-Ausgabe nur an die Wehrleitung |
+| `revision` | INT UNSIGNED, NOT NULL, DEFAULT 1 | Monotoner Stand des Einsatzes einschließlich Übungsmerkmal, Gesamttext, Einheitenzuordnungen und Quellberichte; API-Ausgabe an alle sichtberechtigten Rollen |
 | `report_data_frozen` | TINYINT(1), NOT NULL, DEFAULT 0 | Ab der ersten erfolgreichen Berichtsanlage dauerhaft 1; schützt gemeinsame Einsatzdaten und bestehende Einheits-Fahrzeuglisten |
 | `deleted_at` | DATETIME, NULL | UTC-Zeitpunkt der dauerhaften Ausblendung; NULL für aktive Einsätze |
+| `is_exercise` | BOOLEAN, NOT NULL, DEFAULT FALSE | Gemeinsame Kennzeichnung als Übung für alle beteiligten Einheiten und Berichte |
 
 Ein importierter Einsatz ist über `(organization_id, divera_id)` eindeutig.
 Vor dem ersten Bericht übernimmt ein erneuter Import echte Änderungen. Danach
@@ -217,6 +220,27 @@ Dabei bleiben Einsatz, Zuordnungen, Berichte, Besatzung und bisherige
 Prüfverläufe erhalten. Alle normalen Listen, Statistiken, Detail- und
 Exportpfade behandeln einen gesetzten Löschzeitpunkt wie einen nicht
 vorhandenen Einsatz. DIVERA-Einsätze sind nicht löschbar.
+
+Die Übungskennzeichnung ist ein lokales gemeinsames Einsatzmerkmal und kein
+weiterer Wert der berichtsbezogenen `reports.incident_type`. Sie kann auch für
+DIVERA-Einsätze gesetzt werden und bleibt bei Einzel- und Vollimporten
+unverändert. Jede echte Änderung erhöht ausschließlich die Einsatzrevision;
+Berichte, Berichtsrevisionen und Workflowstatus bleiben unverändert.
+
+### `incident_exercise_changes`
+
+Die unveränderliche Historie enthält jede echte Änderung der gemeinsamen
+Übungskennzeichnung, aber keine Einsatzinhalte.
+
+| Spalte | Typ | Bedeutung |
+|---|---|---|
+| `id` | BIGINT UNSIGNED, PK | Stabile Reihenfolge bei gleichem Zeitpunkt |
+| `incident_id` | BIGINT UNSIGNED, FK | Betroffener Einsatz |
+| `old_value`, `new_value` | BOOLEAN, NOT NULL | Vorherige und neue Kennzeichnung |
+| `actor_id` | BIGINT UNSIGNED, FK, NULL | Auslösender Benutzer; wird bei späterer Benutzerlöschung NULL |
+| `actor_name` | VARCHAR(200), NOT NULL | Anzeigename zum Änderungszeitpunkt |
+| `actor_role` | ENUM, NOT NULL | Rolle zum Änderungszeitpunkt |
+| `created_at` | DATETIME, NOT NULL | Änderungszeitpunkt in UTC |
 
 ### `incident_deletions`
 

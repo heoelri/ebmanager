@@ -273,8 +273,8 @@ assert(filterSource, 'filterIncidents fehlt');
 const filterPreferenceSource = html.match(/function incidentFilterPreference[\s\S]*?(?=\nfunction filterIncidents)/)?.[0];
 assert(filterPreferenceSource, 'incidentFilterPreference fehlt');
 const cards = [
-  {dataset: {incidentStatus: 'report_required'}, hidden: false},
-  {dataset: {incidentStatus: 'submitted'}, hidden: false}
+  {dataset: {incidentStatus: 'report_required', incidentExercise: '0'}, hidden: false},
+  {dataset: {incidentStatus: 'submitted', incidentExercise: '1'}, hidden: false}
 ];
 const noFilteredIncidents = {hidden: true};
 const storedFilters = new Map();
@@ -294,6 +294,10 @@ filterIncidents('ready');
 assert.equal(noFilteredIncidents.hidden, false);
 filterIncidents('');
 assert.deepEqual(cards.map(card => card.hidden), [false, false]);
+filterIncidents('', '1');
+assert.deepEqual(cards.map(card => card.hidden), [true, false]);
+filterIncidents('report_required', '1');
+assert.deepEqual(cards.map(card => card.hidden), [true, true]);
 const blockedPreference = new Function('localStorage', 'me', `${filterPreferenceSource}; return incidentFilterPreference;`)(
   {getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); }},
   {id: 42, role: 'wehrleitung'}
@@ -339,9 +343,14 @@ assert.equal(blockedForcePreference('submitted'), 'submitted');
 assert.match(incidentFilterOptions([{reportStatus: {key: 'submitted'}}], 'report_required'), /value="report_required">Bericht erforderlich/);
 }
 assert.match(html, /<label>Status filtern<select id="incidentStatusFilter"/);
+assert.match(html, /<label>Art filtern<select id="incidentExerciseFilter"/);
+assert.match(html, /data-incident-exercise="\$\{i\.is_exercise\?'1':'0'\}"/);
+assert.match(html, /Reguläre Einsätze/);
+assert.match(html, /Übungen/);
 assert.match(html, /const selectedStatus=incidentFilterPreference\(\)/);
 assert.match(html, /incidentFilterOptions\(incidents,selectedStatus\)/);
-assert.match(html, /statusFilter\.value=selectedStatus;statusFilter\.addEventListener\('change',\(\)=>filterIncidents\(statusFilter\.value\)\);filterIncidents\(statusFilter\.value\)/);
+assert.match(html, /const applyFilters=\(\)=>filterIncidents\(statusFilter\.value,exerciseFilter\.value\)/);
+assert.match(html, /exerciseFilter\.addEventListener\('change',applyFilters\)/);
 
 const reportFieldsSource = html.match(/function contactFields[\s\S]*?(?=\nfunction bindDuration)/)?.[0];
 assert(reportFieldsSource, 'Berichtsdetails fehlen');
@@ -516,6 +525,27 @@ for (const me of [
 assert.match(html, /data-action="download" data-href="api\/incidents\/\$\{id\}\/pdf">Einsatzakte als PDF/);
 assert.match(html, /item\.consolidated_at\?`<p><button type="button" data-action="download" data-href="api\/incidents\/\$\{id\}\/consolidation\/pdf">Gesamtbericht als PDF/);
 assert.match(html, /item\.canDelete\?` <button type="button" class="secondary" data-action="deleteIncident"/);
+assert.match(html, /data-action="toggleExercise"/);
+assert.match(html, /Verlauf der Übungskennzeichnung/);
+const toggleExerciseSource = javascript.match(/async function toggleExercise[^\n]+/)?.[0];
+assert(toggleExerciseSource, 'toggleExercise fehlt');
+const exerciseCalls = [];
+const toggleExercise = new Function(
+  'incidents', 'api', 'load', 'incident', 'announcer',
+  `${toggleExerciseSource}; return toggleExercise;`
+)(
+  [{id: 7, revision: 4, is_exercise: false}],
+  async (...args) => exerciseCalls.push(args),
+  async () => exerciseCalls.push(['load']),
+  async (...args) => exerciseCalls.push(['incident', ...args]),
+  {textContent: ''}
+);
+await toggleExercise(7);
+assert.deepEqual(exerciseCalls, [
+  ['/api/incidents/7/exercise', {method: 'PUT', body: '{"isExercise":true,"revision":4}'}],
+  ['load'],
+  ['incident', 7]
+]);
 const deleteIncidentSource = javascript.match(/async function deleteIncident[^\n]+/)?.[0];
 assert(deleteIncidentSource, 'deleteIncident fehlt');
 const deletionCalls = [];
@@ -655,7 +685,7 @@ assert.equal(statisticsWeekday(1), new Date(2024, 0, 1, 12).toLocaleDateString(u
 assert.equal(statisticsMonth('2026-09'), new Date(2026, 8, 1, 12).toLocaleDateString(undefined, {month: 'long', year: 'numeric'}));
 const statisticsHtml = statisticsMarkup({
   range: {timezone: 'Europe/Berlin'},
-  totals: {incidents: 4, reports: 2, crewAssignments: 2, averageCrew: 1},
+  totals: {incidents: 4, regularIncidents: 3, exercises: 1, reports: 2, crewAssignments: 2, averageCrew: 1},
   alarmedVehicles: [{name: 'LF 20', own: true, count: 2}],
   additionalVehicles: [{name: 'ELW 1', count: 1}],
   members: [{name: 'Historisches Mitglied', count: 1}],
@@ -666,7 +696,7 @@ const statisticsHtml = statisticsMarkup({
   dayPeriods: {day: 2, night: 2},
   periods: {dayStart: '07:00', nightStart: '17:00', weekendStartDay: 5, weekendStart: '17:00', weekendEndDay: 1, weekendEnd: '07:00'}
 });
-for (const expected of ['Alarmierte Fahrzeuge', 'Zusätzliche tatsächlich eingesetzte Fahrzeuge', 'Einsatzbeteiligung der Mitglieder', 'LF 20', 'ELW 1', 'Historisches Mitglied', 'Werktag', 'Wochenende', 'Tag', 'Nacht']) {
+for (const expected of ['Reguläre Einsätze', 'Übungen', 'Alarmierte Fahrzeuge', 'Zusätzliche tatsächlich eingesetzte Fahrzeuge', 'Einsatzbeteiligung der Mitglieder', 'LF 20', 'ELW 1', 'Historisches Mitglied', 'Werktag', 'Wochenende', 'Tag', 'Nacht']) {
   assert.match(statisticsHtml, new RegExp(expected));
 }
 assert.match(statisticsHtml, /2 Besatzungszuordnungen in 2 vorhandenen Berichten/);

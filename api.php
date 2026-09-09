@@ -12,9 +12,9 @@ function databaseConfigurationError(): ?string
             "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN
              ('organizations','units','users','user_units','sessions','login_history','password_resets','incidents','incident_units',
               'divera_imports','members','member_units','qualifications','member_qualifications','vehicles','reports','report_transitions','report_crew',
-              'report_additional_vehicles','incident_deletions')"
+              'report_additional_vehicles','incident_deletions','incident_exercise_changes')"
         )->fetchColumn();
-        if ((int)$tables !== 20) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
+        if ((int)$tables !== 21) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
         $reportColumns = db()->query(
             "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='reports'
              AND column_name IN ('report_year','running_number','damaged_party','damaging_party','incident_command')"
@@ -36,11 +36,11 @@ function databaseConfigurationError(): ?string
                OR (table_name='incidents' AND column_name='report_data_frozen'))"
         )->fetchColumn();
         if ((int)$nameColumns !== 3) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
-        $deletionColumns = db()->query(
+        $incidentColumns = db()->query(
             "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE()
-             AND table_name='incidents' AND column_name='deleted_at'"
+             AND table_name='incidents' AND column_name IN ('deleted_at','is_exercise')"
         )->fetchColumn();
-        if ((int)$deletionColumns !== 1) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
+        if ((int)$incidentColumns !== 2) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
     } catch (PDOException $error) {
         error_log('Datenbankprüfung fehlgeschlagen: SQLSTATE=' . $error->getCode() . ' code=' . (int)($error->errorInfo[1] ?? 0));
         return 'Datenbankverbindung fehlgeschlagen. Prüfen Sie DSN, Benutzername, Passwort und Erreichbarkeit.';
@@ -298,7 +298,7 @@ function unitStatistics(array $user, mixed $fromValue, mixed $toValue): array
     $params = [$unitId, $user['organization_id'], $fromUtc, $untilUtc];
 
     $incidents = query(
-        'SELECT i.id,i.started_at,iu.vehicles,r.id report_id
+        'SELECT i.id,i.started_at,i.is_exercise,iu.vehicles,r.id report_id
          FROM incident_units iu
          JOIN incidents i ON i.id=iu.incident_id
          LEFT JOIN reports r ON r.incident_id=i.id AND r.unit_id=iu.unit_id
@@ -307,9 +307,11 @@ function unitStatistics(array $user, mixed $fromValue, mixed $toValue): array
         $params
     )->fetchAll();
     $counts = ['years' => [], 'months' => [], 'weekdays' => [], 'workPeriods' => ['workday' => 0, 'weekend' => 0], 'dayPeriods' => ['day' => 0, 'night' => 0]];
+    $exerciseCount = 0;
     $alarmedVehicles = [];
     $reportIds = [];
     foreach ($incidents as $incidentRow) {
+        if ((bool)$incidentRow['is_exercise']) $exerciseCount++;
         $local = (new DateTimeImmutable($incidentRow['started_at']))->setTimezone($timezone);
         $year = $local->format('Y');
         $month = $local->format('Y-m');
@@ -380,6 +382,8 @@ function unitStatistics(array $user, mixed $fromValue, mixed $toValue): array
         'unit' => ['id' => $unitId, 'name' => $foundUnit['name']],
         'totals' => [
             'incidents' => count($incidents),
+            'regularIncidents' => count($incidents) - $exerciseCount,
+            'exercises' => $exerciseCount,
             'reports' => $reportCount,
             'crewAssignments' => $crewCount,
             'averageCrew' => $reportCount ? round($crewCount / $reportCount, 2) : null
@@ -562,6 +566,7 @@ function incidentExportLines(array $incident, array $user): array
     exportLine($lines, 'Einsatzdaten', true);
     exportLine($lines, 'Feuerwehr: ' . one('SELECT name FROM organizations WHERE id=?', [$incident['organization_id']])['name']);
     exportLine($lines, 'Einsatz: ' . $incident['title']);
+    exportLine($lines, 'Kennzeichnung: ' . ((bool)$incident['is_exercise'] ? 'Übung' : 'Regulärer Einsatz'));
     exportLine($lines, 'Einsatznummer: ' . ($incident['foreign_id'] ?: ($incident['divera_id'] ?: $incident['id'])));
     exportLine($lines, 'Zeitpunkt: ' . exportDateTime($incident['started_at']) . ' (Europe/Berlin)');
     exportLine($lines, 'Adresse: ' . ($incident['address'] ?: '–'));
@@ -1599,13 +1604,11 @@ try {
             ? 'i.organization_id=? AND i.deleted_at IS NULL'
             : 'i.organization_id=? AND i.deleted_at IS NULL AND EXISTS(SELECT 1 FROM incident_units x JOIN user_units uu ON uu.unit_id=x.unit_id WHERE x.incident_id=i.id AND uu.user_id=?)';
         $params = $user['role'] === 'wehrleitung' ? [$user['organization_id']] : [$user['organization_id'], $user['id']];
-        $additionalFields = $user['role'] === 'wehrleitung'
-            ? ',i.consolidated_text,i.revision'
-            : ($user['role'] === 'einheitsleitung' ? ',i.revision' : '');
+        $additionalFields = ',i.revision' . ($user['role'] === 'wehrleitung' ? ',i.consolidated_text' : '');
         $rowParams = array_merge([$user['organization_id'], $user['organization_id']], $params);
         $rows = query(
             "SELECT i.id,i.organization_id,i.divera_id,i.foreign_id,i.divera_date,i.title,i.started_at,
-             i.message,i.address,i.lat,i.lng,i.remark,i.patient,i.caller,i.consolidated_at$additionalFields,
+             i.message,i.address,i.lat,i.lng,i.remark,i.patient,i.caller,i.consolidated_at,i.is_exercise$additionalFields,
              COALESCE(deletion_assignments.assignment_count,0) assignment_count,
              deletion_assignments.only_unit_id,
              COALESCE(deletion_reports.report_count,0) report_count
@@ -1702,6 +1705,7 @@ try {
             if ($row['consolidated_at'] !== null) $row['consolidated_at'] = utcString(new DateTimeImmutable($row['consolidated_at'], new DateTimeZone('UTC')));
             foreach (['id', 'organization_id', 'divera_date'] as $key) if ($row[$key] !== null) $row[$key] = (int)$row[$key];
             if (isset($row['revision'])) $row['revision'] = (int)$row['revision'];
+            $row['is_exercise'] = (bool)$row['is_exercise'];
             unset($row['assignment_count'], $row['only_unit_id'], $row['report_count']);
             foreach (['lat', 'lng'] as $key) if ($row[$key] !== null) $row[$key] = (float)$row[$key];
         }
@@ -1730,6 +1734,56 @@ try {
         });
         $warning = sendWorkflowNotification('incident_created', $id, $unitIds, $user);
         respond(201, ['id' => $id] + ($warning ? ['warning' => $warning] : []));
+    }
+
+    if ($method === 'GET' && preg_match('#^/api/incidents/(\d+)/exercise-history$#', $path, $match)) {
+        $incidentId = (int)$match[1];
+        if (!visibleIncident($incidentId, $user)) throw new ApiError(404, 'Einsatz nicht gefunden');
+        $history = query(
+            "SELECT old_value,new_value,actor_name,actor_role,
+             DATE_FORMAT(created_at,'%Y-%m-%dT%H:%i:%sZ') created_at
+             FROM incident_exercise_changes WHERE incident_id=? ORDER BY created_at,id",
+            [$incidentId]
+        )->fetchAll();
+        foreach ($history as &$entry) {
+            $entry['old_value'] = (bool)$entry['old_value'];
+            $entry['new_value'] = (bool)$entry['new_value'];
+        }
+        unset($entry);
+        respond(200, $history);
+    }
+
+    if ($method === 'PUT' && preg_match('#^/api/incidents/(\d+)/exercise$#', $path, $match)) {
+        $incidentId = (int)$match[1];
+        $data = input();
+        if (!is_bool($data['isExercise'] ?? null)) throw new ApiError(400, 'Übungskennzeichnung ist ungültig');
+        transaction(function () use ($incidentId, $data, $user) {
+            $foundIncident = one(
+                'SELECT * FROM incidents WHERE id=? AND organization_id=? AND deleted_at IS NULL FOR UPDATE',
+                [$incidentId, $user['organization_id']]
+            );
+            if (!$foundIncident) throw new ApiError(404, 'Einsatz nicht gefunden');
+            if ($user['role'] !== 'wehrleitung' && !one(
+                'SELECT iu.incident_id FROM incident_units iu JOIN user_units uu ON uu.unit_id=iu.unit_id
+                 WHERE iu.incident_id=? AND uu.user_id=? LIMIT 1',
+                [$incidentId, $user['id']]
+            )) {
+                throw new ApiError(403, 'Keine Berechtigung für diesen Einsatz');
+            }
+            assertRevision($data['revision'] ?? null, (int)$foundIncident['revision']);
+            $oldValue = (bool)$foundIncident['is_exercise'];
+            if ($oldValue === $data['isExercise']) return;
+            query(
+                'INSERT INTO incident_exercise_changes(incident_id,old_value,new_value,actor_id,actor_name,actor_role,created_at)
+                 VALUES(?,?,?,?,?,?,UTC_TIMESTAMP())',
+                [$incidentId, (int)$oldValue, (int)$data['isExercise'], $user['id'], $user['name'], $user['role']]
+            );
+            query(
+                'UPDATE incidents SET is_exercise=?,revision=revision+1 WHERE id=?',
+                [(int)$data['isExercise'], $incidentId]
+            );
+        });
+        respond(200, ['ok' => true]);
     }
 
     if ($method === 'DELETE' && preg_match('#^/api/incidents/(\d+)$#', $path, $match)) {

@@ -749,7 +749,7 @@ curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_u
   INCIDENT_ID="$deletable_incident_id" php -r '
     $items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
     $matches=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")));
-    assert(count($matches)===1 && $matches[0]["canDelete"]===false && !isset($matches[0]["revision"]));
+    assert(count($matches)===1 && $matches[0]["canDelete"]===false && is_int($matches[0]["revision"]));
   '
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request DELETE \
@@ -849,6 +849,65 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
     DELETE FROM units WHERE organization_id=(SELECT id FROM organizations WHERE name='Fremde Löschwehr');
     DELETE FROM organizations WHERE name='Fremde Löschwehr'"
 
+# Alle zugeordneten Rollen ändern die gemeinsame Übungskennzeichnung revisionssicher; Verlauf, Mandanten und DIVERA-Erhalt bleiben geschützt.
+exercise_revision=$(curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents" |
+  INCIDENT_ID="$incident_id" php -r '
+    $items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+    $matches=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")));
+    assert(count($matches)===1 && $matches[0]["is_exercise"]===false && is_int($matches[0]["revision"]));
+    echo $matches[0]["revision"];
+  ')
+for invalid_exercise in 'null' '0' '1' '"true"' '[]' '{}'; do
+  test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+    --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
+    --data "{\"isExercise\":$invalid_exercise,\"revision\":$exercise_revision}" "$base_url/api/incidents/$incident_id/exercise")" = 400
+done
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
+  --data '{"isExercise":true,"revision":999999}' "$base_url/api/incidents/$incident_id/exercise")" = 409
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
+  --data "{\"isExercise\":true,\"revision\":$exercise_revision}" "$base_url/api/incidents/$incident_id/exercise")" = 200
+exercise_revision=$((exercise_revision+1))
+for token in "$session_token" "$leader_token" "$force_token"; do
+  curl --insecure --silent --fail --cookie "$session_cookie=$token" "$base_url/api/incidents" |
+    INCIDENT_ID="$incident_id" REVISION="$exercise_revision" php -r '
+      $items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+      $matches=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")));
+      assert(count($matches)===1 && $matches[0]["is_exercise"]===true && $matches[0]["revision"]===(int)getenv("REVISION"));
+    '
+done
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
+  --data "{\"isExercise\":true,\"revision\":$exercise_revision}" "$base_url/api/incidents/$incident_id/exercise")" = 200
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
+  --execute="SELECT CONCAT(revision,':',(SELECT COUNT(*) FROM incident_exercise_changes WHERE incident_id=$incident_id)) FROM incidents WHERE id=$incident_id")" = "$exercise_revision:1"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$leader_token" --header 'Content-Type: application/json' --request PUT \
+  --data "{\"isExercise\":false,\"revision\":$exercise_revision}" "$base_url/api/incidents/$incident_id/exercise")" = 200
+exercise_revision=$((exercise_revision+1))
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request PUT \
+  --data "{\"isExercise\":true,\"revision\":$exercise_revision}" "$base_url/api/incidents/$incident_id/exercise")" = 200
+exercise_revision=$((exercise_revision+1))
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$incident_id/exercise-history" |
+  php -r '
+    $history=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+    assert(array_column($history,"new_value")===[true,false,true]);
+    assert(array_column($history,"actor_name")===["Führungskraft Test","Einheitsleitung Eins","Admin"]);
+    assert(array_column($history,"actor_role")===["fuehrungskraft","einheitsleitung","wehrleitung"]);
+    assert(!array_filter($history,fn($entry)=>!str_ends_with($entry["created_at"],"Z")));
+  '
+unassigned_exercise_id=$(curl --insecure --silent --fail \
+  --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' \
+  --data "{\"title\":\"Nicht zugeordnete Übung\",\"startedAt\":\"2027-01-10T12:00:00.000Z\",\"address\":\"\",\"unitIds\":[$second_unit_id]}" \
+  "$base_url/api/incidents" | php -r 'echo json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR)["id"];')
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
+  --data '{"isExercise":true,"revision":1}' "$base_url/api/incidents/$unassigned_exercise_id/exercise")" = 403
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$unassigned_exercise_id/exercise-history")" = 404
+
 # Die Einheitsstatistik wahrt Rollen und Mandanten und ordnet lokale Zeitgrenzen sowie tatsächliche Beteiligung korrekt zu.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="SET @leader_id=(SELECT id FROM users WHERE email='leitung1@example.test');
@@ -875,6 +934,7 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
     SET @r1=LAST_INSERT_ID(); SET @r2=@r1+1;
     SET @foreign_report=@r1+2;
     UPDATE incidents SET report_data_frozen=1 WHERE id IN (@i1,@i2);
+    UPDATE incidents SET is_exercise=1 WHERE id=@i2;
     INSERT INTO members(organization_id,divera_id,name) VALUES(1,'statistics-active','Aktives Statistikmitglied'),(1,'statistics-inactive','Historisches Statistikmitglied'),(1,'statistics-foreign-unit','Fremdes Statistikmitglied');
     SET @m1=LAST_INSERT_ID(); SET @m2=@m1+1; SET @foreign_member=@m1+2;
     INSERT INTO member_units(member_id,unit_id,active) VALUES(@m1,1,TRUE),(@m2,1,FALSE),(@foreign_member,$second_unit_id,TRUE);
@@ -897,7 +957,7 @@ curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_
   php -r '
     $data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
     assert($data["unit"]["name"]==="Löschzug");
-    assert($data["totals"]===["incidents"=>5,"reports"=>2,"crewAssignments"=>2,"averageCrew"=>1]);
+    assert($data["totals"]===["incidents"=>5,"regularIncidents"=>4,"exercises"=>1,"reports"=>2,"crewAssignments"=>2,"averageCrew"=>1]);
     assert($data["workPeriods"]===["workday"=>3,"weekend"=>2]);
     assert($data["dayPeriods"]===["day"=>2,"night"=>3]);
     assert($data["years"]===[["key"=>"2026","count"=>5]]);
@@ -1220,7 +1280,7 @@ test "$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token
 test "$(incident_status "$force_token" "$incident_id")" = report_required
 test "$(incident_status "$other_force_token" "$incident_id")" = report_exists
 test "$(incident_status "$leader_token" "$incident_id")" = awaiting_report
-assert_pdf "$force_token" "/api/reports/$report_id/pdf" 'Einzelbericht|Führungskraft Test|Rolle: Führungskraft|Ursprünglich|Max Mustermann'
+assert_pdf "$force_token" "/api/reports/$report_id/pdf" 'Einzelbericht|Kennzeichnung: Übung|Führungskraft Test|Rolle: Führungskraft|Ursprünglich|Max Mustermann'
 assert_pdf "$force_token" "/api/incidents/$incident_id/pdf" 'Rollenbezogene Einsatzakte|Führungskraft Test|Rolle: Führungskraft|Ursprünglich' 'Fremdfahrzeug'
 assert_pdf "$other_force_token" "/api/incidents/$incident_id/pdf" 'Rollenbezogene Einsatzakte|Weitere Führungskraft|Rolle: Führungskraft|Testeinsatz' 'Ursprünglich'
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$leader_token" "$base_url/api/reports/$report_id/pdf")" = 404
@@ -1645,6 +1705,16 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
 # Eine nachträglich importierte Einheitenzuordnung invalidiert einen bestehenden Gesamtbericht.
 imported_incident_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
   einsatzberichte --execute="SELECT id FROM incidents WHERE organization_id=1 AND divera_id='alarm-1'")
+# Die lokal gesetzte Übungskennzeichnung eines DIVERA-Einsatzes bleibt bei Einzel- und Vollimporten erhalten.
+imported_exercise_revision=$(curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents" |
+  INCIDENT_ID="$imported_incident_id" php -r '
+    $items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+    $matches=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")));
+    assert(count($matches)===1 && $matches[0]["is_exercise"]===false);
+    echo $matches[0]["revision"];
+  ')
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' --request PUT \
+  --data "{\"isExercise\":true,\"revision\":$imported_exercise_revision}" "$base_url/api/incidents/$imported_incident_id/exercise" >/dev/null
 before_assignment=$(consolidation_data 'Vor zusätzlicher Einheit' "$imported_incident_id")
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE incidents SET consolidated_at=UTC_TIMESTAMP() WHERE divera_id='alarm-1'"
@@ -1682,6 +1752,9 @@ BEFORE="$after_assignment" AFTER="$before_import_consolidation" REPORT="$before_
 '
 curl --insecure --silent --fail --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' \
   --data '{"id":"alarm-1"}' "$base_url/api/units/1/divera/import" >/dev/null
+# Der Einzelimport bewahrt die lokal gesetzte Übungskennzeichnung.
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT is_exercise FROM incidents WHERE id=$imported_incident_id")" = 1
 after_import=$(report_data "$import_report_payload" "$force_token" "$imported_incident_id" "$imported_report_id")
 BEFORE="$before_import" AFTER="$after_import" php -r '
   $before=json_decode(getenv("BEFORE"),true,512,JSON_THROW_ON_ERROR);
@@ -1707,6 +1780,9 @@ sync_response=$(curl --insecure --silent --fail \
   --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
   "$base_url/api/units/1/divera/sync")
 printf '%s' "$sync_response" | php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($data["members"]===2); assert($data["qualifications"]===2); assert($data["vehicles"]===2); assert($data["incidentsCreated"]===1); assert($data["incidentsUpdated"]===0); assert($data["incidentsUnchanged"]===1); assert($data["incidentsWithDifferences"]===0); assert($data["assignmentsCreated"]===1);'
+# Der Gesamtabgleich bewahrt die lokal gesetzte Übungskennzeichnung ebenfalls.
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT is_exercise FROM incidents WHERE id=$imported_incident_id")" = 1
 # Eine tatsächlich überschriebene Berichtsrevision bleibt auch nach einem identischen Gesamtabgleich ungültig.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" \
   --header 'Content-Type: application/json' --request PUT --data "$after_import" "$base_url/api/reports/$imported_report_id")" = 409

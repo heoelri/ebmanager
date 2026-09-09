@@ -6,6 +6,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Added
 
+- Alle einem Einsatz zugeordneten Rollen können ihn revisionsgeschützt organisationsweit als Übung kennzeichnen; Wehrführungen dürfen dies für alle Einsätze ihres Mandanten. Das Merkmal gilt auch für DIVERA-Einsätze, bleibt bei Neuimporten erhalten und erscheint in Filtern, Berichten, PDFs, Statistik und unveränderlichem Prüfverlauf (#115).
 - Einheits- und Wehrführungen können manuell angelegte Einsätze revisionsgeschützt dauerhaft ausblenden. Die fachlichen Daten bleiben erhalten; ein unveränderlicher Audit-Eintrag speichert Akteur und UTC-Zeitpunkt (#112).
 - Das Projekt steht unter der PolyForm Noncommercial License 1.0.0. Feuerwehren, öffentliche Sicherheitsorganisationen und Kommunen dürfen die Software unabhängig von ihrer Finanzierung nutzen, ändern und weitergeben; kommerzielle Nutzung benötigt eine gesonderte Zustimmung (#96).
 - Eine kompakte [API-Referenz](docs/API.md) beschreibt Endpunkte, Rollen, Eingaben, native Antworttypen, optionale Werte, UTC-Zeitformate und Konfliktvorbedingungen (#92).
@@ -48,6 +49,14 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 - Die Einsatzlisten-API liefert konsolidierte Berichtstexte einschließlich zurückbehaltener Arbeitsstände ausschließlich an die Wehrführung. Führungskräfte und Einheitsführungen erhalten weiterhin ihre zulässigen Einsatz- und Statusdaten (#100).
 
 ### Breaking Changes
+
+**#115 benötigt Migration 007 vor dem neuen Anwendungscode.** Sie ergänzt
+`incidents.is_exercise` mit dem Standardwert `false` und die Audit-Tabelle
+`incident_exercise_changes`; bestehende Einsätze bleiben reguläre Einsätze.
+Verbindliche Reihenfolge: Sicherung, Migration 007 und Ledger-Vermerk,
+Schemaprüfung, danach gemeinsamer PHP-/Browserwechsel und Funktionsprüfung.
+Die manuellen Schritte und der Rollback stehen unter
+[Deployment: Übungskennzeichnung](docs/WEBSPACE-DEPLOYMENT.md#einsätze-als-übung-kennzeichnen-115).
 
 **#112 benötigt Migration 006 vor dem neuen Anwendungscode.** Sie ergänzt
 `incidents.deleted_at` und die Audit-Tabelle `incident_deletions`; fachliche
