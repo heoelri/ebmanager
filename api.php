@@ -1602,14 +1602,28 @@ try {
         $additionalFields = $user['role'] === 'wehrleitung'
             ? ',i.consolidated_text,i.revision'
             : ($user['role'] === 'einheitsleitung' ? ',i.revision' : '');
+        $rowParams = array_merge([$user['organization_id'], $user['organization_id']], $params);
         $rows = query(
             "SELECT i.id,i.organization_id,i.divera_id,i.foreign_id,i.divera_date,i.title,i.started_at,
              i.message,i.address,i.lat,i.lng,i.remark,i.patient,i.caller,i.consolidated_at$additionalFields,
-             (SELECT COUNT(*) FROM incident_units all_iu WHERE all_iu.incident_id=i.id) assignment_count,
-             (SELECT MIN(all_iu.unit_id) FROM incident_units all_iu WHERE all_iu.incident_id=i.id) only_unit_id,
-             (SELECT COUNT(*) FROM reports all_r WHERE all_r.incident_id=i.id) report_count
-             FROM incidents i WHERE $where ORDER BY i.started_at DESC,i.id DESC",
-            $params
+             COALESCE(deletion_assignments.assignment_count,0) assignment_count,
+             deletion_assignments.only_unit_id,
+             COALESCE(deletion_reports.report_count,0) report_count
+             FROM incidents i
+             LEFT JOIN (
+                 SELECT iu.incident_id,COUNT(*) assignment_count,MIN(iu.unit_id) only_unit_id
+                 FROM incidents scoped_i JOIN incident_units iu ON iu.incident_id=scoped_i.id
+                 WHERE scoped_i.organization_id=? AND scoped_i.deleted_at IS NULL
+                 GROUP BY iu.incident_id
+             ) deletion_assignments ON deletion_assignments.incident_id=i.id
+             LEFT JOIN (
+                 SELECT r.incident_id,COUNT(*) report_count
+                 FROM incidents scoped_i JOIN reports r ON r.incident_id=scoped_i.id
+                 WHERE scoped_i.organization_id=? AND scoped_i.deleted_at IS NULL
+                 GROUP BY r.incident_id
+             ) deletion_reports ON deletion_reports.incident_id=i.id
+             WHERE $where ORDER BY i.started_at DESC,i.id DESC",
+            $rowParams
         )->fetchAll();
         $assignments = [];
         $membershipJoin = $user['role'] === 'wehrleitung'
