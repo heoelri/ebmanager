@@ -154,18 +154,38 @@ php -r '
   }
 '
 
-# Der Renderer erzeugt mehrseitige PDFs mit Umlauten und Exportmetadaten auf jeder Seite.
+# Der Renderer erhält darstellbare Zeichen, begrenzt jede Courier-Zeile geometrisch und lehnt verlustbehaftete Zeichen ausdrücklich ab.
 php -r '
   require "support.php";
-  $pdf=pdfBinary("Prüfung",array_fill(0,120,["text"=>"Übung","bold"=>false]),"Nutzer: Prüfer | Rolle: Führungskraft");
+  $lines=array_fill(0,120,["text"=>"Übung","bold"=>false]);
+  array_unshift($lines,["text"=>str_repeat("W",200)."\nZweite Zeile","bold"=>false]);
+  array_unshift($lines,["text"=>"Pfad C:\\Test (innen)","bold"=>false]);
+  $pdf=pdfBinary("Prüfung",$lines,"Nutzer: Prüfer | Rolle: Führungskraft | ".str_repeat("M",200));
   assert(str_starts_with($pdf,"%PDF-1.4"));
   assert(str_ends_with($pdf,"%%EOF\n"));
-  assert(preg_match("#/Count ([3-9])#",$pdf));
-  assert(substr_count($pdf,iconv("UTF-8","Windows-1252//TRANSLIT","Nutzer: Prüfer"))>=3);
-  assert(str_contains($pdf,iconv("UTF-8","Windows-1252//TRANSLIT","Übung")));
-  try { @pdfEncode("\xFF"); exit(1); } catch (ApiError $error) {
-    assert($error->status===503);
-    assert($error->getMessage()==="PDF-Text konnte nicht kodiert werden");
+  assert(preg_match("#/Count ([3-9])#",$pdf,$pageMatch));
+  $pageCount=(int)$pageMatch[1];
+  assert(str_contains($pdf,"/BaseFont /Courier"));
+  assert(substr_count($pdf,iconv("UTF-8","Windows-1252","Nutzer: Prüfer"))>=3);
+  assert(str_contains($pdf,iconv("UTF-8","Windows-1252","Übung")));
+  assert(str_contains($pdf,"(".str_repeat("W",82).") Tj"));
+  assert(str_contains($pdf,"(".str_repeat("W",36).") Tj"));
+  assert(str_contains($pdf,"(Zweite Zeile) Tj"));
+  preg_match_all("#/F[12] 10 Tf 50 \d+ Td \(((?:\\\\.|[^\\\\)])*)\) Tj#",$pdf,$bodyRows);
+  foreach($bodyRows[1] as $row) {
+    $text=preg_replace("#\\\\([\\\\()])#","$1",$row);
+    assert(strlen($text)*10*0.6<=495);
+  }
+  assert(in_array("Pfad C:\\\\Test \\(innen\\)",$bodyRows[1],true));
+  preg_match_all("#/F1 7 Tf 40 \d+ Td \(((?:\\\\.|[^\\\\)])*)\) Tj#",$pdf,$footerRows);
+  foreach($footerRows[1] as $row) {
+    $text=preg_replace("#\\\\([\\\\()])#","$1",$row);
+    assert(strlen($text)*7*0.6<=515);
+  }
+  for($page=1;$page<=$pageCount;$page++) assert(str_contains($pdf,"Seite $page/$pageCount"));
+  try { pdfEncode("Ж 李 Łukasz"); exit(1); } catch (ApiError $error) {
+    assert($error->status===422);
+    assert($error->getMessage()==="Der PDF-Export enthält Zeichen, die nicht verlustfrei dargestellt werden können");
   }
 '
 

@@ -33,6 +33,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Fixed
 
+- PDF-Exporte ersetzen nicht darstellbare Namen oder Adressen nicht mehr still durch Fragezeichen oder Transliteration, sondern melden die Grenze ausdrücklich. Der native Renderer verwendet eine Schrift mit exakt berechenbarer Zeichenbreite und bricht lange Wörter sowie mehrzeilige Texte innerhalb des sichtbaren Seitenbereichs um (#98).
 - Fehlerhafte Text-, ID-, Kontakt-, Klassifikations- und Listenformen werden ausdrücklich abgewiesen statt als Leerwerte oder andere IDs übernommen. Objektfehler benennen den betroffenen Berichtsbereich; fachliche Eindeutigkeitskonflikte erhalten passende Meldungen. Listen und Zusammenfassungen besitzen stabile Tie-Breaker; auch der Demo-Seed-Check verarbeitet native Zuordnungslisten (#92).
 - Die Revisionshelfer der API-Regressionen verlangen vor der Payload-Erzeugung genau einen passenden Bericht beziehungsweise Einsatz; fehlende und doppelte Treffer brechen ausdrücklich ab.
 - Revisionskonflikte benennen kontextneutral den „geladenen Stand“, sodass der Hinweis zu Einheitsberichten ebenso wie zu Einsatz-/Gesamtstandsrevisionen passt; HTTP 409 und der Erhalt offener Eingaben bleiben unverändert. `public/app.js` ist für GitHub ausdrücklich als handgepflegter, nicht generierter Quelltext markiert.
