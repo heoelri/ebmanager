@@ -6,6 +6,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Added
 
+- Das Projekt steht unter der PolyForm Noncommercial License 1.0.0. Feuerwehren, öffentliche Sicherheitsorganisationen und Kommunen dürfen die Software unabhängig von ihrer Finanzierung nutzen, ändern und weitergeben; kommerzielle Nutzung benötigt eine gesonderte Zustimmung (#96).
 - Eine kompakte [API-Referenz](docs/API.md) beschreibt Endpunkte, Rollen, Eingaben, native Antworttypen, optionale Werte, UTC-Zeitformate und Konfliktvorbedingungen (#92).
 - Einheitsführungen erhalten einen eigenen Bereich „Statistik“ mit Zeitraumfilter, Fahrzeug- und Mitgliederhäufigkeiten, zeitlichen Verteilungen sowie der durchschnittlichen Besatzungsstärke ihrer Einheit.
 - Bearbeitbare Einheitsberichte können zusätzliche Fahrzeuge aus dem aktuellen Stamm der eigenen Einheit aufnehmen. Die Fahrzeuge stehen als Besatzungsziele bereit, bleiben von DIVERA-Neuimporten unberührt und erscheinen in Ansichten sowie PDF-Exporten.

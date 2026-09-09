@@ -11,21 +11,26 @@ eine responsive, tastatur- und touchbedienbare Oberfläche ohne
 Frontend-Framework, PDO speichert die Daten in MySQL. DIVERA 24/7 wird pro
 Einheit ausschließlich lesend angebunden.
 
-## Open Source und Self-Hosting
+## Quelloffen und Self-Hosting
 
-Das Projekt wird offen entwickelt und ist dafür vorgesehen, von Feuerwehren
-selbst betrieben zu werden. Der vollständige Quellcode und alle notwendigen
-Dateien für Installation, Docker-Entwicklung und Deployment liegen in diesem
-Repository. Es gibt keinen verpflichtenden zentralen Dienst und keine
-Herstellerbindung.
+Das Projekt wird quelloffen entwickelt und ist dafür vorgesehen, von
+Feuerwehren selbst betrieben zu werden. Der vollständige Quellcode und alle
+notwendigen Dateien für Installation, Docker-Entwicklung und Deployment liegen
+in diesem Repository. Es gibt keinen verpflichtenden zentralen Dienst und
+keine Herstellerbindung.
 
 Issues, Fehlerberichte, Verbesserungsvorschläge, fachliches Feedback und Pull
-Requests sind ausdrücklich willkommen.
+Requests sind ausdrücklich willkommen. Beiträge werden unter derselben Lizenz
+angenommen; Beitragende müssen die erforderlichen Rechte daran besitzen.
 
-**Lizenzhinweis:** Derzeit ist noch keine formale Open-Source-Lizenz
-hinterlegt. Bis eine Lizenzdatei ergänzt wurde, ist der Quellcode öffentlich
-einsehbar, aber Nutzung, Veränderung und Weitergabe sind rechtlich noch nicht
-allgemein freigegeben.
+Die Software steht unter der
+[PolyForm Noncommercial License 1.0.0](LICENSE). Nutzung, Änderung und
+Weitergabe sind für nicht-kommerzielle Zwecke erlaubt. Das gilt ausdrücklich
+auch für Feuerwehren, andere öffentliche Sicherheitsorganisationen und
+Kommunen unabhängig von ihrer Finanzierung. Kommerzielle Nutzung durch andere
+Organisationen erfordert eine gesonderte Zustimmung des Rechteinhabers. Wegen
+dieser Einschränkung ist die Software quelloffen, aber keine
+Open-Source-Software im Sinne der Open Source Definition.
 
 ## Funktionsumfang
 
