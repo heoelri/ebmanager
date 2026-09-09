@@ -515,6 +515,21 @@ for (const me of [
 }
 assert.match(html, /data-action="download" data-href="api\/incidents\/\$\{id\}\/pdf">Einsatzakte als PDF/);
 assert.match(html, /item\.consolidated_at\?`<p><button type="button" data-action="download" data-href="api\/incidents\/\$\{id\}\/consolidation\/pdf">Gesamtbericht als PDF/);
+const downloadFileSource = javascript.match(/async function downloadFile[^\n]+/)?.[0];
+assert(downloadFileSource, 'downloadFile fehlt');
+let response = {ok: false, status: 422, headers: {get: () => 'application/json'}, json: async () => ({error: 'PDF-Zeichen nicht darstellbar'})};
+let clicked = false, removed = false, revoked = false;
+const link = {click: () => {clicked = true}, remove: () => {removed = true}};
+const downloadFile = new Function('fetch', 'URL', 'document', `${downloadFileSource}; return downloadFile;`)(
+  async () => response,
+  {createObjectURL: () => 'blob:test', revokeObjectURL: () => {revoked = true}},
+  {createElement: () => link, body: {append: item => assert.equal(item, link)}}
+);
+await assert.rejects(downloadFile('api/test.pdf'), /PDF-Zeichen nicht darstellbar/);
+response = {ok: true, headers: {get: name => name === 'content-type' ? 'application/pdf' : 'attachment; filename="test.pdf"'}, blob: async () => ({})};
+await downloadFile('api/test.pdf');
+assert.equal(link.download, 'test.pdf');
+assert(clicked && removed && revoked);
 const existingReportsNoticeSource = html.match(/function existingReportsNotice[^\n]+/)?.[0];
 assert(existingReportsNoticeSource, 'existingReportsNotice fehlt');
 for (const [me, visible] of [

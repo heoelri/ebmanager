@@ -247,6 +247,7 @@ bleiben erfolgreich und können zusätzlich `warning` enthalten.
 | 409 | Fachlicher Konflikt, veraltete Revision, unzulässiger Workflowstand |
 | 413 | Request-Body größer als 1.000.000 Bytes |
 | 415 | Schreibender Request ohne `application/json` |
+| 422 | PDF-Inhalt enthält Zeichen, die der eingebaute Renderer nicht verlustfrei darstellen kann |
 | 500 | Unerwarteter interner/DB-Fehler, auch unbekannte Unique-Constraints; nur `Interner Fehler` |
 | 502 | Fehlerhafte/fehlgeschlagene DIVERA-Antwort |
 | 503 | Fehlende Konfiguration, Bootstrap-/Schemafehler, nicht verfügbarer Mail- oder PDF-Dienst |

@@ -31,8 +31,9 @@ function assertResponseIntegers(mixed $value): void
 function pdfEncode(string $text): string
 {
     if (!function_exists('iconv')) throw new ApiError(503, 'PDF-Export ist auf diesem Server nicht verfügbar');
-    $encoded = iconv('UTF-8', 'Windows-1252//TRANSLIT', str_replace(["\r\n", "\r"], "\n", $text));
-    if ($encoded === false) throw new ApiError(503, 'PDF-Text konnte nicht kodiert werden');
+    // ponytail: WinAnsi hält den Renderer abhängigkeitsfrei; bei häufigen Ablehnungen eine Unicode-Schrift einbetten.
+    $encoded = @iconv('UTF-8', 'Windows-1252', str_replace(["\r\n", "\r", "\t"], ["\n", "\n", '    '], $text));
+    if ($encoded === false) throw new ApiError(422, 'Der PDF-Export enthält Zeichen, die nicht verlustfrei dargestellt werden können');
     return preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $encoded) ?? '';
 }
 
@@ -46,15 +47,15 @@ function pdfBinary(string $title, array $lines, string $metadata): string
     $rows = [];
     foreach ($lines as $line) {
         $text = pdfEncode((string)($line['text'] ?? ''));
-        $wrapped = $text === '' ? [''] : explode("\n", wordwrap($text, ($line['bold'] ?? false) ? 80 : 95, "\n", true));
+        $wrapped = $text === '' ? [''] : explode("\n", wordwrap($text, 82, "\n", true));
         foreach ($wrapped as $part) $rows[] = ['text' => $part, 'bold' => (bool)($line['bold'] ?? false)];
     }
     $pages = array_chunk($rows, 48) ?: [[]];
     $objects = [
         1 => '<< /Type /Catalog /Pages 2 0 R >>',
         2 => '',
-        3 => '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
-        4 => '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>'
+        3 => '<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>',
+        4 => '<< /Type /Font /Subtype /Type1 /BaseFont /Courier-Bold /Encoding /WinAnsiEncoding >>'
     ];
     $kids = [];
     foreach ($pages as $index => $pageRows) {
