@@ -4,6 +4,10 @@ declare(strict_types=1);
 // Zulässige Benutzerrollen für Verwaltung und API-Prüfungen; Änderungen erfordern auch eine Anpassung des Rollen-ENUMs in schema.sql.
 const ROLES = ['wehrleitung', 'einheitsleitung', 'fuehrungskraft'];
 
+const LOGIN_HISTORY_RETENTION_DAYS = 90;
+const AUTH_CLEANUP_INTERVAL_SECONDS = 3600;
+const AUTH_CLEANUP_BATCH_SIZE = 500;
+
 // Lokale Zeitfenster für Einsatzstatistiken; Wochentage entsprechen DateTime::format('N').
 const STATISTICS_PERIODS = [
     'timezone' => 'Europe/Berlin',

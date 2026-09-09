@@ -21,6 +21,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Changed
 
+- Erfolgreiche Anmeldungen werden 90 Tage aufbewahrt. Die Verwaltung zeigt nur die neueste gespeicherte Anmeldung innerhalb dieser Frist; ein leerer Wert behauptet nicht mehr „noch keine“. API-Nutzung einschließlich Bootstrap bereinigt höchstens stündlich in installationsweit koordinierten Batches je bis zu 500 abgelaufene Sitzungen und 500 alte Login-Einträge; gültige Zugänge und fachliche Daten bleiben erhalten (#17, Teilumfang von #97).
 - Einsatzdaten und bereits vorhandene Einheits-Fahrzeuglisten bleiben ab dem ersten Einheitsbericht historisch erhalten, auch für andere alarmierte Einheiten ohne eigenen Bericht. Abweichende DIVERA-Importe warnen sichtbar, statt Alarmzeit, Berichtsjahr, laufende Nummer oder Freigaben still zu verändern (#89).
 - Autor- und Besatzungsnamen werden als Berichtsdaten gespeichert. Konto-/Stammdatenänderungen ändern bestehende Berichte, PDFs, Personalübersichten und Prüfverläufe nicht; neu aufgenommene Personen erhalten den aktuellen Namen. Die Mitgliederstatistik zählt weiterhin je Person und zeigt den letzten historischen Namen im ausgewerteten Einsatzzeitraum (#89).
 - Identische oder historisch verworfene Importe erhalten alle fachlichen Revisionen und Abschlüsse. Neue Einheitszuordnungen bleiben möglich und widerrufen nur den Gesamtstand. Der Vollabgleich unterscheidet neu, tatsächlich aktualisiert und unverändert sowie Einsätze mit verworfenen Abweichungen; Import- und Mailwarnungen werden gemeinsam angezeigt (#89).
@@ -49,6 +50,16 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 - Die Einsatzlisten-API liefert konsolidierte Berichtstexte einschließlich zurückbehaltener Arbeitsstände ausschließlich an die Wehrführung. Führungskräfte und Einheitsführungen erhalten weiterhin ihre zulässigen Einsatz- und Statusdaten (#100).
 
 ### Breaking Changes
+
+**Anmeldebereinigung (#17/#97) benötigt Migration 008 vor dem Anwendungscode.**
+Sie ergänzt den zeitgeordneten Login-Index und `auth_cleanup_state`, löscht
+selbst aber keine Daten. Mit Aktivierung des neuen Codes werden Login-Einträge
+älter als 90 Tage schrittweise endgültig entfernt; `loginHistory` liefert
+auch vor deren physischer Löschung nur Werte innerhalb der Frist.
+Reihenfolge: Sicherung, Migration 008 und Ledger-Vermerk, Schema-/Indexprüfung,
+gemeinsamer PHP-/Browserwechsel, Funktionsprüfung.
+Manuelle Schritte, Rückstandsgrenzen und Rollback:
+[Deployment: Anmeldebereinigung](docs/WEBSPACE-DEPLOYMENT.md#sitzungen-und-loginhistorie-bereinigen-17-97).
 
 **#115 benötigt Migration 007 vor dem neuen Anwendungscode.** Sie ergänzt
 `incidents.is_exercise` mit dem Standardwert `false` und die Audit-Tabelle

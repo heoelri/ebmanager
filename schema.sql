@@ -48,8 +48,17 @@ CREATE TABLE login_history (
   user_id BIGINT UNSIGNED NOT NULL,
   logged_in_at DATETIME NOT NULL,
   KEY login_history_user_time (user_id, logged_in_at),
+  KEY login_history_time (logged_in_at, id),
   CONSTRAINT login_history_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE auth_cleanup_state (
+  id TINYINT UNSIGNED PRIMARY KEY,
+  last_run_at DATETIME NOT NULL,
+  CONSTRAINT auth_cleanup_singleton CHECK (id=1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO auth_cleanup_state(id,last_run_at) VALUES(1,'1970-01-01 00:00:00');
 
 CREATE TABLE password_resets (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -257,4 +266,5 @@ INSERT INTO schema_migrations(name,applied_at) VALUES
   ('004-report-revisions.sql',UTC_TIMESTAMP()),
   ('005-historical-report-snapshots.sql',UTC_TIMESTAMP()),
   ('006-incident-soft-delete.sql',UTC_TIMESTAMP()),
-  ('007-incident-exercises.sql',UTC_TIMESTAMP());
+  ('007-incident-exercises.sql',UTC_TIMESTAMP()),
+  ('008-auth-retention.sql',UTC_TIMESTAMP());

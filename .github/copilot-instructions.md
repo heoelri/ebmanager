@@ -46,6 +46,7 @@
 - Die Wehrleitung kann fremde Benutzerzugänge zurücksetzen und eine neue siebentägige Einladung senden. Erst nach erfolgreicher Mailannahme werden Passwort, Sitzungen und frühere Einmallinks ungültig; der eigene Zugang ist ausgeschlossen.
 - Eine Passwortänderung widerruft alle Sitzungen des Benutzers. Änderungen an Passwort oder E-Mail-Adresse widerrufen außerdem alle ausstehenden Einladungs- und Wiederherstellungslinks; Tokenausstellung, Bestätigung und Kontoänderungen sperren zuerst den Benutzer und danach seine Token.
 - Erfolgreiche Anmeldungen werden mit Benutzer und UTC-Zeitpunkt in `login_history` gespeichert. Nur die Wehrleitung sieht den neuesten Eintrag je Benutzer. Speichere keine IP-Adressen, Browserdaten oder fehlgeschlagenen Anmeldungen.
+- Erfolgreiche Anmeldungen werden 90 Tage aufbewahrt; die Verwaltung zeigt nur den neuesten Eintrag innerhalb dieses Zeitraums. API-Nutzung einschließlich Bootstrap löst höchstens stündlich installationsweit je einen Batch von maximal 500 abgelaufenen Sitzungen und 500 älteren Login-Einträgen aus. `auth_cleanup_state` koordiniert die Worker; Bereinigung und Laufzeitpunkt sind atomar. Ohne Zugriffe oder bei Rückstand erfolgt die physische Löschung später. Gültige Sitzungen, Einmallinks und fachliche Daten bleiben unverändert; ein Cronjob ist nicht erforderlich.
 
 ## Sitzungen, Requests und E-Mail
 

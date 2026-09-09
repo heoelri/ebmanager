@@ -325,6 +325,49 @@ users_json=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_
 printf '%s' "$users_json" | php -r '$users=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); exit(count($users[0]["loginHistory"])===1 ? 0 : 1);'
 rm -f second-login-cookies.txt
 
+# Anmeldebereinigung hält UTC-Grenzen, 500er-Batches, Stundendrossel und Worker-Sperre ein; Fehler rollen beide Löschungen zurück.
+php test/auth-retention.php
+
+# Ein alter letzter Login wird auch vor seiner physischen Bereinigung nicht mehr ausgegeben.
+cleanup_user_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
+  --execute="INSERT INTO users(organization_id,name,email,password_hash,role) VALUES(1,'Retentionstest','retention@example.test','unbenutzbar','wehrleitung');
+    SET @user_id=LAST_INSERT_ID();
+    INSERT INTO login_history(user_id,logged_in_at) VALUES(@user_id,UTC_TIMESTAMP()-INTERVAL 91 DAY);
+    SELECT @user_id;")
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/users" |
+  CLEANUP_USER_ID="$cleanup_user_id" php -r '
+    $users=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+    $user=array_values(array_filter($users,fn($u)=>$u["id"]===(int)getenv("CLEANUP_USER_ID")))[0];
+    assert($user["loginHistory"]===[]);
+  '
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
+  --execute="SELECT COUNT(*) FROM login_history WHERE user_id=$cleanup_user_id")" = 1
+
+# Öffentlicher Bootstrap und normale API-Nutzung bereinigen ohne neuen Login; gültige Sitzungen bleiben benutzbar.
+for cleanup_path in bootstrap me; do
+  MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" einsatzberichte \
+    --execute="INSERT INTO sessions(token,user_id,expires_at) VALUES(SHA2('retention-expired',256),$cleanup_user_id,UTC_TIMESTAMP()-INTERVAL 1 DAY);
+      UPDATE auth_cleanup_state SET last_run_at=UTC_TIMESTAMP()-INTERVAL 2 HOUR WHERE id=1;"
+  curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/$cleanup_path" >/dev/null
+  test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
+    --execute="SELECT CONCAT((SELECT COUNT(*) FROM sessions WHERE user_id=$cleanup_user_id),'|',
+      (SELECT COUNT(*) FROM login_history WHERE user_id=$cleanup_user_id),'|',
+      (SELECT last_run_at>UTC_TIMESTAMP()-INTERVAL 1 MINUTE FROM auth_cleanup_state WHERE id=1))")" = '0|0|1'
+done
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/me" >/dev/null
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DELETE FROM users WHERE id=$cleanup_user_id"
+
+# Fehlende Tabelle oder Steuerzeile der Migration 008 werden am Bootstrap als HTTP 503 sichtbar.
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="RENAME TABLE auth_cleanup_state TO auth_cleanup_state_missing"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' "$base_url/api/bootstrap")" = 503
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="RENAME TABLE auth_cleanup_state_missing TO auth_cleanup_state; DELETE FROM auth_cleanup_state WHERE id=1"
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' "$base_url/api/bootstrap")" = 503
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="INSERT INTO auth_cleanup_state(id,last_run_at) VALUES(1,UTC_TIMESTAMP())"
+
 # Text-, Wurzel-, ID- und Listenfehler liefern HTTP 400; abgewiesene Anfragen ändern weder Benutzer noch Einheiten oder Einsätze.
 API_BASE_URL="$base_url" COOKIE="$session_cookie=$session_token" php -r '
   $call=function(string $path, string $method="GET", ?string $payload=null): array {

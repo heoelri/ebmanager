@@ -199,7 +199,7 @@ async function admin(){
   <label>Rolle<select name="role"><option value="fuehrungskraft">Führungskraft</option><option value="einheitsleitung">Einheitsführung</option><option value="wehrleitung">Wehrführung</option></select></label>
   <div id="userMemberships">${membershipFields('fuehrungskraft')}</div>
   <button class="form-action">Einladung senden</button></form></section>
-  <section class="card"><h2>Benutzer</h2><ul class="user-list">${users.map(u=>`<li><b>${esc(u.name)}</b> · ${esc(roleLabels[u.role]||u.role)} · ${esc(u.unit_names||'wehrweit')} <button data-action="editUser" data-id="${u.id}">Bearbeiten</button><br><small class="muted">Letzte Anmeldung: ${u.loginHistory.length?formatDateTime(u.loginHistory[0]):'noch keine'}</small></li>`).join('')}</ul></section>`;
+  <section class="card"><h2>Benutzer</h2><ul class="user-list">${users.map(u=>`<li><b>${esc(u.name)}</b> · ${esc(roleLabels[u.role]||u.role)} · ${esc(u.unit_names||'wehrweit')} <button data-action="editUser" data-id="${u.id}">Bearbeiten</button><br><small class="muted">Letzte gespeicherte Anmeldung: ${u.loginHistory.length?formatDateTime(u.loginHistory[0]):'keine im Aufbewahrungszeitraum'}</small></li>`).join('')}</ul></section>`;
   focusMain();bindUnitPickers(app);
   const role=document.querySelector('#user [name=role]');role.onchange=()=>{const memberships=document.querySelector('#userMemberships');memberships.innerHTML=membershipFields(role.value);bindUnitPickers(memberships)};
   bindForm('#unit',async d=>{await api('/api/units',{method:'POST',body:JSON.stringify(d)});await load();admin()});

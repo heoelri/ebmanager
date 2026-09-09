@@ -73,6 +73,27 @@ Fahrzeug-Snapshots behalten ihre gespeicherte Reihenfolge und Daten.
 
 ## Endpunkte
 
+### Technische Anmeldebereinigung
+
+API-Aufrufe nach den zentralen Request-/Zugangsprüfungen sowie ein
+schema-validierter `GET /bootstrap` können vor der eigentlichen Verarbeitung
+eine installationsweite Bereinigung auslösen. Es gibt keinen zusätzlichen
+Wartungsendpunkt und keine neuen Clientparameter: höchstens stündlich werden
+je maximal 500 abgelaufene Sitzungen und 500 mehr als 90 Tage alte
+Anmeldeeinträge entfernt. Konkurrenzrequests überspringen einen bereits
+laufenden Batch. Fehler werden über den regulären Fehlerpfad gemeldet;
+die Bereinigung wird zurückgerollt, bevor fachliche Änderungen beginnen.
+
+`loginHistory` bleibt eine native Liste mit höchstens einem UTC-Zeitpunkt.
+Eine leere Liste bedeutet „keine gespeicherte Anmeldung im
+Aufbewahrungszeitraum“, nicht zwingend „noch nie angemeldet“. Ältere Einträge
+werden auch bei Bereinigungsrückstand nicht mehr ausgegeben. Gültige Sitzungen,
+Passwort-/Einladungstoken und Berichtsverläufe bleiben unverändert.
+Details zu Ruhezeiten, Rückständen und Migration:
+[Webspace-Deployment](WEBSPACE-DEPLOYMENT.md#sitzungen-und-loginhistorie-bereinigen-17-97).
+
+### Übersicht
+
 Rollen: **W** = `wehrleitung`, **E** = `einheitsleitung`,
 **F** = `fuehrungskraft`; **A** = alle angemeldeten Rollen.
 „Sichtbar“ umfasst immer die serverseitigen Mandanten-, Rollen- und
@@ -95,7 +116,7 @@ Einheitsgrenzen. Antworten sind JSON, sofern nicht als PDF bezeichnet.
 | `GET /units/:id/members` | A, erlaubte Einheit | aktive Mitglieder: `id, name, divera_id, active` (0/1), `qualifications` (Anzeigetext) |
 | `GET /units/:id/resources` | A, erlaubte Einheit | `{members:[], vehicles:[]}`; Mitglieder auch inaktiv; Fahrzeuge `id, divera_id, name, shortname, fullname` |
 | `GET /statistics?from=…&to=…` | E | einschließlich beider Tage, nur aktuelle Einheit; Gesamtzahl, reguläre Einsätze und Übungen separat; weitere Auswertungen gemeinsam |
-| `GET /users` | W | Liste `id, name, email, role, unit_ids:[], unit_names, loginHistory:[]`; höchstens neuester Login je Benutzer |
+| `GET /users` | W | Liste `id, name, email, role, unit_ids:[], unit_names, loginHistory:[]`; höchstens neuester Login der letzten 90 Tage je Benutzer |
 | `POST /users` | W | `name, email, role, unitIds[]` (alternativ `unitId`) → 201 `{id}`; siebentägige Einladung, kein Startpasswort |
 | `PUT /users/:id` | W | `name, email, role, unitIds[]`, optional `password` → `{ok:true}`; letzte Wehrführung bleibt erhalten |
 | `POST /users/:id/invitation` | W, nicht eigener Zugang | `{}` → `{ok:true}`; siebentägige Neueinladung; Widerruf erst bei erfolgreicher Mailannahme |

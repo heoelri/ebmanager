@@ -16,8 +16,11 @@ for _ in {1..60}; do
 done
 "${compose[@]}" exec -T db mysql --host=127.0.0.1 --user=root -ptest-password einsatzberichte --execute="SELECT 1" >/dev/null
 
-# Eine Altinstallation erhält Workflow, Stammdaten, Revisionen, historische Namens-Snapshots, Soft-Delete und Übungskennzeichnung genau einmal.
+# Eine Altinstallation erhält Workflow, Stammdaten, Revisionen, Snapshots, Soft-Delete, Übungskennzeichnung und Bereinigungszustand genau einmal.
 "${compose[@]}" exec -T db mysql --default-character-set=utf8mb4 --user=root -ptest-password einsatzberichte --execute="
+  DROP TABLE auth_cleanup_state;
+  ALTER TABLE login_history DROP INDEX login_history_time;
+  DELETE FROM schema_migrations WHERE name='008-auth-retention.sql';
   DROP TABLE incident_exercise_changes;
   ALTER TABLE incidents DROP COLUMN is_exercise;
   DELETE FROM schema_migrations WHERE name='007-incident-exercises.sql';
@@ -56,7 +59,9 @@ done
   INSERT INTO members(id,organization_id,divera_id,name) VALUES
     (10,10,'historisch','Historisches Mitglied'),
     (11,11,'fremd','Fremdes Mitglied');
-  INSERT INTO report_crew(report_id,member_id) VALUES(10,10),(10,11);"
+  INSERT INTO report_crew(report_id,member_id) VALUES(10,10),(10,11);
+  INSERT INTO login_history(user_id,logged_in_at) VALUES(10,'2000-01-01 00:00:00');
+  INSERT INTO sessions(token,user_id,expires_at) VALUES(SHA2('migration-auth-retention',256),10,'2000-01-01 00:00:00');"
 "${compose[@]}" run --rm migrate
 # Der Snapshot-Backfill erhöht Bestandsrevisionen einmal; spätere Stammdatenänderungen dürfen weder Namen noch Revisionen zurücksetzen.
 "${compose[@]}" exec -T db mysql --default-character-set=utf8mb4 --user=root -ptest-password einsatzberichte --execute="
@@ -93,6 +98,17 @@ result="$("${compose[@]}" exec -T db mysql --user=root -ptest-password --batch -
     (SELECT SUM(is_exercise) FROM incidents WHERE id BETWEEN 10 AND 13)
   )")"
 test "$result" = '1|1|author_draft,unit_review,wehr_review,wehr_review|4|1|1|1|1|1|1|7,2,2,2|9,2,2,2|1|1|1:0|1|1|1|1|0'
+
+# Migration 008 wird genau einmal vermerkt und initialisiert die erste Bereinigung samt zeitgeordnetem Index ohne Datenlöschung.
+test "$("${compose[@]}" exec -T db mysql --user=root -ptest-password --batch --skip-column-names einsatzberichte --execute="
+  SELECT CONCAT(
+    (SELECT COUNT(*) FROM schema_migrations WHERE name='008-auth-retention.sql'),'|',
+    (SELECT CONCAT(id,':',last_run_at) FROM auth_cleanup_state),'|',
+    (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics
+      WHERE table_schema=DATABASE() AND table_name='login_history' AND index_name='login_history_time'),'|',
+    (SELECT COUNT(*) FROM login_history WHERE user_id=10 AND logged_in_at='2000-01-01 00:00:00'),'|',
+    (SELECT COUNT(*) FROM sessions WHERE user_id=10 AND expires_at='2000-01-01 00:00:00')
+  )")" = '1|1:1970-01-01 00:00:00|logged_in_at,id|1|1'
 
 # Migration 005 bewahrt heutige Namen, synchronisiert Zusammenfassungen und übernimmt keine Namen aus Fremdmandanten.
 test "$("${compose[@]}" exec -T db mysql --default-character-set=utf8mb4 --user=root -ptest-password --batch --skip-column-names einsatzberichte --execute="
