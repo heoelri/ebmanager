@@ -41,7 +41,7 @@ jobs:
             bash -lc 'npm install --prefix /tmp/ui --no-save --package-lock=false playwright@1.55.0 && cp test/ui-screenshots.mjs /tmp/ui/ && node /tmp/ui/ui-screenshots.mjs'
       - name: Screenshots als Artefakt speichern
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ui-screenshots
           path: screenshots/*.png
