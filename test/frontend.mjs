@@ -426,6 +426,29 @@ assert(durationSource, 'durationText fehlt');
 const durationText = new Function(`${durationSource}; return durationText;`)();
 assert.equal(durationText(null, null), '–');
 assert.equal(durationText(null, '2026-08-22T19:00:00Z'), '–');
+const bindDurationSource = html.match(/function bindDuration[^\n]+/)?.[0];
+assert(bindDurationSource, 'bindDuration fehlt');
+const durationOutput = {textContent: ''};
+let updateDuration;
+const durationForm = {
+  elements: {
+    alarmedAt: {value: '2026-10-25T02:30', dataset: {originalLocal: '2026-10-25T02:30', originalIso: '2026-10-25T00:30:00.000Z'}},
+    endedAt: {
+      value: '2026-10-25T02:30',
+      dataset: {originalLocal: '2026-10-25T02:30', originalIso: '2026-10-25T01:30:00.000Z'},
+      addEventListener: (event, handler) => {assert.equal(event, 'input'); updateDuration = handler;}
+    }
+  },
+  querySelector: selector => {assert.equal(selector, '.duration'); return durationOutput;}
+};
+const bindDuration = new Function(
+  'durationText', 'reportDateTime', `${bindDurationSource}; return bindDuration;`
+)(durationText, reportDateTime);
+bindDuration(durationForm);
+assert.equal(durationOutput.textContent, 'Einsatzdauer: 1 Std. 0 Min.');
+durationForm.elements.endedAt = {...durationForm.elements.endedAt, value: '2026-10-25T02:30', dataset: {}};
+updateDuration();
+assert.match(durationOutput.textContent, /Einsatzdauer: Einsatzende ist wegen der Zeitumstellung mehrdeutig/);
 
 const formatDateTimeSource = html.match(/function formatDateTime[^\n]+/)?.[0];
 assert(formatDateTimeSource, 'formatDateTime fehlt');

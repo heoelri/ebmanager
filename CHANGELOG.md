@@ -36,7 +36,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Fixed
 
-- Datenbankverbindungen verwenden unabhängig von der MySQL-Hostzeitzone UTC. Unverändert gespeicherte Berichtszeiten behalten beim Bearbeiten ihren ursprünglichen ISO-Zeitpunkt einschließlich Sekunden und Zeitwechsel-Offset; neue nicht existente oder mehrdeutige Ortszeiten werden abgewiesen (#87).
+- Datenbankverbindungen verwenden unabhängig von der MySQL-Hostzeitzone UTC. Unverändert gespeicherte Berichtszeiten behalten beim Bearbeiten und in der Daueranzeige ihren ursprünglichen ISO-Zeitpunkt einschließlich Sekunden und Zeitwechsel-Offset; neue nicht existente oder mehrdeutige Ortszeiten werden abgewiesen. Der Hostzeitzonentest stellt die globale Testeinstellung auch bei Abbruch wieder her und prüft den Reset-Default samt Fünf-Minuten-Grenze (#87).
 - Der Verlauf der Übungskennzeichnung wird in den Einsatzdetails nur angezeigt, wenn mindestens eine Änderung vorhanden ist.
 - Der Konkurrenztest zur Anmeldebereinigung stellt sein temporär verkürztes MySQL-Lock-Wartezeitlimit unmittelbar nach dem Testabschnitt auch bei Fehlern wieder her; nachfolgende Datenbankoperationen behalten ihre ursprüngliche Wartezeit (#118).
 - PDF-Exporte ersetzen nicht darstellbare Namen oder Adressen nicht mehr still durch Fragezeichen oder Transliteration, sondern melden die Grenze ausdrücklich. Der native Renderer verwendet eine Schrift mit exakt berechenbarer Zeichenbreite und bricht lange Wörter sowie mehrzeilige Texte innerhalb des sichtbaren Seitenbereichs um (#98).

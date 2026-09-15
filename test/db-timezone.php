@@ -17,6 +17,23 @@ try {
     );
     $userId = (int)db()->lastInsertId();
     query(
+        'INSERT INTO password_resets(user_id,token_hash,expires_at) VALUES(?,?,UTC_TIMESTAMP()+INTERVAL 30 MINUTE)',
+        [$userId, hash('sha256', "UTC-Reset $suffix")]
+    );
+    $resetTime = one(
+        'SELECT ABS(TIMESTAMPDIFF(SECOND,requested_at,UTC_TIMESTAMP())) requested_delta,
+                requested_at>UTC_TIMESTAMP()-INTERVAL 5 MINUTE recent
+         FROM password_resets WHERE user_id=?',
+        [$userId]
+    );
+    assert((int)$resetTime['requested_delta'] <= 5);
+    assert((int)$resetTime['recent'] === 1);
+    query('UPDATE password_resets SET requested_at=UTC_TIMESTAMP()-INTERVAL 5 MINUTE WHERE user_id=?', [$userId]);
+    assert((int)one(
+        'SELECT requested_at>UTC_TIMESTAMP()-INTERVAL 5 MINUTE recent FROM password_resets WHERE user_id=?',
+        [$userId]
+    )['recent'] === 0);
+    query(
         "INSERT INTO incidents(organization_id,title,started_at,address,message,remark,patient,caller,consolidated_text)
          VALUES(?,?,'2026-01-01T00:00:00.000Z','','','','','','')",
         [$organizationId, "UTC-Einsatz $suffix"]

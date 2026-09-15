@@ -223,8 +223,9 @@ Copilot-Hinweis die betroffene Gruppe statt eines darin enthaltenen Felds.
 HTTP-Regressionen prüfen diese Meldungen und den unveränderten Datenstand.
 
 Die Formatierung alter `DATETIME`-Werte korrigiert keine früheren
-Zeitzonenfehler; #87 bleibt offen. Die Umstellung verlangt einen gemeinsamen
-PHP-/Browserstand im Wartungsfenster, aber keine neue Migration. Die
+Zeitzonenfehler; möglicherweise unter abweichender Hostzeitzone gespeicherte
+Bestandswerte müssen vor der Umstellung fachlich geprüft werden. Die Umstellung
+verlangt einen gemeinsamen PHP-/Browserstand im Wartungsfenster, aber keine neue Migration. Die
 verbindlichen Schritte einschließlich Rollback stehen unter
 [API-Vertrag umstellen](docs/WEBSPACE-DEPLOYMENT.md#json-antworttypen-und-eingabevalidierung-umstellen-92).
 

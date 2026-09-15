@@ -16,6 +16,21 @@ mysql_tls_args=()
 divera_log="${TMPDIR:-/tmp}/divera-requests-$$.log"
 [[ "${DIVERA_API_BASE_URL:-}" == 'http://divera:8090' ]] && divera_log=/tmp/divera/requests.log
 divera_pid=''
+server_pid=''
+smtp_pid=''
+original_global_timezone=''
+cleanup() {
+  if [[ -n "$original_global_timezone" ]]; then
+    MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" \
+      --execute="SET GLOBAL time_zone='$original_global_timezone'" || true
+  fi
+  if [[ -n "$server_pid" ]]; then
+    kill "$server_pid" "${smtp_pid:-}" "${divera_pid:-}" 2>/dev/null || true
+    rm -f smtp-cert.pem smtp-key.pem "$divera_log"
+    cat php-server.log smtp-server.log divera-server.log
+  fi
+}
+trap cleanup EXIT
 incident_status() {
   curl --insecure --silent --fail --cookie "$session_cookie=$1" "$base_url/api/incidents" |
     INCIDENT_ID="$2" php -r '$items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $matches=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID"))); assert(count($matches)===1); echo $matches[0]["reportStatus"]["key"];'
@@ -226,7 +241,6 @@ if [[ -z "${TEST_BASE_URL:-}" ]]; then
   export SMTP_HOST=localhost SMTP_PORT=2525 SMTP_USERNAME=test SMTP_PASSWORD=test SMTP_CA_FILE="$PWD/smtp-cert.pem"
   php -S 127.0.0.1:8080 api.php >php-server.log 2>&1 &
   server_pid=$!
-  trap 'kill "$server_pid" "${smtp_pid:-}" "${divera_pid:-}" 2>/dev/null || true; rm -f smtp-cert.pem smtp-key.pem "$divera_log"; cat php-server.log smtp-server.log divera-server.log' EXIT
 fi
 sleep 0.25
 
@@ -338,6 +352,7 @@ for host_timezone in '+02:00' '-05:00'; do
   fi
 done
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --execute="SET GLOBAL time_zone='$original_global_timezone'"
+original_global_timezone=''
 
 # Ein alter letzter Login wird auch vor seiner physischen Bereinigung nicht mehr ausgegeben.
 cleanup_user_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
