@@ -380,22 +380,25 @@ in der konfigurierten Datenbank. Ein beliebiger anderer wartender
 `SELECT` genügt nicht. Danach prüfen sie die erneute Adress-/Tokenprüfung
 nach dem Commit der parallelen Kontoänderung.
 
-## Einheitsstatistik vom 3. September 2026
+## Statistik für Einheits- und Wehrführung vom 15. September 2026
 
-`GET /api/statistics` ist ausschließlich für `einheitsleitung` freigegeben
-und leitet die auszuwertende Einheit aus der serverseitigen aktuellen
-`user_units`-Zuordnung ab. Der Client kann keine Einheits-ID vorgeben. Alle
-Einsatzabfragen begrenzen zusätzlich auf `incidents.organization_id`; die
-weiteren Aggregationen verwenden nur daraus ermittelte Berichts-IDs und
-prüfen Mitglieder nochmals gegen denselben Mandanten.
+`GET /api/statistics` ist ausschließlich für `einheitsleitung` und
+`wehrleitung` freigegeben. Für Einheitsführungen wird die auszuwertende
+Einheit weiterhin aus der serverseitigen aktuellen `user_units`-Zuordnung
+abgeleitet; eine abweichende Client-ID wird abgewiesen. Wehrführungen dürfen
+keine Einheit außerhalb ihrer Organisation auswählen. Alle Einsatz- und
+Einheitsabfragen begrenzen auf `organization_id`; die weiteren Aggregationen
+verwenden nur daraus ermittelte Berichts-IDs und prüfen Mitglieder nochmals
+gegen denselben Mandanten.
 
 Die Antwort enthält ausschließlich Namen und aggregierte Häufigkeiten aus
 Fahrzeug-Snapshots, zusätzlichen Berichtsfahrzeugen und strukturierter
 Besatzung. Berichtstexte, Patient, meldende Person, Geschädigte und Schädiger
 werden weder abgefragt noch ausgegeben oder protokolliert. Inaktive
 Mitglieder bleiben für historische Häufigkeiten sichtbar, ohne weitere
-personenbezogene Angaben offenzulegen. Manipulierte Zeiträume werden strikt
-als lokale ISO-Daten validiert.
+personenbezogene Angaben offenzulegen. Manipulierte Zeiträume und Einheits-IDs werden strikt validiert. Wehrweite
+Summen deduplizieren Einsätze anhand ihrer internen ID, während der
+Einheitenvergleich ausschließlich mandantengebundene Zuordnungen zählt.
 
 ## Inaktive DIVERA-Mitglieder vom 3. September 2026
 

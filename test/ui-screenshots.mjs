@@ -107,6 +107,7 @@ try {
       views: [
         ['einsaetze', 'home', 'Freiwillige Feuerwehr Amt Keppel', '#pendingDivera:not([hidden])'],
         ['mitglieder-fahrzeuge', 'resources', 'Mitglieder & Fahrzeuge', '#resources details'],
+        ['statistik', 'statistics', 'Statistik', '#statisticsResults .card'],
         ['verwaltung', 'admin', 'Verwaltung'],
         ['system', 'system', 'System'],
         ['divera', 'divera', 'DIVERA 24/7']

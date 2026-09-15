@@ -72,7 +72,7 @@ assert.match(screenshotsScript, /01-anmeldung\.png/);
 for (const prefix of ['10-fuehrungskraft', '20-einheitsfuehrung', '30-wehrfuehrung']) {
   assert.match(screenshotsScript, new RegExp(`prefix: '${prefix}'`));
 }
-assert.equal((screenshotsScript.match(/\['[^']+', '[^']+', '[^']+'/g) ?? []).length, 12);
+assert.equal((screenshotsScript.match(/\['[^']+', '[^']+', '[^']+'/g) ?? []).length, 13);
 assert.match(screenshotsScript, /viewport: \{width: 1440, height: 1000\}/);
 assert.match(screenshotsScript, /locale: 'de-DE'/);
 assert.match(screenshotsScript, /timezoneId: 'Europe\/Berlin'/);
@@ -677,7 +677,9 @@ assert.match(html, /Alles synchronisieren/);
 assert.match(html, /Fahrzeuge synchronisieren/);
 assert.match(html, /\/resources/);
 assert.match(html, /Qualifikationen:/);
-assert.match(html, /me\.role==='einheitsleitung'\?'<button type="button" data-action="statistics">Statistik<\/button>'/);
+assert.match(html, /\['einheitsleitung','wehrleitung'\]\.includes\(me\.role\)\?'<button type="button" data-action="statistics">Statistik<\/button>'/);
+assert.match(html, /<select name="unit"><option value="">Alle Einheiten<\/option>/);
+assert.match(html, /if\(unit\)query\.set\('unit',unit\)/);
 assert.match(html, /<input name="from" type="date"/);
 assert.match(html, /<input name="to" type="date"/);
 assert.match(html, /<th scope="col">/);
@@ -691,10 +693,12 @@ const {statisticsMarkup, statisticsWeekday, statisticsMonth} = new Function('esc
 assert.equal(statisticsWeekday(1), new Date(2024, 0, 1, 12).toLocaleDateString(undefined, {weekday: 'long'}));
 assert.equal(statisticsMonth('2026-09'), new Date(2026, 8, 1, 12).toLocaleDateString(undefined, {month: 'long', year: 'numeric'}));
 const statisticsHtml = statisticsMarkup({
+  scope: 'organization',
   range: {timezone: 'Europe/Berlin'},
   totals: {incidents: 4, regularIncidents: 3, exercises: 1, reports: 2, crewAssignments: 2, averageCrew: 1},
-  alarmedVehicles: [{name: 'LF 20', own: true, count: 2}],
-  additionalVehicles: [{name: 'ELW 1', count: 1}],
+  units: [{name: 'Löschzug', incidents: 4, reports: 2, averageCrew: 1}],
+  alarmedVehicles: [{name: 'LF 20', unitName: 'Löschzug', own: true, count: 2}],
+  additionalVehicles: [{name: 'ELW 1', unitName: 'Löschzug', count: 1}],
   members: [{name: 'Historisches Mitglied', count: 1}],
   years: [{key: '2026', count: 4}],
   months: [{key: '2026-09', count: 4}],
@@ -703,7 +707,7 @@ const statisticsHtml = statisticsMarkup({
   dayPeriods: {day: 2, night: 2},
   periods: {dayStart: '07:00', nightStart: '17:00', weekendStartDay: 5, weekendStart: '17:00', weekendEndDay: 1, weekendEnd: '07:00'}
 });
-for (const expected of ['Reguläre Einsätze', 'Übungen', 'Alarmierte Fahrzeuge', 'Zusätzliche tatsächlich eingesetzte Fahrzeuge', 'Einsatzbeteiligung der Mitglieder', 'LF 20', 'ELW 1', 'Historisches Mitglied', 'Werktag', 'Wochenende', 'Tag', 'Nacht']) {
+for (const expected of ['Reguläre Einsätze', 'Übungen', 'Einheiten im Vergleich', 'Löschzug', 'Alarmierte Fahrzeuge', 'Zusätzliche tatsächlich eingesetzte Fahrzeuge', 'Einsatzbeteiligung der Mitglieder', 'LF 20', 'ELW 1', 'Historisches Mitglied', 'Werktag', 'Wochenende', 'Tag', 'Nacht']) {
   assert.match(statisticsHtml, new RegExp(expected));
 }
 assert.match(statisticsHtml, /2 Besatzungszuordnungen in 2 vorhandenen Berichten/);
@@ -928,6 +932,7 @@ const navigation = new Function(
 await navigation.initialView();
 assert.deepEqual(requested,['resources']);
 assert.equal(location.search,'?view=resources');
+assert.equal(navigation.viewAllowed('statistics'),true);
 location.search='?view=resources&incident=42';
 await navigation.initialView();
 assert.equal(location.search,'?incident=42');

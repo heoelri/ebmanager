@@ -6,6 +6,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Added
 
+- Die Wehrführung erhält eine organisationsweite Statistik mit Einheitenvergleich und optionalem Filter auf eine einzelne Einheit. Wehrweite Einsatzzahlen zählen gemeinsam alarmierte Einsätze nur einmal.
 - Alle einem Einsatz zugeordneten Rollen können ihn revisionsgeschützt organisationsweit als Übung kennzeichnen; Wehrführungen dürfen dies für alle Einsätze ihres Mandanten. Das Merkmal gilt auch für DIVERA-Einsätze, bleibt bei Neuimporten erhalten und erscheint in Filtern, Berichten, PDFs, Statistik und unveränderlichem Prüfverlauf (#115).
 - Einheits- und Wehrführungen können manuell angelegte Einsätze revisionsgeschützt dauerhaft ausblenden. Die fachlichen Daten bleiben erhalten; ein unveränderlicher Audit-Eintrag speichert Akteur und UTC-Zeitpunkt (#112).
 - Das Projekt steht unter der PolyForm Noncommercial License 1.0.0. Feuerwehren, öffentliche Sicherheitsorganisationen und Kommunen dürfen die Software unabhängig von ihrer Finanzierung nutzen, ändern und weitergeben; kommerzielle Nutzung benötigt eine gesonderte Zustimmung (#96).
@@ -30,7 +31,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 - Einheitszuordnungen, Fahrzeug-Snapshots und Besatzungen werden als native JSON-Listen geliefert; Kontakt-, Einsatzleitungs- und Klassifikationsangaben als native Objekte. Der Browser verarbeitet diese Werte ohne eine zweite JSON-Dekodierung und meldet falsche Antworttypen sichtbar, statt daraus leere Bearbeitungsformulare zu erzeugen (#92).
 - „Einsatz anlegen“ ist auf der Einsatzübersicht standardmäßig eingeklappt und weist auf die ausschließliche Nutzung für nicht über DIVERA alarmierte Einsätze hin.
 - Die Box „DIVERA Import“ auf der Einsatzübersicht ist standardmäßig eingeklappt.
-- Der UI-Screenshot-Kommentar bettet die 16 erzeugten Ansichten direkt über unveränderliche Dateien in einem separaten Screenshot-Branch je Pull Request ein.
+- Der UI-Screenshot-Kommentar bettet die 17 erzeugten Ansichten direkt über unveränderliche Dateien in einem separaten Screenshot-Branch je Pull Request ein.
 - Fremde Alarmfahrzeuge zeigen bei eindeutigem, bereits synchronisiertem Fahrzeugstamm einer anderen Einheit derselben Wehr Name und Typ statt nur der DIVERA-ID; fehlende oder mehrdeutige Zuordnungen bleiben bei der ID.
 - Sichtbare Datums- und Uhrzeitangaben der Browser-Oberfläche verwenden durchgängig das Gebietsschema und das 12-/24-Stunden-Schema des Nutzers; native Datumsfelder behalten die Browserdarstellung.
 

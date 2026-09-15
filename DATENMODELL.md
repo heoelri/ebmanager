@@ -329,12 +329,15 @@ erhalten, auch bei Einheiten ohne eigenen Bericht. Eine später hinzukommende
 Einheit erhält ihren ersten Snapshot, ohne die gemeinsamen Daten oder frühere
 Snapshots zu überschreiben. Eine reine Umsortierung gilt nicht als Änderung.
 
-### Abgeleitete Einheitsstatistiken
+### Abgeleitete Statistiken
 
 `GET /api/statistics` speichert keine zusätzlichen Daten. Die erste
-Ausbaustufe steht ausschließlich der Einheitsführung zur Verfügung und
-aggregiert nur Einsätze ihrer aktuell zugeordneten Einheit im gewählten
-lokalen Datumsbereich.
+Ausbaustufe steht Einheits- und Wehrführungen zur Verfügung. Einheitsführungen
+werten ausschließlich ihre aktuell zugeordnete Einheit aus. Wehrführungen
+werten standardmäßig alle Einheiten ihrer Organisation aus und können die
+Ausgabe auf eine Einheit begrenzen. Wehrweite Zeit- und Einsatzsummen zählen
+einen mehreren Einheiten zugeordneten Einsatz einmal; der Einheitenvergleich
+zählt die Zuordnung für jede alarmierte Einheit.
 
 Alarmierte Fahrzeuge stammen aus `incident_units.vehicles`; zusätzliche
 tatsächlich eingesetzte Fahrzeuge aus `report_additional_vehicles`.
