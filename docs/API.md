@@ -57,10 +57,17 @@ Technische Zeitantworten sind ISO-8601 in UTC mit `Z`: Einsatz-/Berichtszeiten,
 `loginHistory[]` mit Sekunden. Nicht gesetzte optionale Zeitpunkte sind `null`.
 Diese Konvention betrifft nicht die lokalisierte Browseranzeige.
 
-Bestehende MySQL-`DATETIME`-Werte werden als UTC interpretiert. Die noch offene
-Vereinheitlichung aller Schreibzeitpunkte/DB-Defaults aus **#87** wird durch
-die Formatierung nicht behoben; ältere mit anderer Host-Zeitzone geschriebene
-Werte werden nicht nachträglich korrigiert.
+Jede Anwendungsverbindung setzt ihre MySQL-Sitzungszeitzone auf UTC. Dadurch
+werden auch `CURRENT_TIMESTAMP`-Defaults unabhängig von der Hostzeitzone als
+UTC gespeichert. Bestehende MySQL-`DATETIME`-Werte werden weiterhin als UTC
+interpretiert und nicht automatisch umgerechnet.
+
+Der Browser zeigt Berichtszeiten im nativen lokalen `datetime-local`-Feld.
+Beim unveränderten Speichern sendet er den geladenen ISO-Zeitpunkt
+verlustfrei einschließlich Sekunden zurück. Eine echte Änderung wird aus der
+lokalen Browserzeitzone nach UTC umgerechnet; nicht existente oder wegen
+einer Zeitumstellung mehrdeutige Ortszeiten werden vor dem Request sichtbar
+abgewiesen.
 
 Einsätze: `started_at` absteigend, bei Gleichstand ID absteigend. Benutzer,
 Einheiten, Mitglieder und Stammfahrzeuge: Name, dann ID aufsteigend.

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
+process.env.TZ = 'Europe/Berlin';
+
 const documentHtml = fs.readFileSync('public/index.html', 'utf8');
 const javascript = fs.readFileSync('public/app.js', 'utf8');
 const html = `${documentHtml}\n${javascript}`;
@@ -355,13 +357,25 @@ assert.match(html, /exerciseFilter\.addEventListener\('change',applyFilters\)/);
 
 const reportFieldsSource = html.match(/function contactFields[\s\S]*?(?=\nfunction bindDuration)/)?.[0];
 assert(reportFieldsSource, 'Berichtsdetails fehlen');
+const dateTimeSource = html.match(/function localDateTime[\s\S]*?(?=\nfunction contactFields)/)?.[0];
+assert(dateTimeSource, 'Lokale Berichtszeiten fehlen');
+const {localDateTime, dateTimeAttributes, reportDateTime} = new Function(
+  'esc', `${dateTimeSource}; return {localDateTime,dateTimeAttributes,reportDateTime};`
+)(value => String(value ?? ''));
+const originalIso = '2026-10-25T01:30:42.000Z';
+const originalLocal = '2026-10-25T02:30';
+assert.equal(localDateTime(originalIso), originalLocal);
+assert.equal(reportDateTime({value: originalLocal, dataset: {originalLocal, originalIso}}, 'Eintreffzeit'), originalIso);
+assert.equal(reportDateTime({value: '2026-10-25T03:30', dataset: {}}, 'Eintreffzeit'), '2026-10-25T02:30:00.000Z');
+assert.throws(() => reportDateTime({value: '2026-10-25T02:30', dataset: {}}, 'Eintreffzeit'), /mehrdeutig/);
+assert.throws(() => reportDateTime({value: '2026-03-29T02:30', dataset: {}}, 'Eintreffzeit'), /existiert in Ihrer Zeitzone nicht/);
 const {reportDetailsFields} = new Function(
-  'esc', 'ranks', 'localDateTime', 'incidentTypes', 'reportClassifications', 'classificationLabels',
+  'esc', 'ranks', 'dateTimeAttributes', 'incidentTypes', 'reportClassifications', 'classificationLabels',
   `${apiTypesSource}; ${reportFieldsSource}; return {reportDetailsFields};`
 )(
   value => String(value ?? ''),
   {BM: 'Brandmeister', BI: 'Brandinspektor'},
-  value => String(value ?? ''),
+  dateTimeAttributes,
   ['Technische Hilfe'],
   {site: ['Wohngebäude'], cause: ['Unbekannt'], technical: ['Menschen in Notlage']},
   {site: 'Einsatzstelle', cause: 'Schadensursache', technical: 'Technische Hilfe'}
@@ -372,6 +386,7 @@ const reportFields = reportDetailsFields('edit', {
   started_at: '2026-08-22T18:00'
 }, {
   running_number: '7/2026',
+  departed_at: originalIso,
   damaged_party: {name: 'Max', phone: '', address: ''},
   damaging_party: {},
   incident_command: {rank: 'BI', name: 'A', additionalRank: 'BM', additionalName: 'B'},
@@ -385,6 +400,7 @@ assert.match(reportFields, /name="commandRank">[\s\S]*?<option value="BI" select
 assert.match(reportFields, /name="commandName" value="A"/);
 assert.match(reportFields, /name="additionalCommandRank">[\s\S]*?<option value="BM" selected>BM – Brandmeister/);
 assert.match(reportFields, /name="additionalCommandName" value="B"/);
+assert.match(reportFields, /name="departedAt"[^>]+data-original-local="2026-10-25T02:30"[^>]+data-original-iso="2026-10-25T01:30:42.000Z"/);
 assert.equal((reportFields.match(/class="form-section" open/g) ?? []).length, 3);
 assert.match(reportDetailsFields('new', {foreign_id: '', started_at: ''}), /DIVERA-Einsatznummer<input value="Nicht vorhanden" readonly>/);
 
@@ -411,6 +427,29 @@ assert(durationSource, 'durationText fehlt');
 const durationText = new Function(`${durationSource}; return durationText;`)();
 assert.equal(durationText(null, null), '–');
 assert.equal(durationText(null, '2026-08-22T19:00:00Z'), '–');
+const bindDurationSource = html.match(/function bindDuration[^\n]+/)?.[0];
+assert(bindDurationSource, 'bindDuration fehlt');
+const durationOutput = {textContent: ''};
+let updateDuration;
+const durationForm = {
+  elements: {
+    alarmedAt: {value: '2026-10-25T02:30', dataset: {originalLocal: '2026-10-25T02:30', originalIso: '2026-10-25T00:30:00.000Z'}},
+    endedAt: {
+      value: '2026-10-25T02:30',
+      dataset: {originalLocal: '2026-10-25T02:30', originalIso: '2026-10-25T01:30:00.000Z'},
+      addEventListener: (event, handler) => {assert.equal(event, 'input'); updateDuration = handler;}
+    }
+  },
+  querySelector: selector => {assert.equal(selector, '.duration'); return durationOutput;}
+};
+const bindDuration = new Function(
+  'durationText', 'reportDateTime', `${bindDurationSource}; return bindDuration;`
+)(durationText, reportDateTime);
+bindDuration(durationForm);
+assert.equal(durationOutput.textContent, 'Einsatzdauer: 1 Std. 0 Min.');
+durationForm.elements.endedAt = {...durationForm.elements.endedAt, value: '2026-10-25T02:30', dataset: {}};
+updateDuration();
+assert.match(durationOutput.textContent, /Einsatzdauer: Einsatzende ist wegen der Zeitumstellung mehrdeutig/);
 
 const formatDateTimeSource = html.match(/function formatDateTime[^\n]+/)?.[0];
 assert(formatDateTimeSource, 'formatDateTime fehlt');

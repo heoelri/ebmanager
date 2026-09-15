@@ -459,9 +459,9 @@ Eindeutig ist `(unit_id, divera_id)`. Ein Stammdatenabgleich ersetzt den aktuell
 | `incident_type` | VARCHAR(100), NOT NULL | Validierte Einsatzart |
 | `classification` | JSON, NOT NULL | Aufgliederung |
 | `status` | ENUM, NOT NULL | `author_draft`, `unit_review` oder `wehr_review` |
-| `created_at` | DATETIME, NOT NULL | Erstellungszeit |
-| `updated_at` | DATETIME, NOT NULL | Letzte Änderung |
-| `released_at` | DATETIME, NULL | Freigabezeit |
+| `created_at` | DATETIME, NOT NULL | Erstellungszeit in UTC |
+| `updated_at` | DATETIME, NOT NULL | Letzte Änderung in UTC |
+| `released_at` | DATETIME, NULL | Freigabezeit in UTC |
 | `revision` | INT UNSIGNED, NOT NULL, DEFAULT 1 | Monotoner Stand des Berichts einschließlich Besatzung, Zusatzfahrzeuge und Workflow |
 
 Eindeutig ist `(incident_id, unit_id)`: Jede Einheit schreibt pro Einsatz
@@ -473,6 +473,13 @@ fehlen. Alle vorhandenen Einsatzzeiten müssen chronologisch sein. `alarmed_at`
 wird nicht vom Client übernommen. Die Dauer wird bei der Abfrage
 als `duration_minutes` aus `alarmed_at` und `ended_at` berechnet und nicht
 gespeichert.
+
+Die Anwendung setzt die MySQL-Sitzungszeitzone jeder PDO-Verbindung auf UTC.
+Damit schreiben auch die `CURRENT_TIMESTAMP`-Defaults von `created_at` und
+`updated_at` unabhängig von der Hostzeitzone UTC. Bestehende Werte werden
+nicht pauschal umgerechnet, weil ohne externen fachlichen Referenzzeitpunkt
+nicht sicher erkennbar ist, ob sie bereits UTC oder eine lokale Hostzeit
+enthalten.
 
 `classification` enthält die in `constants.php` definierten Gruppen und
 ausschließlich deren dort festgelegte Werte:

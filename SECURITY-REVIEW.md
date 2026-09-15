@@ -1,5 +1,29 @@
 # Security Review
 
+## UTC-Zeitbasis und verlustfreie Berichtszeiten vom 15. September 2026 (#87)
+
+Jede PDO-Verbindung setzt nach erfolgreichem Verbindungsaufbau die
+MySQL-Sitzungszeitzone ausdrücklich auf `+00:00`. Dadurch verwenden
+`CURRENT_TIMESTAMP`-Defaults für Berichte unabhängig von der Hostkonfiguration
+dieselbe UTC-Basis wie Ablauf-, Freigabe- und Auditprüfungen. Die Änderung
+erweitert weder Datenzugriffe noch Rollen- oder Mandantenrechte.
+
+Der Browser speichert an den vorhandenen nativen `datetime-local`-Feldern nur
+den geladenen ISO-Zeitpunkt und dessen angezeigten lokalen Minutenwert.
+Unveränderte Felder senden den ursprünglichen Wert einschließlich Sekunden
+zurück. Bei echten Änderungen prüft der Browser die lokalen
+Datumskomponenten; nicht existente Frühlingszeiten und doppelte
+Herbstzeiten werden sichtbar abgewiesen, statt still auf einen anderen
+Zeitpunkt normalisiert zu werden. Die API validiert weiterhin ausschließlich
+UTC-ISO-Werte und die chronologische Reihenfolge.
+
+Die zusätzlichen HTML-Datenattribute enthalten ausschließlich dieselben
+mandantengebundenen Berichtszeiten, die der berechtigte Benutzer bereits über
+die API erhalten hat. Sie werden weder persistiert noch protokolliert.
+Bestehende möglicherweise mit abweichender Hostzeitzone gespeicherte Werte
+werden nicht automatisch verändert, weil eine pauschale Korrektur fachlich
+richtige UTC-Werte beschädigen könnte.
+
 ## Sitzungs- und Anmeldebereinigung vom 9. September 2026 (#17, Teil von #97)
 
 Die bestätigte Frist beträgt 90 Tage für erfolgreiche Anmeldungen. Erfasst
@@ -199,8 +223,9 @@ Copilot-Hinweis die betroffene Gruppe statt eines darin enthaltenen Felds.
 HTTP-Regressionen prüfen diese Meldungen und den unveränderten Datenstand.
 
 Die Formatierung alter `DATETIME`-Werte korrigiert keine früheren
-Zeitzonenfehler; #87 bleibt offen. Die Umstellung verlangt einen gemeinsamen
-PHP-/Browserstand im Wartungsfenster, aber keine neue Migration. Die
+Zeitzonenfehler; möglicherweise unter abweichender Hostzeitzone gespeicherte
+Bestandswerte müssen vor der Umstellung fachlich geprüft werden. Die Umstellung
+verlangt einen gemeinsamen PHP-/Browserstand im Wartungsfenster, aber keine neue Migration. Die
 verbindlichen Schritte einschließlich Rollback stehen unter
 [API-Vertrag umstellen](docs/WEBSPACE-DEPLOYMENT.md#json-antworttypen-und-eingabevalidierung-umstellen-92).
 

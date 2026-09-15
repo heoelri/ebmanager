@@ -188,6 +188,27 @@ Die Ersteinrichtung ist nach dem ersten Benutzer dauerhaft geschlossen.
 6. Optional pro Einheit einen DIVERA-Access-Key hinterlegen und einen lesenden Abruf durchführen.
 7. Serverprotokolle auf PHP-, Apache- oder Mailfehler prüfen, ohne Zugangsdaten oder DIVERA-Schlüssel weiterzugeben.
 
+### UTC-Zeitbasis und vorhandene Zeitwerte prüfen (#87)
+
+Die Umstellung benötigt keine Datenbankmigration. `support.php` setzt jede
+neue Anwendungsverbindung auf UTC; `public/app.js` muss gleichzeitig
+aktualisiert werden, damit unveränderte Berichtszeiten beim Bearbeiten ihren
+ursprünglichen ISO-Zeitpunkt behalten.
+
+Vor dem Update die Datenbank sichern. Bestehende `DATETIME`-Werte werden
+nicht automatisch verschoben: Ohne einen bekannten externen Referenzzeitpunkt
+ist nicht zuverlässig feststellbar, ob ein älterer Wert bereits UTC oder die
+damalige MySQL-Hostzeit enthält. Bei Installationen, die zuvor nicht auf UTC
+liefen, stichprobenartig bekannte Erstellungs-, Änderungs- und
+Freigabezeitpunkte mit Einsatzunterlagen vergleichen. Nur nach fachlicher
+Bestätigung gezielt betroffene Zeilen korrigieren; keine pauschale
+Stundenverschiebung ausführen.
+
+Nach dem gemeinsamen Upload einen vorhandenen Bericht mit Sekundenanteil oder
+aus der doppelten Herbststunde öffnen und ohne Änderung speichern. Der
+technische ISO-Zeitpunkt muss unverändert bleiben. Eine neu eingegebene nicht
+existente oder mehrdeutige Ortszeit muss die Oberfläche sichtbar ablehnen.
+
 ## 9. Automatisches Deployment mit GitHub Actions einrichten
 
 Das Repository deployt nach erfolgreichen Tests eines Pushs auf `main` den exakt getesteten Commit. Der Workflow verwendet das GitHub-Environment `hiba` und kann zum erneuten Deployment des aktuellen `main`-Commits auch manuell gestartet werden.

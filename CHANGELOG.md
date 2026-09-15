@@ -37,6 +37,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Fixed
 
+- Datenbankverbindungen verwenden unabhängig von der MySQL-Hostzeitzone UTC. Unverändert gespeicherte Berichtszeiten behalten beim Bearbeiten und in der Daueranzeige ihren ursprünglichen ISO-Zeitpunkt einschließlich Sekunden und Zeitwechsel-Offset; neue nicht existente oder mehrdeutige Ortszeiten werden abgewiesen. Der Hostzeitzonentest stellt die globale Testeinstellung auch bei Abbruch wieder her und prüft den Reset-Default samt Fünf-Minuten-Grenze (#87).
 - Der Verlauf der Übungskennzeichnung wird in den Einsatzdetails nur angezeigt, wenn mindestens eine Änderung vorhanden ist.
 - Der Konkurrenztest zur Anmeldebereinigung stellt sein temporär verkürztes MySQL-Lock-Wartezeitlimit unmittelbar nach dem Testabschnitt auch bei Fehlern wieder her; nachfolgende Datenbankoperationen behalten ihre ursprüngliche Wartezeit (#118).
 - PDF-Exporte ersetzen nicht darstellbare Namen oder Adressen nicht mehr still durch Fragezeichen oder Transliteration, sondern melden die Grenze ausdrücklich. Der native Renderer verwendet eine Schrift mit exakt berechenbarer Zeichenbreite und bricht lange Wörter sowie mehrzeilige Texte innerhalb des sichtbaren Seitenbereichs um (#98).
@@ -49,7 +50,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 - Administrative Passwort- und E-Mail-Änderungen widerrufen ausstehende Einladungs- und Wiederherstellungslinks atomar. Tokenanforderungen und Bestätigungen werden mit Kontoänderungen über dieselbe Sperrreihenfolge koordiniert; fehlgeschlagene Mailversuche löschen keine zwischenzeitlich neu ausgestellten Links (#99).
 - Abgelaufene Einmallinks werden vor neuen Wiederherstellungsanforderungen außerhalb der Benutzertransaktion bereinigt; gültige Links bleiben erhalten. Der Parallelitätstest respektiert die konfigurierte PDO-Verbindung einschließlich Port- und Socket-Angaben.
 - Die Parallelitätsregression prüft die konkrete MySQL-Wartebeziehung auf den Primärschlüssel der Benutzertabelle statt lediglich einen wartenden `SELECT`.
-- Neue Wiederherstellungs-, Einladungs- und Neueinladungstoken speichern ihre Anforderungszeit explizit in UTC, damit die Fünf-Minuten-Sperre nicht von der MySQL-Zeitzone abhängt. Bereits vorhandene Zeitwerte werden nicht pauschal umgerechnet; die weitergehenden Zeitkorrekturen aus #87 bleiben separat.
+- Neue Wiederherstellungs-, Einladungs- und Neueinladungstoken speichern ihre Anforderungszeit explizit in UTC, damit die Fünf-Minuten-Sperre nicht von der MySQL-Zeitzone abhängt. Bereits vorhandene Zeitwerte werden nicht pauschal umgerechnet.
 - Die Einsatzlisten-API liefert konsolidierte Berichtstexte einschließlich zurückbehaltener Arbeitsstände ausschließlich an die Wehrführung. Führungskräfte und Einheitsführungen erhalten weiterhin ihre zulässigen Einsatz- und Statusdaten (#100).
 
 ### Breaking Changes
