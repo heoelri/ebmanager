@@ -328,6 +328,17 @@ rm -f second-login-cookies.txt
 # Anmeldebereinigung hält UTC-Grenzen, 500er-Batches, Stundendrossel und Worker-Sperre ein; Fehler rollen beide Löschungen zurück.
 php test/auth-retention.php
 
+# Jede neue PDO-Verbindung schreibt Default- und Aktualisierungszeitpunkte unabhängig von der MySQL-Hostzeitzone als UTC.
+original_global_timezone=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --batch --skip-column-names --execute="SELECT @@global.time_zone")
+for host_timezone in '+02:00' '-05:00'; do
+  MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --execute="SET GLOBAL time_zone='$host_timezone'"
+  if ! php test/db-timezone.php; then
+    MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --execute="SET GLOBAL time_zone='$original_global_timezone'"
+    exit 1
+  fi
+done
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --execute="SET GLOBAL time_zone='$original_global_timezone'"
+
 # Ein alter letzter Login wird auch vor seiner physischen Bereinigung nicht mehr ausgegeben.
 cleanup_user_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte \
   --execute="INSERT INTO users(organization_id,name,email,password_hash,role) VALUES(1,'Retentionstest','retention@example.test','unbenutzbar','wehrleitung');
