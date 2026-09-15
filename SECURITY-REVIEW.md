@@ -143,7 +143,7 @@ Datenbanken lagen in eigenen frischen Dockerprojekten, nicht in normalen
 Entwicklungs- oder Produktionsvolumes. Die fünf Apache-Parallelitätsfälle
 prüfen weiterhin konkrete InnoDB-Transaktions-/Lock-IDs.
 Zusätzlich bestand der vorhandene Screenshot-Test mit Playwright 1.55.0 im
-isolierten Demo-Profil: 16 rollenabhängige Screenshots einschließlich der
+isolierten Demo-Profil: 17 rollenabhängige Screenshots einschließlich der
 Browserprüfung des Filterstandards und seiner einmaligen Präferenzmigration.
 
 ## API-Vertrag und Eingabevalidierung vom 6. September 2026 (#92)
@@ -380,22 +380,25 @@ in der konfigurierten Datenbank. Ein beliebiger anderer wartender
 `SELECT` genügt nicht. Danach prüfen sie die erneute Adress-/Tokenprüfung
 nach dem Commit der parallelen Kontoänderung.
 
-## Einheitsstatistik vom 3. September 2026
+## Statistik für Einheits- und Wehrführung vom 15. September 2026
 
-`GET /api/statistics` ist ausschließlich für `einheitsleitung` freigegeben
-und leitet die auszuwertende Einheit aus der serverseitigen aktuellen
-`user_units`-Zuordnung ab. Der Client kann keine Einheits-ID vorgeben. Alle
-Einsatzabfragen begrenzen zusätzlich auf `incidents.organization_id`; die
-weiteren Aggregationen verwenden nur daraus ermittelte Berichts-IDs und
-prüfen Mitglieder nochmals gegen denselben Mandanten.
+`GET /api/statistics` ist ausschließlich für `einheitsleitung` und
+`wehrleitung` freigegeben. Für Einheitsführungen wird die auszuwertende
+Einheit weiterhin aus der serverseitigen aktuellen `user_units`-Zuordnung
+abgeleitet; eine abweichende Client-ID wird abgewiesen. Wehrführungen dürfen
+keine Einheit außerhalb ihrer Organisation auswählen. Alle Einsatz- und
+Einheitsabfragen begrenzen auf `organization_id`; die weiteren Aggregationen
+verwenden nur daraus ermittelte Berichts-IDs und prüfen Mitglieder nochmals
+gegen denselben Mandanten.
 
 Die Antwort enthält ausschließlich Namen und aggregierte Häufigkeiten aus
 Fahrzeug-Snapshots, zusätzlichen Berichtsfahrzeugen und strukturierter
 Besatzung. Berichtstexte, Patient, meldende Person, Geschädigte und Schädiger
 werden weder abgefragt noch ausgegeben oder protokolliert. Inaktive
 Mitglieder bleiben für historische Häufigkeiten sichtbar, ohne weitere
-personenbezogene Angaben offenzulegen. Manipulierte Zeiträume werden strikt
-als lokale ISO-Daten validiert.
+personenbezogene Angaben offenzulegen. Manipulierte Zeiträume und Einheits-IDs werden strikt validiert. Wehrweite
+Summen deduplizieren Einsätze anhand ihrer internen ID, während der
+Einheitenvergleich ausschließlich mandantengebundene Zuordnungen zählt.
 
 ## Inaktive DIVERA-Mitglieder vom 3. September 2026
 
@@ -467,7 +470,7 @@ Query-Parameter wählen ausschließlich bereits vorhandene Browseransichten aus 
 
 Der Screenshot-Workflow läuft auf `pull_request` und führt den Code des Pull Requests niemals über `pull_request_target` aus. Er verwendet ausschließlich die versionierten Demo-Daten und offensichtlich unechte lokale Zugangsdaten. Screenshots werden für alle PRs mit ausschließlich lesenden Rechten als Artefakt gespeichert.
 
-Der PR-Kommentar läuft getrennt über `workflow_run` mit der unveränderlich vom Standardbranch geladenen Workflowdefinition. Nur erfolgreiche Screenshot-Läufe für Quell-Branches desselben Repositorys werden verarbeitet. Dieser zweite Workflow lädt ausschließlich das erzeugte Artefakt, führt keinen PR-Code aus und akzeptiert nur die 16 fest erwarteten PNG-Dateinamen. Er schreibt sie über die Git-Daten-API als wurzellosen Commit in einen separaten Branch je Pull Request; jeder neue Lauf ersetzt dessen bisherigen Stand ohne wachsende erreichbare Historie. Der Kommentar bettet unveränderliche Raw-URLs des erzeugten Screenshot-Commits direkt ein. GitHub CLI 2.99.0 wird mit fester Version und SHA-256-Prüfsumme geladen; ein persönlicher Zugriffstoken oder Deployment-Secret wird nicht verwendet. Fork-PRs erreichen den schreibenden Job nicht und erhalten weiterhin ausschließlich das Artefakt.
+Der PR-Kommentar läuft getrennt über `workflow_run` mit der unveränderlich vom Standardbranch geladenen Workflowdefinition. Nur erfolgreiche Screenshot-Läufe für Quell-Branches desselben Repositorys werden verarbeitet. Dieser zweite Workflow lädt ausschließlich das erzeugte Artefakt, führt keinen PR-Code aus und akzeptiert nur die 17 fest erwarteten PNG-Dateinamen. Er schreibt sie über die Git-Daten-API als wurzellosen Commit in einen separaten Branch je Pull Request; jeder neue Lauf ersetzt dessen bisherigen Stand ohne wachsende erreichbare Historie. Der Kommentar bettet unveränderliche Raw-URLs des erzeugten Screenshot-Commits direkt ein. GitHub CLI 2.99.0 wird mit fester Version und SHA-256-Prüfsumme geladen; ein persönlicher Zugriffstoken oder Deployment-Secret wird nicht verwendet. Fork-PRs erreichen den schreibenden Job nicht und erhalten weiterhin ausschließlich das Artefakt.
 
 ## Wehrweite Fahrzeugnamen vom 4. September 2026
 

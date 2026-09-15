@@ -282,13 +282,31 @@ function statisticsPeriods(DateTimeImmutable $date): array
     return [$weekend ? 'weekend' : 'workday', $day ? 'day' : 'night'];
 }
 
-function unitStatistics(array $user, mixed $fromValue, mixed $toValue): array
+function unitStatistics(array $user, mixed $fromValue, mixed $toValue, mixed $unitValue = null): array
 {
-    assertRole($user, 'einheitsleitung');
-    if (count($user['unitIds']) !== 1) throw new ApiError(403, 'Keine eindeutige Einheit zugeordnet');
-    $unitId = (int)$user['unitIds'][0];
-    $foundUnit = unit($unitId, (int)$user['organization_id']);
-    if (!$foundUnit) throw new ApiError(404, 'Einheit nicht gefunden');
+    assertRole($user, 'einheitsleitung', 'wehrleitung');
+    $organizationId = (int)$user['organization_id'];
+    $unitId = null;
+    if ($user['role'] === 'einheitsleitung') {
+        if (count($user['unitIds']) !== 1) throw new ApiError(403, 'Keine eindeutige Einheit zugeordnet');
+        $unitId = (int)$user['unitIds'][0];
+        if ($unitValue !== null && $unitValue !== '' && positiveId($unitValue, 'Einheit') !== $unitId) {
+            throw new ApiError(403, 'Keine Berechtigung');
+        }
+    } elseif ($unitValue !== null && $unitValue !== '') {
+        $unitId = positiveId($unitValue, 'Einheit');
+    }
+    $availableUnits = query(
+        'SELECT id,name FROM units WHERE organization_id=? ORDER BY name,id',
+        [$organizationId]
+    )->fetchAll();
+    foreach ($availableUnits as &$availableUnit) $availableUnit['id'] = (int)$availableUnit['id'];
+    unset($availableUnit);
+    $foundUnit = null;
+    foreach ($availableUnits as $availableUnit) {
+        if ($availableUnit['id'] === $unitId) $foundUnit = $availableUnit;
+    }
+    if ($unitId !== null && !$foundUnit) throw new ApiError(404, 'Einheit nicht gefunden');
 
     $timezone = new DateTimeZone(STATISTICS_PERIODS['timezone']);
     $from = statisticsDate($fromValue, 'Von', $timezone);
@@ -296,34 +314,58 @@ function unitStatistics(array $user, mixed $fromValue, mixed $toValue): array
     if ($from > $to) throw new ApiError(400, 'Von darf nicht nach Bis liegen');
     $fromUtc = $from->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.v\Z');
     $untilUtc = $to->modify('+1 day')->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.v\Z');
-    $params = [$unitId, $user['organization_id'], $fromUtc, $untilUtc];
+    $params = [$organizationId, $fromUtc, $untilUtc];
+    $unitFilter = '';
+    if ($unitId !== null) {
+        $unitFilter = ' AND iu.unit_id=?';
+        $params[] = $unitId;
+    }
 
     $incidents = query(
-        'SELECT i.id,i.started_at,i.is_exercise,iu.vehicles,r.id report_id
+        'SELECT i.id,i.started_at,i.is_exercise,iu.unit_id,u.name unit_name,iu.vehicles,r.id report_id
          FROM incident_units iu
          JOIN incidents i ON i.id=iu.incident_id
+         JOIN units u ON u.id=iu.unit_id AND u.organization_id=i.organization_id
          LEFT JOIN reports r ON r.incident_id=i.id AND r.unit_id=iu.unit_id
-         WHERE iu.unit_id=? AND i.organization_id=? AND i.deleted_at IS NULL AND i.started_at>=? AND i.started_at<?
-         ORDER BY i.started_at,i.id',
+         WHERE i.organization_id=? AND i.deleted_at IS NULL AND i.started_at>=? AND i.started_at<?' . $unitFilter . '
+         ORDER BY i.started_at,i.id,iu.unit_id',
         $params
     )->fetchAll();
     $counts = ['years' => [], 'months' => [], 'weekdays' => [], 'workPeriods' => ['workday' => 0, 'weekend' => 0], 'dayPeriods' => ['day' => 0, 'night' => 0]];
     $exerciseCount = 0;
     $alarmedVehicles = [];
-    $reportIds = [];
+    $reportUnits = [];
+    $seenIncidents = [];
+    $unitCounts = [];
+    foreach ($availableUnits as $availableUnit) {
+        $unitCounts[$availableUnit['id']] = [
+            'id' => $availableUnit['id'], 'name' => $availableUnit['name'],
+            'incidents' => 0, 'reports' => 0, 'crewAssignments' => 0
+        ];
+    }
     foreach ($incidents as $incidentRow) {
-        if ((bool)$incidentRow['is_exercise']) $exerciseCount++;
-        $local = (new DateTimeImmutable($incidentRow['started_at']))->setTimezone($timezone);
-        $year = $local->format('Y');
-        $month = $local->format('Y-m');
-        $weekday = $local->format('N');
-        $counts['years'][$year] = ($counts['years'][$year] ?? 0) + 1;
-        $counts['months'][$month] = ($counts['months'][$month] ?? 0) + 1;
-        $counts['weekdays'][$weekday] = ($counts['weekdays'][$weekday] ?? 0) + 1;
-        [$workPeriod, $dayPeriod] = statisticsPeriods($local);
-        $counts['workPeriods'][$workPeriod]++;
-        $counts['dayPeriods'][$dayPeriod]++;
-        if ($incidentRow['report_id'] !== null) $reportIds[] = (int)$incidentRow['report_id'];
+        $currentUnitId = (int)$incidentRow['unit_id'];
+        $unitCounts[$currentUnitId]['incidents']++;
+        if ($incidentRow['report_id'] !== null) {
+            $reportId = (int)$incidentRow['report_id'];
+            $reportUnits[$reportId] = $currentUnitId;
+            $unitCounts[$currentUnitId]['reports']++;
+        }
+        $incidentId = (int)$incidentRow['id'];
+        if (!isset($seenIncidents[$incidentId])) {
+            $seenIncidents[$incidentId] = true;
+            if ((bool)$incidentRow['is_exercise']) $exerciseCount++;
+            $local = (new DateTimeImmutable($incidentRow['started_at']))->setTimezone($timezone);
+            $year = $local->format('Y');
+            $month = $local->format('Y-m');
+            $weekday = $local->format('N');
+            $counts['years'][$year] = ($counts['years'][$year] ?? 0) + 1;
+            $counts['months'][$month] = ($counts['months'][$month] ?? 0) + 1;
+            $counts['weekdays'][$weekday] = ($counts['weekdays'][$weekday] ?? 0) + 1;
+            [$workPeriod, $dayPeriod] = statisticsPeriods($local);
+            $counts['workPeriods'][$workPeriod]++;
+            $counts['dayPeriods'][$dayPeriod]++;
+        }
 
         $seen = [];
         foreach (exportJson($incidentRow['vehicles']) as $vehicle) {
@@ -332,16 +374,21 @@ function unitStatistics(array $user, mixed $fromValue, mixed $toValue): array
             $own = !is_array($vehicle) || ($vehicle['own'] ?? true) !== false;
             if (!$own) continue;
             $vehicleId = trim((string)(is_array($vehicle) ? ($vehicle['id'] ?? '') : ''));
-            $key = $vehicleId !== '' ? $vehicleId : $name;
+            $key = $currentUnitId . ':' . ($vehicleId !== '' ? $vehicleId : $name);
             if (isset($seen[$key])) continue;
             $seen[$key] = true;
-            $alarmedVehicles[$key] = ['name' => $name, 'own' => $own, 'count' => ($alarmedVehicles[$key]['count'] ?? 0) + 1];
+            $entry = ['name' => $name];
+            if ($unitId === null) $entry['unitName'] = $incidentRow['unit_name'];
+            $entry['own'] = true;
+            $entry['count'] = ($alarmedVehicles[$key]['count'] ?? 0) + 1;
+            $alarmedVehicles[$key] = $entry;
         }
     }
 
     $members = [];
     $additionalVehicles = [];
     $crewCount = 0;
+    $reportIds = array_keys($reportUnits);
     if ($reportIds) {
         $placeholders = implode(',', array_fill(0, count($reportIds), '?'));
         foreach (query(
@@ -355,12 +402,18 @@ function unitStatistics(array $user, mixed $fromValue, mixed $toValue): array
             $id = (int)$member['id'];
             $members[$id] = ['name' => $member['name'], 'count' => ($members[$id]['count'] ?? 0) + 1];
             $crewCount++;
+            $unitCounts[$reportUnits[(int)$member['report_id']]]['crewAssignments']++;
         }
         foreach (query(
-            "SELECT vehicle FROM report_additional_vehicles WHERE report_id IN ($placeholders) ORDER BY vehicle,report_id",
+            "SELECT report_id,vehicle FROM report_additional_vehicles WHERE report_id IN ($placeholders) ORDER BY vehicle,report_id",
             $reportIds
-        )->fetchAll(PDO::FETCH_COLUMN) as $vehicle) {
-            $additionalVehicles[$vehicle] = ($additionalVehicles[$vehicle] ?? 0) + 1;
+        )->fetchAll() as $vehicle) {
+            $currentUnitId = $reportUnits[(int)$vehicle['report_id']];
+            $key = $currentUnitId . ':' . $vehicle['vehicle'];
+            $entry = ['name' => $vehicle['vehicle']];
+            if ($unitId === null) $entry['unitName'] = $unitCounts[$currentUnitId]['name'];
+            $entry['count'] = ($additionalVehicles[$key]['count'] ?? 0) + 1;
+            $additionalVehicles[$key] = $entry;
         }
     }
 
@@ -372,18 +425,28 @@ function unitStatistics(array $user, mixed $fromValue, mixed $toValue): array
     };
     $ranked = static function (array $values): array {
         $result = array_values($values);
-        usort($result, fn($a, $b) => $b['count'] <=> $a['count'] ?: strnatcasecmp($a['name'], $b['name']));
+        usort($result, fn($a, $b) => $b['count'] <=> $a['count']
+            ?: strnatcasecmp($a['name'], $b['name'])
+            ?: strnatcasecmp($a['unitName'] ?? '', $b['unitName'] ?? ''));
         return $result;
     };
-    foreach ($additionalVehicles as $name => $count) $additionalVehicles[$name] = ['name' => $name, 'count' => $count];
+    foreach ($unitCounts as &$unitCount) {
+        $unitCount['averageCrew'] = $unitCount['reports']
+            ? round($unitCount['crewAssignments'] / $unitCount['reports'], 2)
+            : null;
+    }
+    unset($unitCount);
 
     $reportCount = count($reportIds);
+    $incidentCount = count($seenIncidents);
     return [
         'range' => ['from' => $from->format('Y-m-d'), 'to' => $to->format('Y-m-d'), 'timezone' => STATISTICS_PERIODS['timezone']],
-        'unit' => ['id' => $unitId, 'name' => $foundUnit['name']],
+        'scope' => $unitId === null ? 'organization' : 'unit',
+        'unit' => $foundUnit ? ['id' => $unitId, 'name' => $foundUnit['name']] : null,
+        'units' => array_values($unitId === null ? $unitCounts : []),
         'totals' => [
-            'incidents' => count($incidents),
-            'regularIncidents' => count($incidents) - $exerciseCount,
+            'incidents' => $incidentCount,
+            'regularIncidents' => $incidentCount - $exerciseCount,
             'exercises' => $exerciseCount,
             'reports' => $reportCount,
             'crewAssignments' => $crewCount,
@@ -1472,7 +1535,8 @@ try {
         respond(200, unitStatistics(
             $user,
             $_GET['from'] ?? $today->format('Y-01-01'),
-            $_GET['to'] ?? $today->format('Y-m-d')
+            $_GET['to'] ?? $today->format('Y-m-d'),
+            $_GET['unit'] ?? null
         ));
     }
 

@@ -951,7 +951,7 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$unassigned_exercise_id/exercise-history")" = 404
 
-# Die Einheitsstatistik wahrt Rollen und Mandanten und ordnet lokale Zeitgrenzen sowie tatsächliche Beteiligung korrekt zu.
+# Die Statistik wahrt Rollen und Mandanten, zählt wehrweit gemeinsame Einsätze einmal und filtert für die Wehrführung nach Einheit.
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="SET @leader_id=(SELECT id FROM users WHERE email='leitung1@example.test');
     INSERT INTO incidents(organization_id,title,started_at,message,remark,patient,caller,consolidated_text) VALUES
@@ -987,14 +987,23 @@ MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=ut
     INSERT INTO units(organization_id,name) VALUES(@foreign_org,'Fremde Einheit'); SET @foreign_unit=LAST_INSERT_ID();
     INSERT INTO incidents(organization_id,title,started_at,message,remark,patient,caller,consolidated_text) VALUES(@foreign_org,'Fremder Statistikeinsatz','2026-09-04T15:00:00.000Z','','','','',''); SET @foreign_incident=LAST_INSERT_ID();
     INSERT INTO incident_units(incident_id,unit_id,vehicles) VALUES(@foreign_incident,@foreign_unit,JSON_ARRAY(JSON_OBJECT('name','Mandantenfahrzeug','own',TRUE)))"
-test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/statistics?from=2026-09-04&to=2026-09-07")" = 403
+# Führungskräfte bleiben von der Statistik ausgeschlossen.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$force_token" "$base_url/api/statistics?from=2026-09-04&to=2026-09-07")" = 403
+# Einheitsführungen dürfen keine fremde Einheit über den Filter auswählen.
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$leader_token" "$base_url/api/statistics?from=2026-09-04&to=2026-09-07&unit=$second_unit_id")" = 403
+# Wehrführungen dürfen keine Einheit eines fremden Mandanten auswerten.
+foreign_statistics_unit_id=$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" --batch --skip-column-names einsatzberichte --execute="SELECT id FROM units WHERE name='Fremde Einheit'")
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" "$base_url/api/statistics?from=2026-09-04&to=2026-09-07&unit=$foreign_statistics_unit_id")" = 404
+# Ein vertauschter Statistikzeitraum bleibt ungültig.
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$leader_token" "$base_url/api/statistics?from=2026-09-08&to=2026-09-07")" = 400
 # Statistikgrenzen akzeptieren keine Query-Arrays statt eines Datumsstrings.
 for date_field in from to; do
   test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$leader_token" \
     "$base_url/api/statistics?$date_field%5B%5D=2026-09-04")" = 400
 done
+# Der optionale Einheitsfilter akzeptiert keine Query-Arrays statt einer ID.
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' --cookie "$session_cookie=$session_token" \
+  "$base_url/api/statistics?from=2026-09-04&to=2026-09-07&unit%5B%5D=1")" = 400
 # Alarmierte Fahrzeuge anderer Einheiten erscheinen nicht in der Statistik.
 curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_url/api/statistics?from=2026-09-04&to=2026-09-07" |
   php -r '
@@ -1015,6 +1024,31 @@ curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_
     assert(!isset($data["members"][0]["id"]));
     assert(!str_contains(json_encode($data,JSON_THROW_ON_ERROR),"Mandantenfahrzeug"));
     assert(!str_contains(json_encode($data,JSON_THROW_ON_ERROR),"Fremdes Statistikmitglied"));
+  '
+# Die Wehrstatistik zählt gemeinsame Einsätze einmal, vergleicht Einheiten und enthält nur Daten des eigenen Mandanten.
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/statistics?from=2026-09-04&to=2026-09-07" |
+  SECOND_UNIT_ID="$second_unit_id" php -r '
+    $data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+    assert($data["scope"]==="organization" && $data["unit"]===null);
+    assert($data["totals"]===["incidents"=>5,"regularIncidents"=>4,"exercises"=>1,"reports"=>3,"crewAssignments"=>3,"averageCrew"=>1]);
+    $units=array_column($data["units"],null,"id");
+    assert($units[1]===["id"=>1,"name"=>"Löschzug","incidents"=>5,"reports"=>2,"crewAssignments"=>2,"averageCrew"=>1]);
+    assert($units[(int)getenv("SECOND_UNIT_ID")]["incidents"]===1);
+    assert($units[(int)getenv("SECOND_UNIT_ID")]["reports"]===1);
+    assert($units[(int)getenv("SECOND_UNIT_ID")]["crewAssignments"]===1);
+    assert(array_column($data["alarmedVehicles"],"name")===["LF 20 Statistik","Gemeinsames Fremdfahrzeug","TLF Statistik"]);
+    assert(in_array("Fremdes Statistikmitglied",array_column($data["members"],"name"),true));
+    assert(!str_contains(json_encode($data,JSON_THROW_ON_ERROR),"Mandantenfahrzeug"));
+  '
+# Der Wehrführungsfilter liefert dieselbe einheitsbezogene Sicht wie die gewählte Einheit.
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/statistics?from=2026-09-04&to=2026-09-07&unit=$second_unit_id" |
+  SECOND_UNIT_ID="$second_unit_id" php -r '
+    $data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+    assert($data["scope"]==="unit" && $data["unit"]["id"]===(int)getenv("SECOND_UNIT_ID") && $data["units"]===[]);
+    assert($data["totals"]===["incidents"=>1,"regularIncidents"=>1,"exercises"=>0,"reports"=>1,"crewAssignments"=>1,"averageCrew"=>1]);
+    assert($data["alarmedVehicles"]===[["name"=>"Gemeinsames Fremdfahrzeug","own"=>true,"count"=>1]]);
+    assert($data["additionalVehicles"]===[]);
+    assert(array_column($data["members"],"name")===["Fremdes Statistikmitglied"]);
   '
 curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_url/api/statistics?from=2026-01-01&to=2026-01-01" |
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($data["totals"]["incidents"]===1);'

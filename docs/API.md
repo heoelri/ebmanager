@@ -115,7 +115,7 @@ Einheitsgrenzen. Antworten sind JSON, sofern nicht als PDF bezeichnet.
 | `POST /units` | W | `name` → 201 `{id}` |
 | `GET /units/:id/members` | A, erlaubte Einheit | aktive Mitglieder: `id, name, divera_id, active` (0/1), `qualifications` (Anzeigetext) |
 | `GET /units/:id/resources` | A, erlaubte Einheit | `{members:[], vehicles:[]}`; Mitglieder auch inaktiv; Fahrzeuge `id, divera_id, name, shortname, fullname` |
-| `GET /statistics?from=…&to=…` | E | einschließlich beider Tage, nur aktuelle Einheit; Gesamtzahl, reguläre Einsätze und Übungen separat; weitere Auswertungen gemeinsam |
+| `GET /statistics?from=…&to=…&unit=…` | E/W | einschließlich beider Tage; E nur aktuelle Einheit, W standardmäßig gesamte Organisation und optional eine eigene Einheit; Gesamtzahl, reguläre Einsätze und Übungen separat |
 | `GET /users` | W | Liste `id, name, email, role, unit_ids:[], unit_names, loginHistory:[]`; höchstens neuester Login der letzten 90 Tage je Benutzer |
 | `POST /users` | W | `name, email, role, unitIds[]` (alternativ `unitId`) → 201 `{id}`; siebentägige Einladung, kein Startpasswort |
 | `PUT /users/:id` | W | `name, email, role, unitIds[]`, optional `password` → `{ok:true}`; letzte Wehrführung bleibt erhalten |
@@ -148,10 +148,14 @@ DIVERA-Aufrufe bleiben ausschließlich GET auf `/api/v2/alarms` und
 Die Discovery-Alarme enthalten `id, foreignId, date, title, startedAt, text,
 address, lat, lng, remark, patient, caller, vehicles`; Koordinaten sind
 Zahlen oder `null`. Ein Import nimmt ausschließlich die ID entgegen.
-Die Statistik liefert `range`, `unit`, `totals`, `alarmedVehicles`,
-`additionalVehicles`, `members`, `years`, `months`, `weekdays`,
-`workPeriods`, `dayPeriods` und `periods`; Summen-/Ranglisten enthalten
-Anzahlwerte, keine fremden Berichts- oder Personendetails.
+Die Statistik liefert `range`, `scope` (`unit` oder `organization`), die
+gewählte `unit` oder `null`, den wehrweiten Einheitenvergleich `units`,
+`totals`, `alarmedVehicles`, `additionalVehicles`, `members`, `years`,
+`months`, `weekdays`, `workPeriods`, `dayPeriods` und `periods`.
+Wehrweite Einsatz- und Zeitreihen zählen einen mehreren Einheiten
+zugeordneten Einsatz einmal; `units[].incidents` zählt die Zuordnungen je
+Einheit. Summen- und Ranglisten enthalten Anzahlwerte, keine Berichts- oder
+weiteren Personendetails fremder Mandanten.
 Mitglieder werden je Mitglieds-ID gezählt. Ihr Anzeigename stammt aus dem
 letzten ausgewerteten Einsatz (Alarmzeit, dann Berichts-ID), nicht aus dem
 aktuellen Stamm.
