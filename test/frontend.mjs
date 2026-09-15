@@ -57,6 +57,7 @@ assert.match(screenshotCommentWorkflow, /refs\/heads\/\$screenshot_branch/);
 assert.match(screenshotCommentWorkflow, /raw\.githubusercontent\.com\/\$GITHUB_REPOSITORY\/\$screenshot_commit/);
 assert.doesNotMatch(screenshotCommentWorkflow, /Workflow-Artefakt herunterladen/);
 assert.match(screenshotCommentWorkflow, /expected_files=\([\s\S]*?01-anmeldung\.png[\s\S]*?30-wehrfuehrung-verwaltung\.png/);
+assert.match(screenshotCommentWorkflow, /30-wehrfuehrung-mitglieder-fahrzeuge\.png\s+30-wehrfuehrung-statistik\.png\s+30-wehrfuehrung-system\.png/);
 assert.match(screenshotCommentWorkflow, /test "\$\(basename "\$\{files\[\$index\]\}"\)" = "\$\{expected_files\[\$index\]\}"/);
 assert.match(screenshotCommentWorkflow, /contains\(\\"\$marker\\"\)/);
 assert.match(screenshotCommentWorkflow, /commits\/\$HEAD_SHA\/pulls/);

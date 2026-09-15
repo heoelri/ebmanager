@@ -143,7 +143,7 @@ Datenbanken lagen in eigenen frischen Dockerprojekten, nicht in normalen
 Entwicklungs- oder Produktionsvolumes. Die fünf Apache-Parallelitätsfälle
 prüfen weiterhin konkrete InnoDB-Transaktions-/Lock-IDs.
 Zusätzlich bestand der vorhandene Screenshot-Test mit Playwright 1.55.0 im
-isolierten Demo-Profil: 16 rollenabhängige Screenshots einschließlich der
+isolierten Demo-Profil: 17 rollenabhängige Screenshots einschließlich der
 Browserprüfung des Filterstandards und seiner einmaligen Präferenzmigration.
 
 ## API-Vertrag und Eingabevalidierung vom 6. September 2026 (#92)
@@ -470,7 +470,7 @@ Query-Parameter wählen ausschließlich bereits vorhandene Browseransichten aus 
 
 Der Screenshot-Workflow läuft auf `pull_request` und führt den Code des Pull Requests niemals über `pull_request_target` aus. Er verwendet ausschließlich die versionierten Demo-Daten und offensichtlich unechte lokale Zugangsdaten. Screenshots werden für alle PRs mit ausschließlich lesenden Rechten als Artefakt gespeichert.
 
-Der PR-Kommentar läuft getrennt über `workflow_run` mit der unveränderlich vom Standardbranch geladenen Workflowdefinition. Nur erfolgreiche Screenshot-Läufe für Quell-Branches desselben Repositorys werden verarbeitet. Dieser zweite Workflow lädt ausschließlich das erzeugte Artefakt, führt keinen PR-Code aus und akzeptiert nur die 16 fest erwarteten PNG-Dateinamen. Er schreibt sie über die Git-Daten-API als wurzellosen Commit in einen separaten Branch je Pull Request; jeder neue Lauf ersetzt dessen bisherigen Stand ohne wachsende erreichbare Historie. Der Kommentar bettet unveränderliche Raw-URLs des erzeugten Screenshot-Commits direkt ein. GitHub CLI 2.99.0 wird mit fester Version und SHA-256-Prüfsumme geladen; ein persönlicher Zugriffstoken oder Deployment-Secret wird nicht verwendet. Fork-PRs erreichen den schreibenden Job nicht und erhalten weiterhin ausschließlich das Artefakt.
+Der PR-Kommentar läuft getrennt über `workflow_run` mit der unveränderlich vom Standardbranch geladenen Workflowdefinition. Nur erfolgreiche Screenshot-Läufe für Quell-Branches desselben Repositorys werden verarbeitet. Dieser zweite Workflow lädt ausschließlich das erzeugte Artefakt, führt keinen PR-Code aus und akzeptiert nur die 17 fest erwarteten PNG-Dateinamen. Er schreibt sie über die Git-Daten-API als wurzellosen Commit in einen separaten Branch je Pull Request; jeder neue Lauf ersetzt dessen bisherigen Stand ohne wachsende erreichbare Historie. Der Kommentar bettet unveränderliche Raw-URLs des erzeugten Screenshot-Commits direkt ein. GitHub CLI 2.99.0 wird mit fester Version und SHA-256-Prüfsumme geladen; ein persönlicher Zugriffstoken oder Deployment-Secret wird nicht verwendet. Fork-PRs erreichen den schreibenden Job nicht und erhalten weiterhin ausschließlich das Artefakt.
 
 ## Wehrweite Fahrzeugnamen vom 4. September 2026
 
