@@ -526,7 +526,14 @@ assert.match(html, /data-action="download" data-href="api\/incidents\/\$\{id\}\/
 assert.match(html, /item\.consolidated_at\?`<p><button type="button" data-action="download" data-href="api\/incidents\/\$\{id\}\/consolidation\/pdf">Gesamtbericht als PDF/);
 assert.match(html, /item\.canDelete\?` <button type="button" class="secondary" data-action="deleteIncident"/);
 assert.match(html, /data-action="toggleExercise"/);
-assert.match(html, /Verlauf der Übungskennzeichnung/);
+const exerciseHistorySource = javascript.match(/function exerciseHistory[^\n]+/)?.[0];
+assert(exerciseHistorySource, 'exerciseHistory fehlt');
+const exerciseHistory = new Function(
+  'formatDateTime', 'esc', 'roleLabels',
+  `${exerciseHistorySource}; return exerciseHistory;`
+)(value => value, value => String(value ?? ''), {wehrleitung: 'Wehrführung'});
+assert.equal(exerciseHistory([]), '');
+assert.match(exerciseHistory([{created_at: '2026-08-23T18:00:00Z', actor_name: 'Test', actor_role: 'wehrleitung', new_value: true}]), /Verlauf der Übungskennzeichnung \(1\).*Als Übung markiert/);
 const toggleExerciseSource = javascript.match(/async function toggleExercise[^\n]+/)?.[0];
 assert(toggleExerciseSource, 'toggleExercise fehlt');
 const exerciseCalls = [];
