@@ -75,7 +75,7 @@ assert.match(screenshotsScript, /01-anmeldung\.png/);
 for (const prefix of ['10-fuehrungskraft', '20-einheitsfuehrung', '30-wehrfuehrung']) {
   assert.match(screenshotsScript, new RegExp(`prefix: '${prefix}'`));
 }
-assert.equal((screenshotsScript.match(/\['[^']+', '[^']+', '[^']+'/g) ?? []).length, 13);
+assert.equal((screenshotsScript.match(/^\s*\['[^']+', '[^']+', '[^']+'/gm) ?? []).length, 13);
 assert.match(screenshotsScript, /viewport: \{width: 1440, height: 1000\}/);
 assert.match(screenshotsScript, /locale: 'de-DE'/);
 assert.match(screenshotsScript, /timezoneId: 'Europe\/Berlin'/);
@@ -370,7 +370,7 @@ assert.equal(reportDateTime({value: '2026-10-25T03:30', dataset: {}}, 'Eintreffz
 assert.throws(() => reportDateTime({value: '2026-10-25T02:30', dataset: {}}, 'Eintreffzeit'), /mehrdeutig/);
 assert.throws(() => reportDateTime({value: '2026-03-29T02:30', dataset: {}}, 'Eintreffzeit'), /existiert in Ihrer Zeitzone nicht/);
 const {reportDetailsFields} = new Function(
-  'esc', 'ranks', 'dateTimeAttributes', 'incidentTypes', 'reportClassifications', 'classificationLabels',
+  'esc', 'ranks', 'dateTimeAttributes', 'incidentTypes', 'reportClassifications', 'classificationLabels', 'localDateTime',
   `${apiTypesSource}; ${reportFieldsSource}; return {reportDetailsFields};`
 )(
   value => String(value ?? ''),
@@ -378,7 +378,8 @@ const {reportDetailsFields} = new Function(
   dateTimeAttributes,
   ['Technische Hilfe'],
   {site: ['Wohngebäude'], cause: ['Unbekannt'], technical: ['Menschen in Notlage']},
-  {site: 'Einsatzstelle', cause: 'Schadensursache', technical: 'Technische Hilfe'}
+  {site: 'Einsatzstelle', cause: 'Schadensursache', technical: 'Technische Hilfe'},
+  localDateTime
 );
 const reportFields = reportDetailsFields('edit', {
   foreign_id: 'E-42',
@@ -403,6 +404,16 @@ assert.match(reportFields, /name="additionalCommandName" value="B"/);
 assert.match(reportFields, /name="departedAt"[^>]+data-original-local="2026-10-25T02:30"[^>]+data-original-iso="2026-10-25T01:30:42.000Z"/);
 assert.equal((reportFields.match(/class="form-section" open/g) ?? []).length, 3);
 assert.match(reportDetailsFields('new', {foreign_id: '', started_at: ''}), /DIVERA-Einsatznummer<input value="Nicht vorhanden" readonly>/);
+// Neue Berichte übernehmen den lokalen Alarmtag, lassen Uhrzeiten leer und ändern die Alarmierung nicht.
+const newReportFields = reportDetailsFields('new', {started_at: '2026-08-22T22:30:42.000Z'});
+assert.match(newReportFields, /name="alarmedAt"[^>]+value="2026-08-23T00:30"[^>]+readonly/);
+assert.match(newReportFields, /name="reportDate" type="date" value="2026-08-23" required/);
+for (const name of ['departedAt', 'arrivedAt', 'endedAt']) {
+  assert.match(newReportFields, new RegExp(`name="${name}Date" type="date" value="2026-08-23"`));
+  assert.match(newReportFields, new RegExp(`name="${name}" type="time"[^>]*>`));
+  assert.doesNotMatch(newReportFields, new RegExp(`name="${name}"[^>]*value=`));
+}
+assert.doesNotMatch(reportFields, /name="reportDate"|type="time"|name="departedAtDate"/);
 
 // Kontakt-, Leitungs- und Klassifikationsobjekte bleiben in Formular und Übersicht erhalten; alte JSON-Strings werden sichtbar abgelehnt.
 {
@@ -450,6 +461,53 @@ assert.equal(durationOutput.textContent, 'Einsatzdauer: 1 Std. 0 Min.');
 durationForm.elements.endedAt = {...durationForm.elements.endedAt, value: '2026-10-25T02:30', dataset: {}};
 updateDuration();
 assert.match(durationOutput.textContent, /Einsatzdauer: Einsatzende ist wegen der Zeitumstellung mehrdeutig/);
+
+// Gemeinsame Datumsänderungen bewahren abweichende Tage und Uhrzeiten; Payload und Dauer nutzen dieselbe ISO-Auflösung.
+{
+const control = value => ({value, dataset: {}, listeners: {}, addEventListener(event, handler) {this.listeners[event] = handler;}});
+const form = {elements: {}, querySelector: () => output};
+const output = {textContent: ''};
+form.elements.alarmedAt = {value: '2026-08-22T23:00', dataset: {}};
+form.elements.reportDate = control('2026-08-22');
+for (const name of ['departedAt', 'arrivedAt', 'endedAt']) {
+  form.elements[`${name}Date`] = control('2026-08-22');
+  form.elements[name] = {...control(''), type: 'time', name, form};
+}
+bindDuration(form);
+assert.equal(output.textContent, 'Einsatzdauer: –');
+assert.equal(reportDateTime(form.elements.departedAt, 'Ausrückezeit'), null);
+assert.throws(() => reportDateTime(form.elements.endedAt, 'Einsatzende', true), /erforderlich/);
+form.elements.departedAtDate.value = '2026-08-24';
+form.elements.departedAt.value = '00:10';
+form.elements.endedAt.value = '00:30';
+form.elements.reportDate.value = '2026-08-23';
+form.elements.reportDate.listeners.change();
+assert.equal(form.elements.departedAtDate.value, '2026-08-24');
+assert.equal(form.elements.departedAt.value, '00:10');
+assert.equal(form.elements.arrivedAtDate.value, '2026-08-23');
+assert.equal(form.elements.endedAtDate.value, '2026-08-23');
+assert.equal(form.elements.endedAt.value, '00:30');
+assert.equal(form.elements.alarmedAt.value, '2026-08-22T23:00');
+assert.equal(reportDateTime(form.elements.endedAt, 'Einsatzende', true), '2026-08-22T22:30:00.000Z');
+assert.equal(output.textContent, 'Einsatzdauer: 1 Std. 30 Min.');
+form.elements.endedAtDate.value = '2026-08-24';
+form.elements.endedAtDate.listeners.input();
+assert.equal(output.textContent, 'Einsatzdauer: 25 Std. 30 Min.');
+form.elements.reportDate.value = '';
+form.elements.reportDate.listeners.change();
+assert.equal(form.elements.arrivedAtDate.value, '2026-08-23');
+form.elements.reportDate.value = '2026-08-25';
+form.elements.reportDate.listeners.change();
+assert.equal(form.elements.arrivedAtDate.value, '2026-08-25');
+assert.equal(form.elements.endedAtDate.value, '2026-08-24');
+form.elements.endedAtDate.value = '';
+assert.throws(() => reportDateTime(form.elements.endedAt, 'Einsatzende'), /ungültig/);
+form.elements.endedAtDate.value = '2026-03-29';
+form.elements.endedAt.value = '02:30';
+assert.throws(() => reportDateTime(form.elements.endedAt, 'Einsatzende'), /existiert in Ihrer Zeitzone nicht/);
+form.elements.endedAtDate.value = '2026-10-25';
+assert.throws(() => reportDateTime(form.elements.endedAt, 'Einsatzende'), /mehrdeutig/);
+}
 
 const formatDateTimeSource = html.match(/function formatDateTime[^\n]+/)?.[0];
 assert(formatDateTimeSource, 'formatDateTime fehlt');

@@ -130,6 +130,7 @@
 - Hauptbereiche verwenden Query-basierte Deep Links über `view` beziehungsweise `incident`. Refresh und Browser-Historie stellen nur für die aktuelle Rolle erlaubte Ansichten wieder her; Hash-Fragmente bleiben Einladungs- und Wiederherstellungslinks vorbehalten.
 - Sichtbare Datums- und Uhrzeitangaben der Browser-Oberfläche verwenden das Gebietsschema und das 12-/24-Stunden-Schema des Nutzers. Nutze dafür die zentralen nativen `Intl`-/`toLocale*`-Formatter; technische API- und Formulareingabewerte bleiben ISO-konform.
 - Native `datetime-local`-Felder für Berichtszeiten bewahren bei unveränderter Anzeige den geladenen ISO-Zeitpunkt einschließlich Sekunden und Zeitwechsel-Offset. Geänderte nicht existente oder mehrdeutige Ortszeiten werden abgewiesen; Daueranzeigen verwenden dieselbe ISO-Auflösung.
+- Neue Berichte verwenden für Ausrücken, Eintreffen und Einsatzende getrennte native Datums- und Uhrzeitfelder: Datum vorbelegt mit dem lokalen Alarmtag, Uhrzeit leer. Ein gemeinsames Datum aktualisiert nur Datumswerte, die noch dem bisherigen gemeinsamen Datum entsprechen; individuelle Abweichungen bleiben erhalten. Die Alarmierung bleibt unveränderlich, gespeicherte Berichte behalten ihre bisherigen Zeitfelder.
 
 ## Datenschutz und Geheimnisse
 
