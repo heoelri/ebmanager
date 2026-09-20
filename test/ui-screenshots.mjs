@@ -73,6 +73,38 @@ async function checkIncidentFilter(page, prefix) {
   await filter.selectOption('report_required');
 }
 
+async function checkReportDates(page) {
+  const response = await page.request.get(`${baseUrl}/api/incidents`);
+  assert(response.ok());
+  const incidents = await response.json();
+  const incident = incidents.find(item => item.reportStatus.key === 'report_required');
+  assert(incident, 'Demo-Einsatz ohne eigenen Bericht fehlt');
+  await page.goto(`${baseUrl}/?incident=${incident.id}`, {waitUntil: 'networkidle'});
+  const form = page.locator('#report');
+  await form.waitFor();
+  const alarm = await form.locator('[name=alarmedAt]').inputValue();
+  const day = alarm.slice(0, 10);
+  assert.equal(await form.locator('[name=reportDate]').inputValue(), day);
+  for (const name of ['departedAt', 'arrivedAt', 'endedAt']) {
+    assert.equal(await form.locator(`[name=${name}Date]`).inputValue(), day);
+    assert.equal(await form.locator(`[name=${name}]`).inputValue(), '');
+  }
+  await form.locator('[name=departedAtDate]').fill('2027-01-02');
+  await form.locator('[name=endedAt]').fill('12:30');
+  await form.locator('[name=reportDate]').fill('2027-01-03');
+  await form.locator('[name=reportDate]').blur();
+  assert.equal(await form.locator('[name=departedAtDate]').inputValue(), '2027-01-02');
+  assert.equal(await form.locator('[name=arrivedAtDate]').inputValue(), '2027-01-03');
+  assert.equal(await form.locator('[name=endedAtDate]').inputValue(), '2027-01-03');
+  assert.equal(await form.locator('[name=alarmedAt]').inputValue(), alarm);
+  const payload = await form.evaluate(form => reportDetailsPayload(form));
+  assert.equal(payload.departedAt, null);
+  assert.equal(payload.arrivedAt, null);
+  assert.equal(payload.endedAt, '2027-01-03T11:30:00.000Z');
+  await form.locator('[name=endedAtDate]').fill('2027-01-04');
+  assert.equal((await form.evaluate(form => reportDetailsPayload(form))).endedAt, '2027-01-04T11:30:00.000Z');
+}
+
 try {
   const loginContext = await browser.newContext(contextOptions);
   const loginPage = await loginContext.newPage();
@@ -118,6 +150,7 @@ try {
   for (const role of roles) {
     const {context, page} = await login(role.email);
     await checkIncidentFilter(page, role.prefix);
+    if (role.prefix === '10-fuehrungskraft') await checkReportDates(page);
     for (const [name, view, heading, ready] of role.views) {
       await captureView(page, role.prefix, name, view, heading, ready);
     }

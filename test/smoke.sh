@@ -1366,6 +1366,21 @@ curl --insecure --silent --fail \
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="DELETE FROM members WHERE id=100"
 
+# Ein individuelles Einsatzende am Folgetag bleibt erhalten; mitgesendete Formulardaten ändern die Alarmierung nicht.
+next_day_payload=$(printf '%s' "$report_payload" | php -r '
+  $data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+  $data["endedAt"]="2026-08-23T00:30:00.000Z";
+  $data["reportDate"]="2026-08-23";
+  $data["endedAtDate"]="2026-08-23";
+  $data["alarmedAt"]="2026-08-23T00:00:00.000Z";
+  echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);
+')
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" \
+  --header 'Content-Type: application/json' --request PUT \
+  --data "$(report_data "$next_day_payload")" "$base_url/api/reports/$report_id" >/dev/null
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT r.ended_at='2026-08-23T00:30:00.000Z' AND r.alarmed_at=i.started_at FROM reports r JOIN incidents i ON i.id=r.incident_id WHERE r.id=$report_id_int")" = 1
+
 # Ausrücke- und Eintreffzeit können bei einem abgebrochenen Einsatz geleert werden.
 report_without_travel_times="${report_payload/\"departedAt\":\"2026-08-22T18:05:00.000Z\",\"arrivedAt\":\"2026-08-22T18:10:00.000Z\"/\"departedAt\":null,\"arrivedAt\":null}"
 # Auch das Leeren optionaler Zeiten verlangt die aktuelle Berichtsrevision.
