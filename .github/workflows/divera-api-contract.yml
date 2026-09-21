@@ -1,6 +1,12 @@
 name: DIVERA API contract
 
 on:
+  pull_request:
+    paths:
+      - api.php
+      - test/fake-divera.php
+      - test/divera-api-contract.sh
+      - .github/workflows/divera-api-contract.yml
   schedule:
     - cron: '17 6 1 * *'
   workflow_dispatch:
