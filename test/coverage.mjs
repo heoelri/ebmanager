@@ -11,7 +11,8 @@ export function summarizePhp(samples) {
       assert(['api.php', 'support.php', 'constants.php'].includes(file), `Unerwartete Coverage-Datei: ${file}`);
       const merged = files[file] ??= {};
       for (const [line, hit] of Object.entries(lines)) {
-        assert(/^[1-9]\d*$/.test(line) && [1, -1, -2].includes(hit), 'Ungültige Xdebug-Zeile');
+        assert(/^[1-9]\d*$/.test(line) &&
+          Number.isInteger(hit) && (hit > 0 || hit === -1 || hit === -2), 'Ungültige Xdebug-Zeile');
         merged[line] = Math.max(merged[line] ?? -2, hit);
       }
     }

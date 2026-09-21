@@ -597,7 +597,7 @@ test "$(curl --insecure --silent --show-error --cookie logout-cookies.txt --cook
   --dump-header logout-headers.txt --write-out '|%{http_code}' \
   --header 'Content-Type: application/json' --header "Origin: $base_url" --data '{}' \
   "$base_url/api/logout")" = '{"ok":true}|200'
-grep --ignore-case --extended-regexp --quiet "^Set-Cookie: $session_cookie=deleted;.*Max-Age=0;.*path=/;.*HttpOnly;.*SameSite=Strict" logout-headers.txt
+grep --ignore-case --extended-regexp --quiet "^Set-Cookie: $session_cookie=;.*Max-Age=0;.*path=/;.*HttpOnly;.*SameSite=Strict" logout-headers.txt
 if [[ "$base_url" == https://* ]]; then
   grep --ignore-case --extended-regexp --quiet "^Set-Cookie: $session_cookie=.*; secure;" logout-headers.txt
 fi

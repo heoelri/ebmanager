@@ -44,6 +44,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Fixed
 
+- Coverage-Auswertung akzeptiert Xdebug-Ausführungszähler größer als eins; der Logout-Smoke-Test prüft den tatsächlich leeren Löschwert des Sitzungscookies (Review zu #125).
 - Ein nachträglich geöffneter Dialog entwertet ausstehende Antworten auch dann, wenn beim Requeststart kein Dialog offen war. Dialogfehler blockieren keine erneute Übermittlung; Nachladefehler nach erfolgreichem Dialogschluss bleiben in der Hauptansicht sichtbar. Verzögerte Schließereignisse entziehen weder neuen Dialogen noch fokussierten Fehlern den Fokus. Auch die erste Anmeldeseite wird auf unbehandelte Browserfehler geprüft (Review zu #125).
 - Die Smoke-Suite verlangt nicht mehr den im Zuge von #88 entfernten globalen Warnungspuffer `pendingWarning`.
 

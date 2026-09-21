@@ -4,7 +4,7 @@ import {summarizeBrowser, summarizePhp} from './coverage.mjs';
 
 // Coverage vereinigt Treffer über Requests/Navigationen, zählt unbesuchte Zeilen und ignoriert unerreichbaren Code.
 const phpSamples = [
-  {'api.php': {1: 1, 2: -1, 3: -2}, 'support.php': {8: -1}, 'constants.php': {4: 1}},
+  {'api.php': {1: 2, 2: -1, 3: -2}, 'support.php': {8: -1}, 'constants.php': {4: 1}},
   {'api.php': {1: -1, 2: 1, 3: -2}, 'support.php': {8: -1}, 'constants.php': {4: 1}}
 ];
 assert.deepEqual(summarizePhp(phpSamples), {
@@ -16,8 +16,8 @@ assert.deepEqual(summarizePhp([...phpSamples].reverse()), summarizePhp(phpSample
 assert.throws(() => summarizePhp([]), /Keine PHP-Coverage/);
 assert.throws(() => summarizePhp([{'api.php': {1: 1}}]), /Keine Coverage/);
 assert.throws(() => summarizePhp([{'api.php': {}, 'support.php': {}, 'constants.php': {}}]), /Keine ausführbaren Zeilen/);
-// Xdebug-Zeilenwerte sind Zustände (1/-1/-2), keine Ausführungszähler.
-for (const hit of [0, 2, -3, 1.5, '1', null]) {
+// Xdebug liefert positive Ausführungszähler sowie -1/-2 für unbesuchte beziehungsweise unerreichbare Zeilen.
+for (const hit of [0, -3, 1.5, '1', null]) {
   assert.throws(() => summarizePhp([{...phpSamples[0], 'api.php': {1: hit}}]), /Ungültige Xdebug-Zeile/);
 }
 const coverageSource = 'function first(){}\nasync function second(){}\nstart().catch(showError);\n';
