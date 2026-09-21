@@ -23,6 +23,15 @@ Der DIVERA-Vertragscheck lädt weiterhin nur öffentliche OpenAPI-Dokumente.
 
 ## Formular- und Request-Lebenszyklus vom 20. September 2026 (#88)
 
+Nachprüfung zu #125: Die Kontextprüfung vergleicht auch den ursprünglich
+geschlossenen Dialogzustand und verwendet den Formularknoten statt des
+ersten Dialogkindes. Eingefügte Fehlermeldungen verändern damit nicht die
+Formularidentität. Nachladefehler nach einem bewusst abgeschlossenen Dialog
+werden nur im weiterhin aktuellen Hauptkontext angezeigt; neu geöffnete
+Dialoge bleiben einschließlich Eingaben und Fokus unangetastet.
+Verzögerte `close`-Ereignisse geben den Fokus nur dann zurück, wenn kein neuer
+Dialog geöffnet und keine Fehlermeldung fokussiert ist.
+
 Navigationsgeneration, verbundene DOM-Knoten und Dialogidentität begrenzen
 die Verwendung asynchroner Antworten. Anmeldeansicht, Passwortanforderung und
 Abmelden entwerten vorherige Ansichten ebenfalls. Die serverseitigen

@@ -16,6 +16,10 @@ assert.deepEqual(summarizePhp([...phpSamples].reverse()), summarizePhp(phpSample
 assert.throws(() => summarizePhp([]), /Keine PHP-Coverage/);
 assert.throws(() => summarizePhp([{'api.php': {1: 1}}]), /Keine Coverage/);
 assert.throws(() => summarizePhp([{'api.php': {}, 'support.php': {}, 'constants.php': {}}]), /Keine ausführbaren Zeilen/);
+// Xdebug-Zeilenwerte sind Zustände (1/-1/-2), keine Ausführungszähler.
+for (const hit of [0, 2, -3, 1.5, '1', null]) {
+  assert.throws(() => summarizePhp([{...phpSamples[0], 'api.php': {1: hit}}]), /Ungültige Xdebug-Zeile/);
+}
 const coverageSource = 'function first(){}\nasync function second(){}\nstart().catch(showError);\n';
 const coverageEntries = [
   {source: coverageSource, functions: [{functionName: 'first', ranges: [{count: 1}]}]},
@@ -37,6 +41,31 @@ const deployment = fs.readFileSync('.github/workflows/deploy.yml', 'utf8');
 const screenshotsWorkflow = fs.readFileSync('.github/workflows/ui-screenshots.yml', 'utf8');
 const screenshotCommentWorkflow = fs.readFileSync('.github/workflows/ui-screenshot-comment.yml', 'utf8');
 const screenshotsScript = fs.readFileSync('test/ui-screenshots.mjs', 'utf8');
+// Jede Browser-Sitzung, einschließlich der ersten Anmeldeseite, erfasst Fehler vor der Navigation und lehnt sie beim Schließen ab.
+{
+  const openSessionSource = screenshotsScript.match(/async function openSession[\s\S]*?(?=\nasync function login)/)?.[0];
+  const closeSource = screenshotsScript.match(/async function close[\s\S]*?(?=\nasync function captureView)/)?.[0];
+  assert(openSessionSource && closeSource, 'Gemeinsame Browser-Sitzungsprüfung fehlt');
+  for (const failed of [false, true]) {
+    let listener, closed = false, measured = false;
+    const page = {
+      on: (event, handler) => {assert.equal(event, 'pageerror'); listener = handler;},
+      goto: async () => {if (failed) listener(Error('Fehler auf der Anmeldeseite'));}
+    };
+    const context = {newPage: async () => page, close: async () => {closed = true;}};
+    const coverage = {
+      start: async item => assert.equal(item, page),
+      collect: async (item, group) => {assert.equal(item, page); assert.equal(group, 'backend'); measured = true;}
+    };
+    const {openSession, close} = new Function('browser', 'coverage', 'contextOptions', 'baseUrl', 'assert',
+      `${openSessionSource};${closeSource};return {openSession,close};`)(
+      {newContext: async () => context}, coverage, {}, 'https://app.test/', assert);
+    const session = await openSession();
+    if (failed) await assert.rejects(close(session), /Keine unbehandelten Browserfehler/);
+    else await close(session);
+    assert(closed && measured);
+  }
+}
 const testWorkflow = fs.readFileSync('.github/workflows/test.yml', 'utf8');
 const dockerfile = fs.readFileSync('Dockerfile', 'utf8');
 const compose = fs.readFileSync('compose.yaml', 'utf8');
@@ -557,18 +586,26 @@ assert.deepEqual([...times.matchAll(/<dt>([^<]+)<\/dt>/g)].map(match => match[1]
 const restoreFocusSource = html.match(/function restoreDialogFocus[^\n]+/)?.[0];
 assert(restoreFocusSource, 'restoreDialogFocus fehlt');
 assert.match(css, /\.form-section\s*>\s*summary:focus-visible\s*\{[\s\S]*?outline-offset:\s*-3px/);
-let closeHandler;
-let focusCount = 0;
-const restoreDialogFocus = new Function('dialog', `${restoreFocusSource}; return restoreDialogFocus;`)({
-  addEventListener: (event, handler, options) => {
-    assert.equal(event, 'close');
-    assert.deepEqual(options, {once: true});
-    closeHandler = handler;
-  }
-});
-restoreDialogFocus({isConnected: true, focus: () => focusCount++});
-closeHandler();
-assert.equal(focusCount, 1);
+// Ein verzögertes close-Ereignis darf weder einer neuen Fehlermeldung noch einem neuen Dialog den Fokus entziehen.
+for (const [open, alertFocused, isConnected, expected] of [
+  [false, false, true, 1],
+  [false, true, true, 0],
+  [true, false, true, 0],
+  [false, false, false, 0]
+]) {
+  let closeHandler, focusCount = 0;
+  const restoreDialogFocus = new Function('dialog', 'document', `${restoreFocusSource}; return restoreDialogFocus;`)({
+    open,
+    addEventListener: (event, handler, options) => {
+      assert.equal(event, 'close');
+      assert.deepEqual(options, {once: true});
+      closeHandler = handler;
+    }
+  }, {activeElement: {matches: selector => {assert.equal(selector, '[role=alert]'); return alertFocused;}}});
+  restoreDialogFocus({isConnected, focus: () => focusCount++});
+  closeHandler();
+  assert.equal(focusCount, expected);
+}
 
 const editReportSource = html.match(/async function editReport[^\n]+/)?.[0];
 assert(editReportSource, 'editReport fehlt');

@@ -263,6 +263,74 @@ export async function checkUiLifecycle(browser, coverage) {
     await test.close();
   }
 
+  // Auch ohne ursprünglich offenen Dialog darf ein alter Refresh keinen neuen Dialog oder dessen Ansicht verändern.
+  for (const path of ['/api/incidents', '/api/incidents/2/reports']) {
+    for (const failed of [false, true]) {
+      const test = await open(), {page} = test;
+      await page.evaluate(() => navigate('incident', 2));
+      const refresh = test.hold(path);
+      const pending = page.evaluate(() => refreshIncident(2, {warning: 'Alte Refresh-Warnung'}));
+      await refresh.received;
+      await page.getByRole('button', {name: 'An Einheitsführung zurückgeben', exact: true}).click();
+      await page.locator('#returnReport textarea').fill('Ungespeicherter neuer Kommentar');
+      await page.evaluate(() => {
+        window.headingBeforeRefresh = app.querySelector('h1');
+        window.formBeforeRefresh = dialog.querySelector('form');
+        announcer.textContent = 'Neuer Dialog';
+      });
+      refresh.release(failed ? {status: 503, json: {error: 'Alter Refresh-Fehler'}}
+        : {json: path === '/api/incidents' ? incidents : reports});
+      await pending;
+      assert.equal(await page.evaluate(() => app.querySelector('h1') === headingBeforeRefresh), true);
+      assert.equal(await page.evaluate(() => dialog.open && dialog.querySelector('form') === formBeforeRefresh), true);
+      assert.equal(await page.locator('#returnReport textarea').inputValue(), 'Ungespeicherter neuer Kommentar');
+      assert.equal(await page.locator('#returnReport textarea').evaluate(node => node === document.activeElement), true);
+      assert.equal(await page.getByRole('alert').count(), 0);
+      assert.equal(await page.locator('#announcer').textContent(), 'Neuer Dialog');
+      await test.close();
+    }
+  }
+
+  // Ein sichtbarer Dialogfehler verändert nicht die Formularidentität und erlaubt einen bewussten erneuten Versuch.
+  {
+    const test = await open(), {page, handlers, calls} = test;
+    await page.evaluate(() => navigate('incident', 2));
+    handlers.set('POST /api/reports/9/return-to-unit',
+      route => route.fulfill({status: 503, json: {error: 'Speichern fehlgeschlagen'}}));
+    await page.getByRole('button', {name: 'An Einheitsführung zurückgeben', exact: true}).click();
+    await page.locator('#returnReport textarea').fill('Kommentar bleibt erhalten');
+    await page.getByRole('button', {name: 'Zurückgeben', exact: true}).click();
+    await page.getByRole('alert').filter({hasText: 'Speichern fehlgeschlagen'}).waitFor();
+    await test.settle();
+    assert.equal(await page.locator('#returnReport').getAttribute('aria-busy'), null);
+    assert.equal(await page.getByRole('button', {name: 'Zurückgeben', exact: true}).isEnabled(), true);
+    assert.equal(await page.locator('#returnReport textarea').inputValue(), 'Kommentar bleibt erhalten');
+    handlers.set('POST /api/reports/9/return-to-unit', route => route.fulfill({json: {}}));
+    await page.getByRole('button', {name: 'Zurückgeben', exact: true}).click();
+    await test.settle();
+    assert.equal(calls.filter(call => call.path === '/api/reports/9/return-to-unit').length, 2);
+    assert.equal(await page.locator('#dialog').evaluate(dialog => dialog.open), false);
+    await test.close();
+  }
+
+  // Nach erfolgreichem Schreiben und bewusstem Dialogschluss bleibt ein Nachladefehler in der Hauptansicht sichtbar.
+  {
+    const test = await open(), {page} = test;
+    await page.evaluate(() => navigate('incident', 2));
+    const refresh = test.hold('/api/incidents');
+    await page.getByRole('button', {name: 'An Einheitsführung zurückgeben', exact: true}).click();
+    await page.locator('#returnReport textarea').fill('Gespeicherter Kommentar');
+    await page.getByRole('button', {name: 'Zurückgeben', exact: true}).click();
+    await refresh.received;
+    assert.equal(await page.locator('#dialog').evaluate(dialog => dialog.open), false);
+    refresh.release({status: 503, json: {error: 'Nachladen fehlgeschlagen'}});
+    await test.settle();
+    assert.match(await page.locator('#app [role=alert]').textContent(), /Nachladen fehlgeschlagen/);
+    assert.equal(await page.locator('#app [role=alert]').evaluate(node => node === document.activeElement), true);
+    assert.notEqual(await page.locator('#announcer').textContent(), 'Wird verarbeitet');
+    await test.close();
+  }
+
   // Workflow-Mailwarnungen bleiben nach dem bewusst abgeschlossenen Dialog beim zugehörigen Einsatz sichtbar.
   {
     const test = await open(), {page, handlers} = test;

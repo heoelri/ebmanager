@@ -20,21 +20,27 @@ const contextOptions = {
   timezoneId: 'Europe/Berlin'
 };
 
-async function login(email) {
+async function openSession() {
   const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   await coverage.start(page);
   await page.goto(baseUrl, {waitUntil: 'networkidle'});
+  return {context, page, errors};
+}
+
+async function login(email) {
+  const session = await openSession();
+  const {page} = session;
   await page.getByLabel('E-Mail').fill(email);
   await page.getByLabel('Passwort').fill(password);
   await page.getByRole('button', {name: 'Anmelden'}).click();
   await page.getByRole('heading', {name: 'Freiwillige Feuerwehr Amt Keppel'}).waitFor();
-  return {context, page, errors};
+  return session;
 }
 
-async function close({context, page, errors = []}) {
+async function close({context, page, errors}) {
   await coverage.collect(page, 'backend');
   await context.close();
   assert.deepEqual(errors, [], 'Keine unbehandelten Browserfehler');
@@ -121,13 +127,11 @@ async function checkReportDates(page) {
 let complete = false;
 try {
   await checkUiLifecycle(browser, coverage);
-  const loginContext = await browser.newContext(contextOptions);
-  const loginPage = await loginContext.newPage();
-  await coverage.start(loginPage);
-  await loginPage.goto(baseUrl, {waitUntil: 'networkidle'});
+  const loginSession = await openSession();
+  const loginPage = loginSession.page;
   await loginPage.getByRole('heading', {name: 'Anmelden'}).waitFor();
   await loginPage.screenshot({path: `${output}/01-anmeldung.png`, fullPage: true});
-  await close({context: loginContext, page: loginPage});
+  await close(loginSession);
 
   const roles = [
     {
