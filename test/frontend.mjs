@@ -993,7 +993,7 @@ const syncOutput = {dataset: {}, isConnected: true, setAttribute() {}, removeAtt
 const syncAnnouncer = {};
 const syncWarning = 'Einsatz #42: Abweichende DIVERA-Daten wurden nicht übernommen.';
 const syncHarness = new Function('document', 'api', 'load', 'esc', 'announcer',
-  `const viewContext=()=>()=>true;${diveraRequestSource};${syncSource};return {syncDivera};`)(
+  `let diveraWritePending=false;const viewContext=()=>()=>true;${diveraRequestSource};${syncSource};return {syncDivera};`)(
   {querySelector: selector => selector === '#pullUnit' ? {value: '1'} : syncOutput},
   async () => ({members: 2, qualifications: 2, vehicles: 2, incidentsCreated: 0, incidentsUpdated: 0, incidentsUnchanged: 2, warning: syncWarning}),
   async () => {}, value => value, syncAnnouncer);

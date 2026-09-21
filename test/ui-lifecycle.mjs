@@ -162,6 +162,24 @@ export async function checkUiLifecycle(browser, coverage) {
     await test.close();
   }
 
+  // Ein Einheitenwechsel erlaubt keinen zweiten DIVERA-Schreibvorgang, solange der erste noch läuft.
+  {
+    const test = await open(), {page, calls} = test;
+    await page.evaluate(() => navigate('divera'));
+    await page.getByRole('button', {name: 'Einsätze abrufen', exact: true}).click();
+    const firstImport = test.hold('POST /api/units/1/divera/import');
+    await page.getByRole('button', {name: 'Importieren', exact: true}).click();
+    await firstImport.received;
+    await page.locator('#pullUnit').selectOption('2');
+    await page.locator('#pullUnit').selectOption('1');
+    await page.getByRole('button', {name: 'Einsätze abrufen', exact: true}).click();
+    await page.getByRole('button', {name: 'Importieren', exact: true}).click();
+    assert.equal(calls.filter(call => call.path.endsWith('/import')).length, 1);
+    firstImport.release({json: {id: 5}});
+    await test.settle();
+    await test.close();
+  }
+
   // Einheitenwechsel entwertet alte DIVERA-Antworten; ein fehlgeschlagener Import bleibt ausdrücklich wiederholbar.
   {
     const test = await open(), {page, calls} = test;
