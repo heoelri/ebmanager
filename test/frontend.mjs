@@ -1,5 +1,31 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import {summarizeBrowser, summarizePhp} from './coverage.mjs';
+
+// Coverage vereinigt Treffer über Requests/Navigationen, zählt unbesuchte Zeilen und ignoriert unerreichbaren Code.
+const phpSamples = [
+  {'api.php': {1: 1, 2: -1, 3: -2}, 'support.php': {8: -1}, 'constants.php': {4: 1}},
+  {'api.php': {1: -1, 2: 1, 3: -2}, 'support.php': {8: -1}, 'constants.php': {4: 1}}
+];
+assert.deepEqual(summarizePhp(phpSamples), {
+  'api.php': {executable: 2, reached: 2, missingLines: []},
+  'constants.php': {executable: 1, reached: 1, missingLines: []},
+  'support.php': {executable: 1, reached: 0, missingLines: [8]}
+});
+assert.deepEqual(summarizePhp([...phpSamples].reverse()), summarizePhp(phpSamples));
+assert.throws(() => summarizePhp([]), /Keine PHP-Coverage/);
+assert.throws(() => summarizePhp([{'api.php': {1: 1}}]), /Keine Coverage/);
+assert.throws(() => summarizePhp([{'api.php': {}, 'support.php': {}, 'constants.php': {}}]), /Keine ausführbaren Zeilen/);
+const coverageSource = 'function first(){}\nasync function second(){}\nstart().catch(showError);\n';
+const coverageEntries = [
+  {source: coverageSource, functions: [{functionName: 'first', ranges: [{count: 1}]}]},
+  {source: coverageSource.replace(/start\(\)\.catch\(showError\);\s*$/, ''),
+    functions: [{functionName: 'first', ranges: [{count: 0}]}, {functionName: 'second', ranges: [{count: 1}]}]},
+  {source: 'unrelated', functions: [{functionName: 'second', ranges: [{count: 1}]}]}
+];
+assert.deepEqual(summarizeBrowser(coverageSource, coverageEntries), {scripts: 2, declared: 2, reached: 2, missing: []});
+assert.deepEqual(summarizeBrowser(coverageSource, coverageEntries.slice(0, 1)).missing, ['second']);
+assert.throws(() => summarizeBrowser(coverageSource, []), /Kein passendes/);
 
 process.env.TZ = 'Europe/Berlin';
 
@@ -36,7 +62,9 @@ assert.match(javascript, /summary\.textContent='DIVERA Import – Prüfung läuf
 assert.match(javascript, /summary\.textContent=`DIVERA Import – \$\{statuses\.join\(', '\)\|\|'keine neuen Einsätze'\}`/);
 assert.match(deployment, /put "public\/styles\.css" "public\/styles\.css"/);
 assert.match(deployment, /put "public\/app\.js" "public\/app\.js"/);
-assert.match(screenshotsWorkflow, /pull_request:\s*\n\s*paths:\s*\n\s*- public\/\*\*/);
+assert.match(screenshotsWorkflow, /pull_request:/);
+assert.doesNotMatch(screenshotsWorkflow, /paths(?:-ignore)?:/);
+assert.match(screenshotsWorkflow, /push:\s*\n\s*branches:\s*\n\s*- main/);
 assert.doesNotMatch(screenshotsWorkflow, /pull_request_target/);
 assert.match(screenshotsWorkflow, /actions\/upload-artifact@v7/);
 assert.match(screenshotsWorkflow, /playwright@1\.55\.0/);
@@ -115,7 +143,7 @@ for (const invalid of ['[]', '{}', null, true, 7]) {
 }
 assert.throws(() => apiArray({}), /Liste erwartet/);
 assert.throws(() => apiObject([]), /Objekt erwartet/);
-const apiFor = response => new Function('fetch', `let pendingWarning='';${apiSource}; return api;`)(async () => response);
+const apiFor = response => new Function('fetch', `const viewContext=()=>()=>true,app={querySelector:()=>null};${apiSource}; return api;`)(async () => response);
 await assert.rejects(
   apiFor(new Response('{"error":"Anmeldung erforderlich"}', {status: 401}))('/api/me'),
   error => error.status === 401 && error.message === 'Anmeldung erforderlich'
@@ -634,23 +662,20 @@ assert.equal(exerciseHistory([]), '');
 assert.match(exerciseHistory([{created_at: '2026-08-23T18:00:00Z', actor_name: 'Test', actor_role: 'wehrleitung', new_value: true}]), /Verlauf der Übungskennzeichnung \(1\).*Als Übung markiert/);
 const toggleExerciseSource = javascript.match(/async function toggleExercise[^\n]+/)?.[0];
 assert(toggleExerciseSource, 'toggleExercise fehlt');
-const exerciseCalls = [];
-const toggleExercise = new Function(
-  'incidents', 'api', 'load', 'incident', 'announcer',
-  `${toggleExerciseSource}; return toggleExercise;`
-)(
-  [{id: 7, revision: 4, is_exercise: false}],
-  async (...args) => exerciseCalls.push(args),
-  async () => exerciseCalls.push(['load']),
-  async (...args) => exerciseCalls.push(['incident', ...args]),
-  {textContent: ''}
-);
+const exerciseCalls = [], exerciseItem = {id: 7, revision: 4, is_exercise: false};
+const exerciseNodes = new Map(['[data-exercise-badge]', '[data-action=toggleExercise]', '[data-exercise-history]'].map(key => [key, {}]));
+const exerciseApp = {querySelector: key => exerciseNodes.get(key), querySelectorAll: () => []};
+const toggleExercise = new Function('incidents', 'api', 'app', 'announcer', 'exerciseHistory', 'apiArray',
+  `const viewContext=()=>()=>true; const exerciseBadge=item=>item.is_exercise?'Übung':'';${toggleExerciseSource}; return toggleExercise;`
+)([exerciseItem], async (...args) => {exerciseCalls.push(args); return [];}, exerciseApp, {textContent: ''}, exerciseHistory, apiArray);
 await toggleExercise(7);
 assert.deepEqual(exerciseCalls, [
   ['/api/incidents/7/exercise', {method: 'PUT', body: '{"isExercise":true,"revision":4}'}],
-  ['load'],
-  ['incident', 7]
+  ['/api/incidents/7/exercise-history']
 ]);
+assert.deepEqual(exerciseItem, {id: 7, revision: 5, is_exercise: true});
+assert.equal(exerciseNodes.get('[data-exercise-badge]').innerHTML, 'Übung');
+assert.doesNotMatch(toggleExerciseSource, /await load|await incident|app\.innerHTML/);
 const deleteIncidentSource = javascript.match(/async function deleteIncident[^\n]+/)?.[0];
 assert(deleteIncidentSource, 'deleteIncident fehlt');
 const deletionCalls = [];
@@ -925,11 +950,13 @@ assert.match(crewRoot.innerHTML, /data-name="Archiv 500"/);
 // Importwarnungen werden sofort in der DIVERA-Ansicht angekündigt und nicht erst bei späterer Navigation sichtbar.
 const syncSource = html.match(/async function syncDivera[^\n]+/)?.[0];
 assert(syncSource, 'DIVERA-Synchronisierung fehlt');
-const syncOutput = {};
+const diveraRequestSource = html.match(/function diveraRequest[^\n]+/)?.[0];
+assert(diveraRequestSource, 'DIVERA-Request-Identität fehlt');
+const syncOutput = {dataset: {}, isConnected: true, setAttribute() {}, removeAttribute() {}};
 const syncAnnouncer = {};
 const syncWarning = 'Einsatz #42: Abweichende DIVERA-Daten wurden nicht übernommen.';
 const syncHarness = new Function('document', 'api', 'load', 'esc', 'announcer',
-  `let pendingWarning=${JSON.stringify(syncWarning)};${syncSource};return {syncDivera,warning:()=>pendingWarning};`)(
+  `const viewContext=()=>()=>true;${diveraRequestSource};${syncSource};return {syncDivera};`)(
   {querySelector: selector => selector === '#pullUnit' ? {value: '1'} : syncOutput},
   async () => ({members: 2, qualifications: 2, vehicles: 2, incidentsCreated: 0, incidentsUpdated: 0, incidentsUnchanged: 2, warning: syncWarning}),
   async () => {}, value => value, syncAnnouncer);
@@ -938,17 +965,7 @@ assert.match(syncOutput.innerHTML, /0 aktualisiert, 2 unverändert/);
 assert.match(syncOutput.innerHTML, /role="alert"/);
 assert(syncOutput.innerHTML.includes(syncWarning));
 assert.equal(syncAnnouncer.textContent, syncWarning);
-assert.equal(syncHarness.warning(), '');
-
-// Eine während des Neuladens hinzugekommene andere Warnung wird nicht versehentlich als erledigt entfernt.
-const concurrentWarning = 'Benachrichtigungs-E-Mails konnten nicht versendet werden.';
-const concurrentSync = new Function('document', 'api', 'esc', 'announcer',
-  `let pendingWarning=${JSON.stringify(syncWarning)}; const load=async()=>{pendingWarning=${JSON.stringify(concurrentWarning)}};${syncSource};return {syncDivera,warning:()=>pendingWarning};`)(
-  {querySelector: selector => selector === '#pullUnit' ? {value: '1'} : syncOutput},
-  async () => ({members: 0, qualifications: 0, vehicles: 0, incidentsCreated: 0, incidentsUpdated: 0, incidentsUnchanged: 1, warning: syncWarning}),
-  value => value, syncAnnouncer);
-await concurrentSync.syncDivera('all');
-assert.equal(concurrentSync.warning(), concurrentWarning);
+assert.doesNotMatch(javascript, /pendingWarning/);
 
 // Ressourcen- und Besatzungsansicht verarbeiten native Fahrzeuglisten, ohne fremde Fahrzeuge als eigene Besatzungsziele anzubieten.
 {
@@ -991,6 +1008,7 @@ assert(importedSource && pendingSource, 'DIVERA-Abgleich fehlt');
 const summary = {textContent: ''}, content = {innerHTML: ''};
 const out = {isConnected: true, hidden: true, querySelector: selector => selector === 'summary' ? summary : content, querySelectorAll: () => []};
 const context = {
+  viewContext: () => () => true,
   document: {querySelector: () => out}, me: {role: 'wehrleitung'},
   units: [{id: 2, name: 'Zwei', divera_configured: 1}, {id: 1, name: 'Eins', divera_configured: 1}],
   incidents: [{divera_id: 'old', started_at: '2026-09-01T12:00:00Z', assignments: [{unitId: 1, vehicles: []}]}],
@@ -1011,7 +1029,7 @@ assert.equal(summary.textContent, 'DIVERA Import – 4 neue Einsätze');
 
 const navigationSource = html.match(/function viewAllowed[\s\S]*?(?=\nasync function start)/)?.[0];
 assert(navigationSource, 'Deep-Link-Navigation fehlt');
-assert.match(html, /catch\(e\)\{if\(e\.status===401\)return login\(\)/);
+assert.match(html, /if\(e\.status===401\)return login\(\)/);
 assert.match(html, /addEventListener\('popstate',\(\)=>\{if\(me\)initialView\(\)\.catch\(showError\)\}\)/);
 
 const requested = [];
@@ -1025,7 +1043,7 @@ const me = {role: 'wehrleitung'};
 const views = Object.fromEntries(['home','resources','statistics','admin','systemOverview','divera'].map(view=>[view,()=>{requested.push(view);if(view==='admin')return false}]));
 const navigation = new Function(
   'location','history','dialog','me','incidents','incident',...Object.keys(views),
-  `${navigationSource}; return {viewAllowed,setViewLocation,navigate,initialView};`
+  `let viewRequest=0;${navigationSource}; return {viewAllowed,setViewLocation,navigate,initialView};`
 )(location,history,dialog,me,[{id:42}],id=>{requested.push(`incident:${id}`)},...Object.values(views));
 await navigation.initialView();
 assert.deepEqual(requested,['resources']);

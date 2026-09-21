@@ -1,5 +1,54 @@
 # Security Review
 
+## Testabdeckung und CI-Auslöser vom 21. September 2026
+
+Die neuen Logout-Prüfungen verwenden ausschließlich lokale Testkonten und
+prüfen Cookie-Löschung, serverseitigen Sitzungswiderruf und den Erhalt anderer
+Sitzungen. Der echte Browser-Berichtsworkflow schreibt nur synthetische Daten
+in die isolierte Demo-Organisation. Authentifizierung, Berechtigungen und
+Produktionsendpunkte wurden dafür nicht verändert.
+
+Xdebug wird nur im CI-/lokalen HTTP-Testserver aktiviert. Der separate
+Coverage-Router verweigert andere SAPIs, benötigt ein ausdrücklich gesetztes
+Test-Ausgabeverzeichnis und speichert ausschließlich Dateinamen und
+Zeilenabdeckung der drei Anwendungs-PHP-Dateien. Browserberichte enthalten
+Funktionsnamen und Zähler, keine Cookies, Tokens, Request-Bodies oder
+Berichtsinhalte. Coverage-Dateien sind von Git und Docker-Buildkontexten
+ausgeschlossen und werden nicht per SFTP deployt.
+
+Die erweiterten PR-Auslöser behalten ausschließlich lesende Repositoryrechte.
+Es gibt keinen Zugriff auf Deployment-Secrets, kein `pull_request_target`
+und keine Änderung am getrennten, vertrauensgeprüften Screenshot-Publisher.
+Der DIVERA-Vertragscheck lädt weiterhin nur öffentliche OpenAPI-Dokumente.
+
+## Formular- und Request-Lebenszyklus vom 20. September 2026 (#88)
+
+Navigationsgeneration, verbundene DOM-Knoten und Dialogidentität begrenzen
+die Verwendung asynchroner Antworten. Anmeldeansicht, Passwortanforderung und
+Abmelden entwerten vorherige Ansichten ebenfalls. Die serverseitigen
+Sitzungs-, Mandanten-, Rollen- und Revisionsprüfungen bleiben unverändert;
+die UI-Prüfung ersetzt keine Berechtigungsprüfung.
+
+Bereits versendete Schreibvorgänge können serverseitig erfolgreich enden,
+auch wenn die Ansicht verlassen wurde. Die Oberfläche verwirft dann nur die
+veraltete Rückmeldung und startet weder Folgeaktionen noch automatische
+Wiederholungen. DIVERA-Anfragen bleiben serverseitig ausschließlich lesend.
+Warnungen werden aus der jeweiligen Antwort escaped gerendert, nicht global
+zwischengespeichert und nicht auf spätere Ansichten oder Nutzer übertragen.
+
+Übungsänderungen lassen ungespeicherte Berichtsinhalte und Quellrevisionen
+unverändert. Nach erfolgreichem revisionsgeschütztem Wechsel steigt lokal
+ausschließlich die eigene Einsatzrevision um den auch serverseitig atomar
+ausgeführten Schritt. Fremde spätere Änderungen führen weiterhin zu HTTP 409;
+es gibt kein automatisches Nachladen neuer Schreibvorbedingungen.
+
+Besatzungsressourcen werden nur am jeweiligen Formularknoten im Arbeitsspeicher
+wiederverwendet und mit diesem ersetzt; sensible Formulardaten
+werden weder in Web Storage noch in Logs oder zusätzlichen Serverfeldern
+gespeichert. Tests verwenden ausschließlich synthetische Daten und abgefangene
+HTTP-Antworten, einschließlich umgekehrter Antwortreihenfolge, Schreibfehlern,
+Teil-Erfolg, Benutzerwechsel und unveränderten offenen Formularen.
+
 ## UTC-Zeitbasis und verlustfreie Berichtszeiten vom 15. September 2026 (#87)
 
 Jede PDO-Verbindung setzt nach erfolgreichem Verbindungsaufbau die

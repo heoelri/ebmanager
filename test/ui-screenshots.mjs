@@ -1,6 +1,9 @@
 import fs from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import {chromium} from 'playwright';
+import {checkUiLifecycle} from './ui-lifecycle.mjs';
+import {checkReportWorkflow} from './ui-report-workflow.mjs';
+import {createBrowserCoverage} from './coverage.mjs';
 
 const baseUrl = process.env.SCREENSHOT_BASE_URL || 'https://localhost:8443';
 const output = 'screenshots';
@@ -8,6 +11,7 @@ const password = 'Demo-Feuerwehr-2026!';
 await fs.mkdir(output, {recursive: true});
 
 const browser = await chromium.launch();
+const coverage = await createBrowserCoverage();
 const contextOptions = {
   ignoreHTTPSErrors: true,
   viewport: {width: 1440, height: 1000},
@@ -19,12 +23,21 @@ const contextOptions = {
 async function login(email) {
   const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await coverage.start(page);
   await page.goto(baseUrl, {waitUntil: 'networkidle'});
   await page.getByLabel('E-Mail').fill(email);
   await page.getByLabel('Passwort').fill(password);
   await page.getByRole('button', {name: 'Anmelden'}).click();
   await page.getByRole('heading', {name: 'Freiwillige Feuerwehr Amt Keppel'}).waitFor();
-  return {context, page};
+  return {context, page, errors};
+}
+
+async function close({context, page, errors = []}) {
+  await coverage.collect(page, 'backend');
+  await context.close();
+  assert.deepEqual(errors, [], 'Keine unbehandelten Browserfehler');
 }
 
 async function captureView(page, prefix, name, view, heading, ready) {
@@ -105,13 +118,16 @@ async function checkReportDates(page) {
   assert.equal((await form.evaluate(form => reportDetailsPayload(form))).endedAt, '2027-01-04T11:30:00.000Z');
 }
 
+let complete = false;
 try {
+  await checkUiLifecycle(browser, coverage);
   const loginContext = await browser.newContext(contextOptions);
   const loginPage = await loginContext.newPage();
+  await coverage.start(loginPage);
   await loginPage.goto(baseUrl, {waitUntil: 'networkidle'});
   await loginPage.getByRole('heading', {name: 'Anmelden'}).waitFor();
   await loginPage.screenshot({path: `${output}/01-anmeldung.png`, fullPage: true});
-  await loginContext.close();
+  await close({context: loginContext, page: loginPage});
 
   const roles = [
     {
@@ -148,15 +164,22 @@ try {
   ];
 
   for (const role of roles) {
-    const {context, page} = await login(role.email);
+    const session = await login(role.email);
+    const {page} = session;
     await checkIncidentFilter(page, role.prefix);
     if (role.prefix === '10-fuehrungskraft') await checkReportDates(page);
     for (const [name, view, heading, ready] of role.views) {
       await captureView(page, role.prefix, name, view, heading, ready);
     }
     await captureIncident(page, role.prefix);
-    await context.close();
+    await close(session);
   }
+  await checkReportWorkflow({login, baseUrl, close});
+  complete = true;
 } finally {
-  await browser.close();
+  try {
+    await coverage.write(complete);
+  } finally {
+    await browser.close();
+  }
 }
