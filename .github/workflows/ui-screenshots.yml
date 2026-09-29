@@ -1,11 +1,10 @@
 name: UI-Screenshots
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
-    paths:
-      - public/**
-      - test/ui-screenshots.mjs
-      - .github/workflows/ui-screenshots.yml
   workflow_dispatch:
 
 permissions:
@@ -38,7 +37,14 @@ jobs:
             --workdir /work \
             --env SCREENSHOT_BASE_URL=https://web \
             mcr.microsoft.com/playwright:v1.55.0-noble \
-            bash -lc 'npm install --prefix /tmp/ui --no-save --package-lock=false playwright@1.55.0 && cp test/ui-screenshots.mjs /tmp/ui/ && node /tmp/ui/ui-screenshots.mjs'
+            bash -lc 'npm install --prefix /tmp/ui --no-save --package-lock=false playwright@1.55.0 && cp test/ui-*.mjs test/coverage.mjs /tmp/ui/ && node /tmp/ui/ui-screenshots.mjs'
+      - name: Browser-Coverage als Artefakt speichern
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-coverage
+          path: coverage/browser.json
+          if-no-files-found: error
       - name: Screenshots als Artefakt speichern
         if: always()
         uses: actions/upload-artifact@v7

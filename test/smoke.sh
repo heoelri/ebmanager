@@ -2,6 +2,9 @@
 set -euo pipefail
 trap 'echo "Smoke-Test fehlgeschlagen in Zeile $LINENO" >&2' ERR
 
+# PHP-Assertions müssen tatsächlich Ausnahmen auslösen, damit fehlgeschlagene Prüfungen den Lauf abbrechen.
+php -r 'try { assert(false); } catch (AssertionError) { exit(0); } throw new RuntimeException("PHP-Assertions müssen aktiv sein und Ausnahmen auslösen");'
+
 export DB_DSN="${DB_DSN:-mysql:host=${TEST_DB_HOST:-127.0.0.1};port=3306;dbname=einsatzberichte;charset=utf8mb4}"
 export DB_USER="${DB_USER:-root}"
 export DB_PASSWORD="${DB_PASSWORD:-test-password}"
@@ -210,7 +213,7 @@ php -r '
   $javascript=file_get_contents("public/app.js");
   $frontend=$html.$javascript;
   $css=file_get_contents("public/styles.css");
-  foreach (["viewport-fit=cover","public/styles.css","public/app.js","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:","rankOptions","pendingWarning","initialView","DIVERA-Einsatznummer","Weitere Fahrzeuge der eigenen Einheit","selectedAdditionalVehicles","class=\"command-row\"","class=\"form-section\"","class=\"report-times\"","restoreDialogFocus","Zugang zurücksetzen und neu einladen","resetUser","zone.key===current","zone.historical","zone.dataset.historical","<select name=\"commandRank\">","<select name=\"additionalCommandRank\">"] as $required) {
+  foreach (["viewport-fit=cover","public/styles.css","public/app.js","class=\"skip-link\"","aria-label=\"Hauptnavigation\"","aria-live=\"polite\"","Auf Touch-Geräten","checkPendingDivera","divera?summary=1","Neue DIVERA-Einsätze","Letzter Import:","rankOptions","initialView","DIVERA-Einsatznummer","Weitere Fahrzeuge der eigenen Einheit","selectedAdditionalVehicles","class=\"command-row\"","class=\"form-section\"","class=\"report-times\"","restoreDialogFocus","Zugang zurücksetzen und neu einladen","resetUser","zone.key===current","zone.historical","zone.dataset.historical","<select name=\"commandRank\">","<select name=\"additionalCommandRank\">"] as $required) {
     if (!str_contains($frontend,$required)) { fwrite(STDERR,"Frontend-Marker fehlt: $required\n"); exit(1); }
   }
   foreach (["--control-height: 44px",":focus-visible","safe-area-inset-bottom","forced-colors: active"] as $required) {
@@ -229,6 +232,22 @@ php -r '
 php -r 'require "constants.php"; assert(RANKS["BM"]==="Brandmeister"); assert(RANKS["GBI"]==="Gemeindebrandinspektor"); assert(RANKS["SBI"]==="Stadtbrandinspektor"); assert(array_key_last(RANKS)==="SBI"); assert(INCIDENT_TYPES!==[]); assert(array_keys(CLASSIFICATIONS)===array_keys(CLASSIFICATION_LABELS));'
 
 # Ohne externen Testserver werden lokale HTTP- und SMTP-Testserver gestartet.
+router=api.php
+coverage_args=()
+if [[ -n "${TEST_COVERAGE_DIR:-}" ]]; then
+  if [[ -n "${TEST_BASE_URL:-}" ]]; then
+    echo 'PHP-Coverage benötigt den lokalen HTTP-Testserver.' >&2
+    exit 1
+  fi
+  php -d xdebug.mode=coverage -r 'if (!function_exists("xdebug_info") || !in_array("coverage", xdebug_info("mode"), true)) throw new RuntimeException("Xdebug-Coverage fehlt");'
+  mkdir -p "$TEST_COVERAGE_DIR"
+  if [[ -n "$(find "$TEST_COVERAGE_DIR" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+    echo 'PHP-Coverage benötigt ein leeres Ausgabeverzeichnis.' >&2
+    exit 1
+  fi
+  router=test/coverage-router.php
+  coverage_args=(-d xdebug.mode=coverage)
+fi
 if [[ -z "${TEST_BASE_URL:-}" ]]; then
   export DIVERA_API_BASE_URL=http://127.0.0.1:8090 DIVERA_REQUEST_LOG="$divera_log"
   php -S 127.0.0.1:8090 test/fake-divera.php >divera-server.log 2>&1 &
@@ -239,7 +258,7 @@ if [[ -z "${TEST_BASE_URL:-}" ]]; then
   php test/fake-smtp.php smtp-cert.pem smtp-key.pem 1 smtp-messages.log >smtp-server.log 2>&1 &
   smtp_pid=$!
   export SMTP_HOST=localhost SMTP_PORT=2525 SMTP_USERNAME=test SMTP_PASSWORD=test SMTP_CA_FILE="$PWD/smtp-cert.pem"
-  php -S 127.0.0.1:8080 api.php >php-server.log 2>&1 &
+  php "${coverage_args[@]}" -S 127.0.0.1:8080 "$router" >php-server.log 2>&1 &
   server_pid=$!
 fi
 sleep 0.25
@@ -565,6 +584,31 @@ test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
   --header 'Origin: https://angreifer.example.test' \
   --request POST \
   "$base_url/api/logout")" = 403
+
+# Erfolgreiches Abmelden löscht Cookie und genau diese Sitzung; ein wiederverwendetes Token scheitert, eine andere Sitzung bleibt gültig.
+curl --insecure --silent --fail --cookie-jar logout-cookies.txt \
+  --header 'Content-Type: application/json' \
+  --data '{"email":"admin@example.test","password":"geheimes-passwort"}' \
+  "$base_url/api/login" | grep --quiet '"ok":true'
+logout_token=$(awk -v name="$session_cookie" '$6==name {print $7}' logout-cookies.txt)
+test -n "$logout_token"
+test "$logout_token" != "$session_token"
+test "$(curl --insecure --silent --show-error --cookie logout-cookies.txt --cookie-jar logout-cookies.txt \
+  --dump-header logout-headers.txt --write-out '|%{http_code}' \
+  --header 'Content-Type: application/json' --header "Origin: $base_url" --data '{}' \
+  "$base_url/api/logout")" = '{"ok":true}|200'
+grep --ignore-case --extended-regexp --quiet "^Set-Cookie: $session_cookie=[^;]*;.*Max-Age=0;.*path=/;.*HttpOnly;.*SameSite=Strict" logout-headers.txt
+if [[ "$base_url" == https://* ]]; then
+  grep --ignore-case --extended-regexp --quiet "^Set-Cookie: $session_cookie=.*; secure;" logout-headers.txt
+fi
+test -z "$(awk -v name="$session_cookie" '$6==name {print $7}' logout-cookies.txt)"
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" \
+  --batch --skip-column-names einsatzberichte \
+  --execute="SELECT COUNT(*) FROM sessions WHERE token=SHA2('$logout_token',256)")" = 0
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$logout_token" "$base_url/api/me")" = 401
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/me" | grep --quiet '"role":"wehrleitung"'
+rm -f logout-cookies.txt logout-headers.txt
 
 # Einheitsnamen sind innerhalb einer Wehr ohne Beachtung der Groß-/Kleinschreibung eindeutig.
 second_unit_id=$(curl --insecure --silent --fail \
@@ -1615,6 +1659,28 @@ assert_pdf "$session_token" "/api/incidents/$incident_id/consolidation/pdf" 'Abg
 
 # Ein abgeschlossener Mehr-Einheiten-Gesamttext bleibt für Führungskraft und Einheitsführung unsichtbar.
 assert_consolidated_visibility "$incident_id"
+
+# Übungsänderungen erhöhen nur die Einsatzrevision; ein offenes Formular darf seine Quellberichte und den Gesamttext behalten.
+exercise_form_state=$(consolidation_data 'Ungespeicherter Formulartext')
+exercise_form_revision=$(printf '%s' "$exercise_form_state" | php -r 'echo json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR)["revision"];')
+exercise_form_reports=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$incident_id/reports")
+for exercise_value in false true; do
+  curl --insecure --silent --fail --cookie "$session_cookie=$session_token" \
+    --header 'Content-Type: application/json' --request PUT \
+    --data "{\"isExercise\":$exercise_value,\"revision\":$exercise_form_revision}" \
+    "$base_url/api/incidents/$incident_id/exercise" >/dev/null
+  exercise_form_revision=$((exercise_form_revision+1))
+done
+test "$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$incident_id/reports")" = "$exercise_form_reports"
+consolidation_data 'Ungespeicherter Formulartext' | BEFORE="$exercise_form_state" php -r '
+  $before=json_decode(getenv("BEFORE"),true,512,JSON_THROW_ON_ERROR);
+  $after=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
+  assert($after["revision"]===$before["revision"]+2);
+  unset($before["revision"],$after["revision"]);
+  assert($after===$before);
+'
+test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" --batch --skip-column-names \
+  einsatzberichte --execute="SELECT consolidated_at='2026-08-24 09:00:00' AND consolidated_text LIKE 'Konsolidiert:%' FROM incidents WHERE id=$incident_id")" = 1
 
 # Eine Rückgabe durch die Wehrführung invalidiert die Konsolidierung bis zur erneuten Übergabe.
 stale_command_return=$(report_data '{"comment":"Bitte durch die Einheit prüfen"}')

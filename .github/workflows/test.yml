@@ -34,7 +34,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: PHP und MySQL-Client installieren
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends php-cli php-mysql mysql-client
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends php-cli php-mysql php-xdebug mysql-client
+          php_version="$(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')"
+          echo 'zend.assertions=1' | sudo tee "/etc/php/$php_version/cli/conf.d/99-tests.ini"
       - name: PHP-Syntax prüfen
         run: find . -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Testskripte prüfen
@@ -44,9 +48,18 @@ jobs:
       - name: Schema und API prüfen
         env:
           MYSQL_PWD: test-password
+          TEST_COVERAGE_DIR: coverage/php-raw
         run: |
           mysql --host=127.0.0.1 --user=root einsatzberichte < schema.sql
           bash test/smoke.sh
+          node test/coverage.mjs
+      - name: PHP-Coverage als Artefakt speichern
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: php-coverage
+          path: coverage/
+          if-no-files-found: error
 
   containers:
     name: Docker Compose

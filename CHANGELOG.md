@@ -6,6 +6,9 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Added
 
+- Ein echter Browser-Berichtsworkflow prüft Anlage, Bearbeitung, Übergaben, beide kommentierten Rückgabewege und Konsolidierung über alle drei Rollen gegen Apache/MySQL. HTTP- und Browsertests prüfen erfolgreiches Abmelden einschließlich Cookie-Löschung, serverseitig unwirksamer Token-Wiederverwendung und Erhalt anderer Sitzungen.
+- CI veröffentlicht PHP-Zeilenabdeckung der HTTP-Smoke-Requests mit einem ausschließlich lokalen Xdebug-Router sowie Browser-Funktionsabdeckung, getrennt nach echtem Backend und synthetischen Lifecycle-Tests. Fehlende Zeilen beziehungsweise Funktionen bleiben sichtbar; es gibt keine irreführende Gesamtquote oder Prozenthürde.
+
 - Die Wehrführung erhält eine organisationsweite Statistik mit Einheitenvergleich und optionalem Filter auf eine einzelne Einheit. Wehrweite Einsatzzahlen zählen gemeinsam alarmierte Einsätze nur einmal.
 - Alle einem Einsatz zugeordneten Rollen können ihn revisionsgeschützt organisationsweit als Übung kennzeichnen; Wehrführungen dürfen dies für alle Einsätze ihres Mandanten. Das Merkmal gilt auch für DIVERA-Einsätze, bleibt bei Neuimporten erhalten und erscheint in Filtern, Berichten, PDFs, Statistik und unveränderlichem Prüfverlauf (#115).
 - Einheits- und Wehrführungen können manuell angelegte Einsätze revisionsgeschützt dauerhaft ausblenden. Die fachlichen Daten bleiben erhalten; ein unveränderlicher Audit-Eintrag speichert Akteur und UTC-Zeitpunkt (#112).
@@ -21,6 +24,9 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 - Das produktive Deployment kann zusätzlich zum automatischen Lauf nach erfolgreichen `main`-Tests manuell für den aktuellen `main`-Commit gestartet werden.
 
 ### Changed
+
+- Browserprüfungen und die unverändert 17 Screenshots laufen für alle Pull Requests und Pushs auf `main`, auch bei reinen Backendänderungen. Der DIVERA-Vertragscheck läuft zusätzlich bei Pull Requests mit Änderungen an API, Fake, Vertragstest oder dessen Workflow.
+- Die Smoke-Suite verweigert den Start bei abgeschalteten PHP-Assertions; CI aktiviert sie ausdrücklich.
 
 - Neue Einheitsberichte übernehmen den lokalen Alarmtag als gemeinsames Datum für Ausrücken, Eintreffen und Einsatzende; die Uhrzeiten bleiben leer. Das gemeinsame Datum lässt sich einmalig für alle noch mitlaufenden Datumswerte ändern, individuelle Abweichungen etwa über Mitternacht bleiben erhalten. Die Alarmierung und gespeicherte Berichtszeiten bleiben unverändert (#123).
 - Erfolgreiche Anmeldungen werden 90 Tage aufbewahrt. Die Verwaltung zeigt nur die neueste gespeicherte Anmeldung innerhalb dieser Frist; ein leerer Wert behauptet nicht mehr „noch keine“. API-Nutzung einschließlich Bootstrap bereinigt höchstens stündlich in installationsweit koordinierten Batches je bis zu 500 abgelaufene Sitzungen und 500 alte Login-Einträge; gültige Zugänge und fachliche Daten bleiben erhalten (#17, Teilumfang von #97).
@@ -38,6 +44,12 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Fixed
 
+- Coverage-Auswertung akzeptiert Xdebug-Ausführungszähler größer als eins; der Logout-Smoke-Test prüft die Löschattribute unabhängig vom PHP-Löschmarker des Sitzungscookies (Review zu #125).
+- Ein nachträglich geöffneter Dialog entwertet ausstehende Antworten auch dann, wenn beim Requeststart kein Dialog offen war. Dialogfehler blockieren keine erneute Übermittlung; Nachladefehler nach erfolgreichem Dialogschluss bleiben in der Hauptansicht sichtbar. Verzögerte Schließereignisse entziehen weder neuen Dialogen noch fokussierten Fehlern den Fokus. Auch die erste Anmeldeseite wird auf unbehandelte Browserfehler geprüft; Einheitenwechsel erlauben keinen zweiten DIVERA-Schreibvorgang, solange der erste noch läuft (Review zu #125).
+- Die Smoke-Suite verlangt nicht mehr den im Zuge von #88 entfernten globalen Warnungspuffer `pendingWarning`.
+
+- Veraltete Navigations-, Formular- und DIVERA-Antworten überschreiben weder die aktuelle Ansicht noch deren URL oder Fehlermeldungen. Einzelimporte behandeln Fehler sichtbar, verhindern doppelte Schreibvorgänge und erlauben eine bewusste Wiederholung; Synchronisation und Import zeigen Erfolg samt Warnung direkt beim zugehörigen Vorgang, ohne globalen Warnungspuffer (#88).
+- Übungsänderungen aktualisieren Kennzeichnung, Verlauf und die eigene Einsatzrevision ohne Neuaufbau offener Einheits- oder Gesamtberichte. Zusatzfahrzeuge verwenden die bereits am Formular geladenen Ressourcen, damit zwischenzeitliche Besatzungsänderungen nicht durch eine alte Antwort verloren gehen; während eines Einheitswechsels ist das alte Board vorübergehend nicht bedienbar (#88).
 - Datenbankverbindungen verwenden unabhängig von der MySQL-Hostzeitzone UTC. Unverändert gespeicherte Berichtszeiten behalten beim Bearbeiten und in der Daueranzeige ihren ursprünglichen ISO-Zeitpunkt einschließlich Sekunden und Zeitwechsel-Offset; neue nicht existente oder mehrdeutige Ortszeiten werden abgewiesen. Der Hostzeitzonentest stellt die globale Testeinstellung auch bei Abbruch wieder her und prüft den Reset-Default samt Fünf-Minuten-Grenze (#87).
 - Der Verlauf der Übungskennzeichnung wird in den Einsatzdetails nur angezeigt, wenn mindestens eine Änderung vorhanden ist.
 - Der Konkurrenztest zur Anmeldebereinigung stellt sein temporär verkürztes MySQL-Lock-Wartezeitlimit unmittelbar nach dem Testabschnitt auch bei Fehlern wieder her; nachfolgende Datenbankoperationen behalten ihre ursprüngliche Wartezeit (#118).

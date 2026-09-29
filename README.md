@@ -161,7 +161,23 @@ Alle Demo-Konten verwenden ausschließlich lokal das Kennwort `Demo-Feuerwehr-20
 
 Demodaten, Demo-Zugangsdaten und die reservierten `demo-local-*`-Keys dürfen nicht außerhalb der lokalen Docker-Compose-Umgebung verwendet werden. Der normale Aufruf `docker compose up` importiert keine Demodaten; Produktionsschema, Migrationen, CI und Deploymentpfade enthalten den Seed nicht.
 
-Pull Requests mit Änderungen unter `public/**` oder am Screenshot-Test starten zusätzlich den Workflow **UI-Screenshots**. Er rendert die Anmeldung und alle rollenabhängigen Hauptansichten einschließlich einer Einsatzdetailansicht für Führungskraft, Einheitsführung und Wehrführung mit dem lokalen Demo-System. Die 17 PNG-Dateien werden als Workflow-Artefakt gespeichert und bei Branches dieses Repositorys zusätzlich direkt in einen einklappbaren PR-Kommentar eingebettet. Fork-PRs erhalten wegen der eingeschränkten Schreibrechte ausschließlich das Artefakt.
+Alle Pull Requests und Pushs auf `main` starten zusätzlich den Workflow **UI-Screenshots**, damit auch reine Backendänderungen im Browser geprüft werden. Er rendert die Anmeldung und alle rollenabhängigen Hauptansichten einschließlich einer Einsatzdetailansicht für Führungskraft, Einheitsführung und Wehrführung mit dem lokalen Demo-System. Die 17 PNG-Dateien werden als Workflow-Artefakt gespeichert und bei PR-Branches dieses Repositorys zusätzlich direkt in einen einklappbaren PR-Kommentar eingebettet. Fork-PRs erhalten wegen der eingeschränkten Schreibrechte ausschließlich das Artefakt.
+
+Vor den Screenshots prüft `test/ui-lifecycle.mjs` mit demselben Playwright-Browser und synthetischen HTTP-Antworten verzögerte Navigation, Formularerhalt, Besatzungsauswahl sowie DIVERA-Fehler und -Warnungen. Danach führt `test/ui-report-workflow.mjs` einen vollständigen Bericht durch alle drei Rollen gegen das echte Demo-Backend: Anlage, Bearbeitung, beide Rückgabewege, erneute Übergaben und Konsolidierung. Neuladen und API-Leseprüfungen bestätigen die gespeicherten Inhalte und Zeiten. Echtes Abmelden prüft Cookie-Löschung und die Ablehnung des alten Tokens; andere Sitzungen bleiben gültig. Diese schreibenden Tests dürfen nur gegen eine isolierte Demo-Installation laufen.
+
+`coverage/browser.json` wird als Artefakt `browser-coverage` veröffentlicht. Gemessen werden benannte Top-Level-Funktionen aus `public/app.js`, getrennt nach echtem Backend und gemockten Lifecycle-Tests sowie vereinigt. Die Messung bleibt über Navigationen erhalten. Das ist weder Zeilen-/Zweigabdeckung noch die Abdeckung der separat ausgeführten Node-Tests; Screenshots werden weiterhin nicht automatisch mit Referenzbildern verglichen.
+
+Der CI-Job **PHP and MySQL** verwendet zusätzlich die reine Testabhängigkeit Xdebug. `test/coverage-router.php` misst nur die PHP-Zeilen in `api.php`, `support.php` und `constants.php`, die HTTP-Requests der Smoke-Suite erreichen. `test/coverage.mjs` vereinigt die Request-Messungen zu `coverage/php.json`, einschließlich nicht erreichter ausführbarer Zeilen. Rohdaten und Bericht erscheinen im Artefakt `php-coverage`; direkte PHP-CLI-Prüfungen, Apache- und Browserläufe sind darin nicht enthalten. Es gibt keine Gesamtquote oder Prozenthürde. Fehlende Messdaten und abgeschaltete PHP-Assertions sind Fehler.
+
+Mit vorbereitetem isoliertem MySQL-Testschema, aktiviertem `zend.assertions=1` und installiertem PHP-Xdebug lässt sich diese Messung unter Linux ausführen:
+
+```bash
+export TEST_COVERAGE_DIR=coverage/php-raw
+bash test/smoke.sh
+node test/coverage.mjs
+```
+
+Das Ausgabeverzeichnis muss leer sein; für einen erneuten Lauf ein neues leeres Verzeichnis wählen. `TEST_BASE_URL` darf dabei nicht gesetzt sein, da nur der lokale HTTP-Testserver instrumentiert wird. Der Router wird nicht per SFTP deployt. Das reguläre Docker-Image enthält den Testcode, aber kein Xdebug; für die Messung wird ein separater PHP-Testserver mit Xdebug verwendet.
 
 Die Docker-Tests verwenden dieselben MySQL- und HTTP-Prüfungen wie CI:
 
@@ -181,7 +197,7 @@ Die vollständige Erstinstallation mit Hosting-Voraussetzungen, Datenbank, Konfi
 
 DIVERA wird je Einheit unter **DIVERA** mit dem Access-Key aus **Verwaltung → Einstellungen → Schnittstellen → API** verbunden. Die Anbindung liest ausschließlich Einsätze, Mitglieder, Qualifikationen und Fahrzeugstammdaten per HTTPS `GET`; lokale Importe verändern keine Daten in DIVERA. Führungskräfte können Einsätze ihrer Einheiten abrufen und importieren, während Konfiguration und Stammdatensynchronisation der Einheits- und Wehrführung vorbehalten bleiben.
 
-Der lokale Fake in `test/fake-divera.php` verweist direkt auf die offiziellen OpenAPI-Dokumente. `.github/workflows/divera-api-contract.yml` vergleicht die verwendeten Endpunkte und dokumentierten Felder monatlich sowie bei manueller Auslösung mit [DIVERA Swagger](https://api.divera247.com/). Der nicht eindeutig dokumentierte Fahrzeugbezug eines Einsatzes muss bei Änderungen zusätzlich mit einer separaten DIVERA-Testeinheit geprüft werden.
+Der lokale Fake in `test/fake-divera.php` verweist direkt auf die offiziellen OpenAPI-Dokumente. `.github/workflows/divera-api-contract.yml` vergleicht die verwendeten Endpunkte und dokumentierten Felder monatlich, bei manueller Auslösung sowie bei relevanten Pull Requests mit [DIVERA Swagger](https://api.divera247.com/). Dieser Namens-/Pfadcheck ist keine vollständige Schema- oder Typvalidierung. Der nicht eindeutig dokumentierte Fahrzeugbezug eines Einsatzes muss bei Änderungen zusätzlich mit einer separaten DIVERA-Testeinheit geprüft werden.
 
 ## Benachrichtigungen
 

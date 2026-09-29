@@ -2,3 +2,4 @@ config.local.php
 .build-id
 node_modules/
 screenshots/
+coverage/
