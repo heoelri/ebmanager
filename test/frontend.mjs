@@ -36,6 +36,10 @@ process.env.TZ = 'Europe/Berlin';
 const documentHtml = fs.readFileSync('public/index.html', 'utf8');
 const javascript = fs.readFileSync('public/app.js', 'utf8');
 const html = `${documentHtml}\n${javascript}`;
+// Liest eine vollständige Top-Level-Deklaration aus dem formatierten public/app.js; eingerückte Zeilen und mehrzeilige Signaturen gehören zum Rumpf.
+const declaration = name => javascript.match(
+  new RegExp(`^(?:(?:async )?function ${name}\\b|const ${name} =).*(?:\\n(?:[ \\t]|\\)).*)*(?:\\n[}\\]].*)?`, 'm')
+)?.[0];
 const css = fs.readFileSync('public/styles.css', 'utf8');
 const deployment = fs.readFileSync('.github/workflows/deploy.yml', 'utf8');
 const screenshotsWorkflow = fs.readFileSync('.github/workflows/ui-screenshots.yml', 'utf8');
@@ -87,8 +91,8 @@ assert.match(css, /@media \(forced-colors: active\)/);
 assert.match(css, /@media \(forced-colors: active\)[\s\S]*?\.error\s*\{[\s\S]*?border-inline-start-width:\s*4px/);
 assert.match(javascript, /<details(?=[^>]*\bid="pendingDivera")(?=[^>]*\bhidden\b)(?=[^>]*\baria-live="polite")[^>]*>\s*<summary>\s*DIVERA Import\s*<\/summary>/);
 assert.doesNotMatch(javascript, /<details(?=[^>]*\bid="pendingDivera")[^>]*\bopen(?:\s|=|>)/);
-assert.match(javascript, /summary\.textContent='DIVERA Import – Prüfung läuft …'/);
-assert.match(javascript, /summary\.textContent=`DIVERA Import – \$\{statuses\.join\(', '\)\|\|'keine neuen Einsätze'\}`/);
+assert.match(javascript, /summary\.textContent = 'DIVERA Import – Prüfung läuft …'/);
+assert.match(javascript, /summary\.textContent = `DIVERA Import – \$\{statuses\.join\(', '\) \|\| 'keine neuen Einsätze'\}`/);
 assert.match(deployment, /put "public\/styles\.css" "public\/styles\.css"/);
 assert.match(deployment, /put "public\/app\.js" "public\/app\.js"/);
 assert.match(screenshotsWorkflow, /pull_request:/);
@@ -154,10 +158,10 @@ assert.match(htaccess, /FilesMatch "\^\(\\\.build-id\|/);
 assert.match(htaccess, /Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'"/);
 assert.match(javascript, /document\.addEventListener\('click'/);
 
-const apiSource = html.match(/async function api[^\n]+/)?.[0];
+const apiSource = declaration('api');
 assert(apiSource, 'API-Helfer fehlt');
 const apiTypesSource = ['apiArray', 'apiObject'].map(name => {
-  const source = javascript.match(new RegExp(`function ${name}[^\\n]+`))?.[0];
+  const source = declaration(name);
   assert(source, `${name} fehlt`);
   return source;
 }).join('\n');
@@ -185,7 +189,7 @@ assert.deepEqual(await apiFor(new Response(null, {status: 204}))('/api/empty'), 
 
 // Konflikte behalten den HTTP-Status, nennen die Wiederherstellung und wiederholen den Schreibzugriff nicht.
 {
-const reportWriteSource = html.match(/async function reportWrite[^\n]+/)?.[0];
+const reportWriteSource = declaration('reportWrite');
 assert(reportWriteSource, 'Revisionierter Berichtsaufruf fehlt');
 let writeCalls = [];
 const reportWrite = new Function('api', `${reportWriteSource}; return reportWrite;`)(async (path, options) => {
@@ -197,8 +201,8 @@ await assert.rejects(reportWrite('/api/reports/7', {revision: 3}, 'PUT'), error 
 assert.deepEqual(writeCalls, [{path: '/api/reports/7', method: 'PUT', data: {revision: 3}}]);
 
 // Bearbeitungs- und Rückgabedialoge senden ihre geladene Revision und bleiben bei Konflikten unverändert offen.
-const editReportSource = html.match(/async function editReport[^\n]+/)?.[0];
-const returnReportSource = html.match(/function returnReport[^\n]+/)?.[0];
+const editReportSource = declaration('editReport');
+const returnReportSource = declaration('returnReport');
 assert(editReportSource && returnReportSource, 'Berichtsdialoge fehlen');
 for (const operation of ['edit', 'return']) {
   const report = {id: 7, incident_id: 8, unit_id: 1, revision: 3, crew: [], narrative: 'Geladen'};
@@ -237,7 +241,7 @@ for (const operation of ['edit', 'return']) {
 }
 
 // Der Gesamtbericht bindet geladenen Textstand und Quellberichte, ohne beim Konflikt Formular oder Eingaben zu ersetzen.
-const consolidationBinding = html.match(/if\(me\.role==='wehrleitung'&&mayConsolidate\)bindForm[^\n]+/)?.[0];
+const consolidationBinding = javascript.match(/if \(me\.role === 'wehrleitung' && mayConsolidate\)[\s\S]*?\n {6}\}\);/)?.[0];
 assert(consolidationBinding, 'Revisioniertes Konsolidierungsformular fehlt');
 let consolidationHandler;
 new Function('me', 'mayConsolidate', 'bindForm', 'reportWrite', 'id', 'item', 'reports', 'load', 'incident', consolidationBinding)(
@@ -252,7 +256,7 @@ assert.deepEqual(writeCalls.at(-1), {path: '/api/incidents/8/consolidation', met
   data: {text: 'Ungespeicherter Gesamttext', revision: 12, reportVersions: [{id: 7, revision: 3}, {id: 9, revision: 5}]}});
 
 // Auch direkte Übergabeschaltflächen senden die geladene Revision und laden bei Konflikten nicht nach.
-const submitReportSource = html.match(/async function submitReport[^\n]+/)?.[0];
+const submitReportSource = declaration('submitReport');
 assert(submitReportSource, 'Revisionierte Übergabe fehlt');
 let submissionError;
 const submitReport = new Function('currentReports', 'reportWrite', 'load', 'incident', 'showError',
@@ -265,12 +269,12 @@ assert.equal(submissionError.status, 409);
 assert.deepEqual(writeCalls.at(-1), {path: '/api/reports/7/submit-to-command', method: 'POST', data: {revision: 3}});
 }
 
-const resetPasswordSource = html.match(/async function resetPassword[^\n]+/)?.[0];
+const resetPasswordSource = declaration('resetPassword');
 assert(resetPasswordSource, 'resetPassword fehlt');
-assert.match(resetPasswordSource, /password-reset\/context.*method:'POST'.*JSON\.stringify\(\{token\}\)/);
+assert.match(resetPasswordSource, /password-reset\/context.*method: 'POST'.*JSON\.stringify\(\{token\}\)/);
 assert(resetPasswordSource.indexOf('autocomplete="username"') < resetPasswordSource.indexOf('autocomplete="new-password"'));
 assert.match(resetPasswordSource, /name="username" type="email" autocomplete="username"[^>]+readonly/);
-assert.match(resetPasswordSource, /catch\(error\)\{history\.replaceState\(\{\},'',location\.pathname\)/);
+assert.match(resetPasswordSource, /catch \(error\) \{\s*history\.replaceState\(\{\}, '', location\.pathname\)/);
 assert.match(resetPasswordSource, /Link nicht mehr gültig/);
 assert.match(resetPasswordSource, /data-action="forgotPassword">Neuen Link anfordern/);
 assert.match(html, /fragment\.get\('invite'\)/);
@@ -291,7 +295,7 @@ assert.match(rankOptions(''), /^<option value="">Keine Angabe<\/option>/);
 assert.match(rankOptions('ALT'), /value="ALT" selected>ALT/);
 assert.equal((rankOptions('ALT').match(/value="ALT"/g) ?? []).length, 1);
 
-const incidentStatusSource = html.match(/function incidentStatus[^\n]+/)?.[0];
+const incidentStatusSource = declaration('incidentStatus');
 assert(incidentStatusSource, 'incidentStatus fehlt');
 const incidentStatus = new Function('esc', `${incidentStatusSource}; return incidentStatus;`)(value => String(value));
 for (const label of ['Bericht erforderlich', 'Prüfung erforderlich', 'Bereit zur Konsolidierung', 'Abgeschlossen']) {
@@ -302,19 +306,19 @@ assert.match(html, /<fieldset class="unit-picker"><legend>Einheiten<\/legend><de
 assert.match(css, /button,\s*input:not\(\[type="checkbox"\]\):not\(\[type="radio"\]\),\s*select\s*\{\s*min-height:\s*var\(--control-height\)/);
 assert.match(css, /\.unit-picker summary\s*\{[\s\S]*?min-height:\s*var\(--control-height\)/);
 assert.match(css, /\.unit-picker \.check-grid\s*\{[\s\S]*?position:\s*absolute[\s\S]*?top:\s*calc\(100% \+ \.25rem\)[\s\S]*?inset-inline:\s*0/);
-assert.match(html, /const error=Error\(r\.ok\?'Ungültige Serverantwort':text\);error\.status=r\.status;throw error/);
-assert.match(html, /boxes\.forEach\(box=>box\.setCustomValidity\(count\?'':'Wählen Sie mindestens eine Einheit aus\.'\)\)/);
-assert.match(html, /if\(form\.getAttribute\('aria-busy'\)==='true'\)return/);
-assert.match(html, /e\.submitter\|\|form\.querySelector\('button\[type=submit\],button:not\(\[type\]\)'\)/);
+assert.match(html, /const error = Error\(r\.ok \? 'Ungültige Serverantwort' : text\);\s*error\.status = r\.status;\s*throw error/);
+assert.match(html, /boxes\.forEach\(box => box\.setCustomValidity\(count \? '' : 'Wählen Sie mindestens eine Einheit aus\.'\)\)/);
+assert.match(html, /if \(form\.getAttribute\('aria-busy'\) === 'true'\) return/);
+assert.match(html, /e\.submitter \|\| form\.querySelector\('button\[type=submit\],button:not\(\[type\]\)'\)/);
 assert.equal((html.match(/<button class="form-action">(?:Anmelden|Anlegen|Einladung senden|Speichern)<\/button>/g) ?? []).length, 5);
 assert.match(html, /<form id="login" class="grid">[\s\S]*?<button class="form-action">Anmelden<\/button>/);
 assert.match(html, /<form id="incident" class="grid">[\s\S]*?<button class="form-action">Anlegen<\/button>/);
 assert.match(html, /<form id="divera" class="grid">[\s\S]*?<button class="form-action">Speichern<\/button>/);
 assert.match(css, /\.form-action\s*\{[\s\S]*?align-self:\s*end/);
 
-const filterOptionsSource = html.match(/function incidentFilterOptions[^\n]+/)?.[0];
+const filterOptionsSource = declaration('incidentFilterOptions');
 assert(filterOptionsSource, 'incidentFilterOptions fehlt');
-const filterLabelsSource = html.match(/const incidentStatusFilterLabels=\{[^\n]+/)?.[0];
+const filterLabelsSource = declaration('incidentStatusFilterLabels');
 assert(filterLabelsSource, 'incidentStatusFilterLabels fehlt');
 const incidentFilterOptions = new Function('esc', `${filterLabelsSource};${filterOptionsSource}; return incidentFilterOptions;`)(value => String(value));
 assert.equal(incidentFilterOptions([
@@ -328,7 +332,7 @@ assert.doesNotMatch(incidentFilterOptions([], 'unknown'), /unknown/);
 assert.doesNotMatch(incidentFilterOptions([], 'toString'), /toString/);
 assert.equal(incidentFilterOptions([{reportStatus: {key: 'toString'}}]), '<option value="toString">toString</option>');
 
-const filterSource = html.match(/function filterIncidents[^\n]+/)?.[0];
+const filterSource = declaration('filterIncidents');
 assert(filterSource, 'filterIncidents fehlt');
 const filterPreferenceSource = html.match(/function incidentFilterPreference[\s\S]*?(?=\nfunction filterIncidents)/)?.[0];
 assert(filterPreferenceSource, 'incidentFilterPreference fehlt');
@@ -404,13 +408,13 @@ assert.match(incidentFilterOptions([{reportStatus: {key: 'submitted'}}], 'report
 }
 assert.match(html, /<label>Status filtern<select id="incidentStatusFilter"/);
 assert.match(html, /<label>Art filtern<select id="incidentExerciseFilter"/);
-assert.match(html, /data-incident-exercise="\$\{i\.is_exercise\?'1':'0'\}"/);
+assert.match(html, /data-incident-exercise="\$\{i\.is_exercise \? '1' : '0'\}"/);
 assert.match(html, /Reguläre Einsätze/);
 assert.match(html, /Übungen/);
-assert.match(html, /const selectedStatus=incidentFilterPreference\(\)/);
-assert.match(html, /incidentFilterOptions\(incidents,selectedStatus\)/);
-assert.match(html, /const applyFilters=\(\)=>filterIncidents\(statusFilter\.value,exerciseFilter\.value\)/);
-assert.match(html, /exerciseFilter\.addEventListener\('change',applyFilters\)/);
+assert.match(html, /const selectedStatus = incidentFilterPreference\(\)/);
+assert.match(html, /incidentFilterOptions\(incidents, selectedStatus\)/);
+assert.match(html, /const applyFilters = \(\) => filterIncidents\(statusFilter\.value, exerciseFilter\.value\)/);
+assert.match(html, /exerciseFilter\.addEventListener\('change', applyFilters\)/);
 
 const reportFieldsSource = html.match(/function contactFields[\s\S]*?(?=\nfunction bindDuration)/)?.[0];
 assert(reportFieldsSource, 'Berichtsdetails fehlen');
@@ -475,7 +479,7 @@ assert.doesNotMatch(reportFields, /name="reportDate"|type="time"|name="departedA
 // Kontakt-, Leitungs- und Klassifikationsobjekte bleiben in Formular und Übersicht erhalten; alte JSON-Strings werden sichtbar abgelehnt.
 {
 const summarySource = ['contactSummary', 'commandSummary', 'classificationSummary']
-  .map(name => javascript.match(new RegExp(`function ${name}[^\\n]+`))?.[0]).join('\n');
+  .map(name => declaration(name)).join('\n');
 const summaries = new Function('esc', 'classificationLabels',
   `${apiTypesSource}; ${summarySource}; return {contactSummary,commandSummary,classificationSummary};`
 )(value => String(value ?? '').replaceAll('<', '&lt;'), {site: 'Einsatzstelle'});
@@ -490,12 +494,12 @@ for (const field of ['damaged_party', 'damaging_party', 'incident_command', 'cla
 }
 }
 
-const durationSource = html.match(/function durationText[^\n]+/)?.[0];
+const durationSource = declaration('durationText');
 assert(durationSource, 'durationText fehlt');
 const durationText = new Function(`${durationSource}; return durationText;`)();
 assert.equal(durationText(null, null), '–');
 assert.equal(durationText(null, '2026-08-22T19:00:00Z'), '–');
-const bindDurationSource = html.match(/function bindDuration[^\n]+/)?.[0];
+const bindDurationSource = declaration('bindDuration');
 assert(bindDurationSource, 'bindDuration fehlt');
 const durationOutput = {textContent: ''};
 let updateDuration;
@@ -566,7 +570,7 @@ form.elements.endedAtDate.value = '2026-10-25';
 assert.throws(() => reportDateTime(form.elements.endedAt, 'Einsatzende'), /mehrdeutig/);
 }
 
-const formatDateTimeSource = html.match(/function formatDateTime[^\n]+/)?.[0];
+const formatDateTimeSource = declaration('formatDateTime');
 assert(formatDateTimeSource, 'formatDateTime fehlt');
 const formatDateTime = new Function(`${formatDateTimeSource}; return formatDateTime;`)();
 const sampleDateTime = '2026-09-04T07:05:00Z';
@@ -574,7 +578,7 @@ assert.equal(formatDateTime(sampleDateTime), new Date(sampleDateTime).toLocaleSt
 assert.equal(formatDateTime(null), '–');
 assert.equal(formatDateTime('ungültig'), '–');
 
-const reportTimesSource = html.match(/function reportTimes[^\n]+/)?.[0];
+const reportTimesSource = declaration('reportTimes');
 assert(reportTimesSource, 'reportTimes fehlt');
 const reportTimes = new Function(
   'formatDateTime', 'durationText',
@@ -583,7 +587,7 @@ const reportTimes = new Function(
 const times = reportTimes({alarmed_at: 'a', departed_at: 'b', arrived_at: 'c', ended_at: 'd'});
 assert.deepEqual([...times.matchAll(/<dt>([^<]+)<\/dt>/g)].map(match => match[1]), ['Alarmiert', 'Ausgerückt', 'Eingetroffen', 'Beendet', 'Dauer']);
 
-const restoreFocusSource = html.match(/function restoreDialogFocus[^\n]+/)?.[0];
+const restoreFocusSource = declaration('restoreDialogFocus');
 assert(restoreFocusSource, 'restoreDialogFocus fehlt');
 assert.match(css, /\.form-section\s*>\s*summary:focus-visible\s*\{[\s\S]*?outline-offset:\s*-3px/);
 // Ein verzögertes close-Ereignis darf weder einer neuen Fehlermeldung noch einem neuen Dialog den Fokus entziehen.
@@ -607,27 +611,27 @@ for (const [open, alertFocused, isConnected, expected] of [
   assert.equal(focusCount, expected);
 }
 
-const editReportSource = html.match(/async function editReport[^\n]+/)?.[0];
+const editReportSource = declaration('editReport');
 assert(editReportSource, 'editReport fehlt');
 assert.match(editReportSource, /<button type="submit" disabled>Speichern<\/button>/);
-assert(editReportSource.indexOf("bindForm('#edit'") < editReportSource.indexOf("await loadReportCrew(form,'#editCrew'"));
+assert(editReportSource.indexOf("bindForm('#edit'") < editReportSource.indexOf("await loadReportCrew(form, '#editCrew'"));
 assert.match(html, /data-action="editReport" data-id="\$\{report\.id\}"/);
 assert.match(html, /data-action="editUser" data-id="\$\{u\.id\}"/);
-assert.match(html, /author_draft:'Entwurf der Führungskraft'/);
-assert.match(html, /unit_review:'Prüfung durch Einheitsführung'/);
-assert.match(html, /wehr_review:'Prüfung durch Wehrführung'/);
+assert.match(html, /author_draft: 'Entwurf der Führungskraft'/);
+assert.match(html, /unit_review: 'Prüfung durch Einheitsführung'/);
+assert.match(html, /wehr_review: 'Prüfung durch Wehrführung'/);
 assert.match(html, /submit-to-unit/);
 assert.match(html, /return-to-author/);
 assert.match(html, /submit-to-command/);
 assert.match(html, /return-to-unit/);
 assert.match(html, /name="comment" maxlength="2000" required/);
 assert.match(html, /Prüfverlauf \(\$\{report\.history\.length\}\)/);
-assert.match(html, /roleLabels=\{fuehrungskraft:'Führungskraft',einheitsleitung:'Einheitsführung',wehrleitung:'Wehrführung'\}/);
-assert.match(html, /Abgeschickt\$\{submitted\?` am/);
+assert.match(html, /roleLabels = \{fuehrungskraft: 'Führungskraft', einheitsleitung: 'Einheitsführung', wehrleitung: 'Wehrführung'\}/);
+assert.match(html, /Abgeschickt\$\{submitted \? ` am/);
 assert.match(html, /Der Einsatzbericht ist für Sie jetzt nur noch lesbar/);
 assert.match(html, /jede alarmierte Einheit einen Bericht an die Wehrführung gesendet hat/);
 assert.match(html, /Noch nicht bereit:/);
-assert.match(html, /if\(me\.role==='wehrleitung'&&mayConsolidate\)bindForm\('#consolidate'/);
+assert.match(html, /if \(me\.role === 'wehrleitung' && mayConsolidate\)\s*bindForm\('#consolidate'/);
 const resourceOverviewSource = html.match(/function crewSummary[\s\S]*?(?=\nfunction selectedCrew)/)?.[0];
 assert(resourceOverviewSource, 'Konsolidierte Fahrzeug- und Besatzungsübersicht fehlt');
 const consolidatedResources = new Function(
@@ -658,8 +662,8 @@ assert.equal(tiedOverview, consolidatedResources([...tiedAssignments].reverse(),
 const crewSummary = new Function('esc', `${apiTypesSource}; ${resourceOverviewSource}; return crewSummary;`)(value => value);
 assert.equal(crewSummary([], ['Ä', 'A\u0308']), crewSummary([], ['A\u0308', 'Ä']));
 assert.throws(() => crewSummary('[]'), /Liste erwartet/);
-assert.match(html, /<h3>Fahrzeuge und Besatzung<\/h3>\$\{consolidatedResources\(assignments,reports,units\)\}/);
-const authorNoticeSource = html.match(/function authorReportNotice[^\n]+/)?.[0];
+assert.match(html, /<h3>Fahrzeuge und Besatzung<\/h3>\$\{consolidatedResources\(assignments, reports, units\)\}/);
+const authorNoticeSource = declaration('authorReportNotice');
 assert(authorNoticeSource, 'authorReportNotice fehlt');
 const authorReportNotice = new Function(
   'me', 'formatDateTime', 'esc',
@@ -674,7 +678,7 @@ assert.match(authorReportNotice({
   history: [{from_status: 'author_draft', to_status: 'unit_review', created_at: '2026-08-23T18:00:00Z'}]
 }), /Abgeschickt am 2026-08-23T18:00:00Z.*nur noch lesbar/);
 assert.equal(authorReportNotice({status: 'author_draft', history: []}), '');
-const reportActionsSource = html.match(/function reportActions[^\n]+/)?.[0];
+const reportActionsSource = declaration('reportActions');
 assert(reportActionsSource, 'reportActions fehlt');
 for (const me of [
   {id: 1, role: 'fuehrungskraft', unitIds: [1]},
@@ -686,10 +690,10 @@ for (const me of [
   assert.doesNotMatch(actions, /Bearbeiten/);
 }
 assert.match(html, /data-action="download" data-href="api\/incidents\/\$\{id\}\/pdf">Einsatzakte als PDF/);
-assert.match(html, /item\.consolidated_at\?`<p><button type="button" data-action="download" data-href="api\/incidents\/\$\{id\}\/consolidation\/pdf">Gesamtbericht als PDF/);
-assert.match(html, /item\.canDelete\?` <button type="button" class="secondary" data-action="deleteIncident"/);
+assert.match(html, /item\.consolidated_at \? `<p><button type="button" data-action="download" data-href="api\/incidents\/\$\{id\}\/consolidation\/pdf">Gesamtbericht als PDF/);
+assert.match(html, /item\.canDelete \? ` <button type="button" class="secondary" data-action="deleteIncident"/);
 assert.match(html, /data-action="toggleExercise"/);
-const exerciseHistorySource = javascript.match(/function exerciseHistory[^\n]+/)?.[0];
+const exerciseHistorySource = declaration('exerciseHistory');
 assert(exerciseHistorySource, 'exerciseHistory fehlt');
 const exerciseHistory = new Function(
   'formatDateTime', 'esc', 'roleLabels',
@@ -697,7 +701,7 @@ const exerciseHistory = new Function(
 )(value => value, value => String(value ?? ''), {wehrleitung: 'Wehrführung'});
 assert.equal(exerciseHistory([]), '');
 assert.match(exerciseHistory([{created_at: '2026-08-23T18:00:00Z', actor_name: 'Test', actor_role: 'wehrleitung', new_value: true}]), /Verlauf der Übungskennzeichnung \(1\).*Als Übung markiert/);
-const toggleExerciseSource = javascript.match(/async function toggleExercise[^\n]+/)?.[0];
+const toggleExerciseSource = declaration('toggleExercise');
 assert(toggleExerciseSource, 'toggleExercise fehlt');
 const exerciseCalls = [], exerciseItem = {id: 7, revision: 4, is_exercise: false};
 const exerciseNodes = new Map(['[data-exercise-badge]', '[data-action=toggleExercise]', '[data-exercise-history]'].map(key => [key, {}]));
@@ -713,7 +717,7 @@ assert.deepEqual(exerciseCalls, [
 assert.deepEqual(exerciseItem, {id: 7, revision: 5, is_exercise: true});
 assert.equal(exerciseNodes.get('[data-exercise-badge]').innerHTML, 'Übung');
 assert.doesNotMatch(toggleExerciseSource, /await load|await incident|app\.innerHTML/);
-const deleteIncidentSource = javascript.match(/async function deleteIncident[^\n]+/)?.[0];
+const deleteIncidentSource = declaration('deleteIncident');
 assert(deleteIncidentSource, 'deleteIncident fehlt');
 const deletionCalls = [];
 let deletionPrompt = '';
@@ -736,7 +740,7 @@ assert.deepEqual(deletionCalls, [
   ['load'],
   ['navigate', 'home']
 ]);
-const downloadFileSource = javascript.match(/async function downloadFile[^\n]+/)?.[0];
+const downloadFileSource = declaration('downloadFile');
 assert(downloadFileSource, 'downloadFile fehlt');
 let response = {ok: false, status: 422, headers: {get: () => 'application/json'}, text: async () => '{"error":"PDF-Zeichen nicht darstellbar"}'};
 let clicked = false, removed = false, revoked = false;
@@ -757,7 +761,7 @@ clicked = removed = revoked = false;
 link.click = () => {throw Error('Download blockiert')};
 await assert.rejects(downloadFile('api/test.pdf'), /Download blockiert/);
 assert(removed && revoked);
-const existingReportsNoticeSource = html.match(/function existingReportsNotice[^\n]+/)?.[0];
+const existingReportsNoticeSource = declaration('existingReportsNotice');
 assert(existingReportsNoticeSource, 'existingReportsNotice fehlt');
 for (const [me, visible] of [
   [{role: 'wehrleitung', unitIds: []}, true],
@@ -767,7 +771,7 @@ for (const [me, visible] of [
   const existingReportsNotice = new Function('me', `${existingReportsNoticeSource}; return existingReportsNotice;`)(me);
   assert.equal(existingReportsNotice().includes('Für alle verfügbaren Einheiten'), visible);
 }
-const inaccessibleReportNoticesSource = html.match(/function inaccessibleReportNotices[^\n]+/)?.[0];
+const inaccessibleReportNoticesSource = declaration('inaccessibleReportNotices');
 assert(inaccessibleReportNoticesSource, 'inaccessibleReportNotices fehlt');
 const inaccessibleReportNotices = new Function(
   'me', 'units', 'esc',
@@ -784,7 +788,7 @@ const inaccessibleNotice = inaccessibleReportNotices([
 assert.match(inaccessibleNotice, /Löschzug Mitte.*Franziska &lt;Roth>.*Berichtsinhalte/s);
 assert.doesNotMatch(inaccessibleNotice, /Nils Weber|Löschgruppe Nord/);
 assert.doesNotMatch(html, /\/release/);
-const membershipFieldsSource = html.match(/function membershipFields[^\n]+/)?.[0];
+const membershipFieldsSource = declaration('membershipFields');
 assert(membershipFieldsSource, 'Einheitsauswahl für Benutzer fehlt');
 const membershipFields = new Function('units', 'esc', `${membershipFieldsSource}; return membershipFields;`)(
   [{id: 1, name: 'Löschzug'}, {id: 2, name: 'Löschgruppe'}],
@@ -795,7 +799,7 @@ assert.doesNotMatch(membershipFields('einheitsleitung'), /unit-picker|<details>/
 assert.match(membershipFields('einheitsleitung'), /<legend>Einheit<\/legend>.*type="radio".*required/s);
 // Benutzerbearbeitung übernimmt native Einheits-IDs und sendet die gültigen Formularstrings ohne zweite JSON-Kodierung.
 {
-const editUserSource = javascript.match(/function editUser[^\n]+/)?.[0];
+const editUserSource = declaration('editUser');
 assert(editUserSource, 'Benutzerbearbeitung fehlt');
 let saveUser;
 const requests = [];
@@ -820,26 +824,26 @@ assert.throws(() => editUser(7, {}), /Liste erwartet/);
 assert.equal(dialog.innerHTML, markup);
 }
 assert.match(html, /<ul class="user-list">\$\{users\.map/);
-assert.match(html, /\$\{esc\(roleLabels\[u\.role\]\|\|u\.role\)\}/);
+assert.match(html, /\$\{esc\(roleLabels\[u\.role\] \|\| u\.role\)\}/);
 assert.match(html, />\$\{roleLabels\[r\]\}<\/option>/);
-assert.match(html, /\$\{esc\(roleLabels\[me\.role\]\|\|me\.role\)\}/);
-assert.match(html, /\$\{esc\(roleLabels\[user\.role\]\|\|user\.role\)\}/);
+assert.match(html, /\$\{esc\(roleLabels\[me\.role\] \|\| me\.role\)\}/);
+assert.match(html, /\$\{esc\(roleLabels\[user\.role\] \|\| user\.role\)\}/);
 assert.match(css, /\.form-section > summary,\s*\.crew-available summary\s*\{[\s\S]*?min-height:\s*var\(--control-height\)/);
-const unitPickerLabelSource = html.match(/function unitPickerLabel[^\n]+/)?.[0];
+const unitPickerLabelSource = declaration('unitPickerLabel');
 assert(unitPickerLabelSource, 'Beschriftung der Einheitsauswahl fehlt');
 const unitPickerLabel = new Function(`${unitPickerLabelSource}; return unitPickerLabel;`)();
 assert.equal(unitPickerLabel(0), 'Einheiten auswählen');
 assert.equal(unitPickerLabel(1), '1 Einheit ausgewählt');
 assert.equal(unitPickerLabel(2), '2 Einheiten ausgewählt');
-assert.match(html, /setCustomValidity\(count\?'':'Wählen Sie mindestens eine Einheit aus\.'\)/);
-assert.match(html, /addEventListener\('invalid',\(\)=>details\.open=true,true\)/);
+assert.match(html, /setCustomValidity\(count \? '' : 'Wählen Sie mindestens eine Einheit aus\.'\)/);
+assert.match(html, /addEventListener\('invalid', \(\) => \(details\.open = true\), true\)/);
 assert.match(html, /Alles synchronisieren/);
 assert.match(html, /Fahrzeuge synchronisieren/);
 assert.match(html, /\/resources/);
 assert.match(html, /Qualifikationen:/);
-assert.match(html, /\['einheitsleitung','wehrleitung'\]\.includes\(me\.role\)\?'<button type="button" data-action="statistics">Statistik<\/button>'/);
+assert.match(html, /\['einheitsleitung', 'wehrleitung'\]\.includes\(me\.role\) \? '<button type="button" data-action="statistics">Statistik<\/button>'/);
 assert.match(html, /<select name="unit"><option value="">Alle Einheiten<\/option>/);
-assert.match(html, /if\(unit\)query\.set\('unit',unit\)/);
+assert.match(html, /if \(unit\) query\.set\('unit', unit\)/);
 assert.match(html, /<input name="from" type="date"/);
 assert.match(html, /<input name="to" type="date"/);
 assert.match(html, /<th scope="col">/);
@@ -873,28 +877,28 @@ for (const expected of ['Reguläre Einsätze', 'Übungen', 'Einheiten im Verglei
 assert.match(statisticsHtml, /2 Besatzungszuordnungen in 2 vorhandenen Berichten/);
 assert.match(statisticsMarkup({totals: {incidents: 0}}), /Für den gewählten Zeitraum liegen keine Einsätze/);
 
-const loadCrewSource = html.match(/async function loadReportCrew[^\n]+/)?.[0];
+const loadCrewSource = declaration('loadReportCrew');
 assert(loadCrewSource, 'loadReportCrew fehlt');
-assert.doesNotMatch(loadCrewSource, /unitSelect\.disabled=true/);
-assert.match(loadCrewSource, /form\.closest\('dialog'\)&&!dialog\.open/);
-assert.match(loadCrewSource, /root\.dataset\.crewRequest!==request/);
-assert.match(loadCrewSource, /unitSelect\?\.value\|\|unitId/);
+assert.doesNotMatch(loadCrewSource, /unitSelect\.disabled\s*=\s*true/);
+assert.match(loadCrewSource, /form\.closest\('dialog'\) && !dialog\.open/);
+assert.match(loadCrewSource, /root\.dataset\.crewRequest !== request/);
+assert.match(loadCrewSource, /unitSelect\?\.value \|\| unitId/);
 assert.match(loadCrewSource, /Erneut laden/);
-assert.match(loadCrewSource, /if\(restoreFocus\)retry\.focus\(\)/);
-const renderResourcesSource = html.match(/async function renderResources[^\n]+/)?.[0];
+assert.match(loadCrewSource, /if \(restoreFocus\) retry\.focus\(\)/);
+const renderResourcesSource = declaration('renderResources');
 assert(renderResourcesSource, 'Ressourcenansicht fehlt');
-const resourcesSource = html.match(/function resources[^\n]+/)?.[0];
+const resourcesSource = declaration('resources');
 assert(resourcesSource, 'Ressourcenbereich fehlt');
-assert.match(renderResourcesSource, /root\.dataset\.request=request/);
-assert.match(renderResourcesSource, /if\(!root\.isConnected\|\|root\.dataset\.request!==request\)return/);
-assert.match(renderResourcesSource, /catch\(error\)\{if\(!root\.isConnected\|\|root\.dataset\.request!==request\)return;throw error\}/);
+assert.match(renderResourcesSource, /root\.dataset\.request = request/);
+assert.match(renderResourcesSource, /if \(!root\.isConnected \|\| root\.dataset\.request !== request\) return/);
+assert.match(renderResourcesSource, /catch \(error\) \{\s*if \(!root\.isConnected \|\| root\.dataset\.request !== request\) return;\s*throw error;\s*\}/);
 assert.match(resourcesSource, /<fieldset class="resource-filter"><legend>Ansicht<\/legend><label><input id="showInactiveMembers"/);
 assert.doesNotMatch(renderResourcesSource, /showInactiveMembers|Inaktive Mitglieder anzeigen/);
 assert.equal((renderResourcesSource.match(/<details class="card resource-section" open>/g) ?? []).length, 3);
 assert.match(renderResourcesSource, /<summary>Mitglieder \(<span id="memberCount"><\/span>\)<\/summary>/);
 assert.match(renderResourcesSource, /<summary>Eigene Fahrzeuge \(\$\{own\.length\}\)<\/summary>/);
 assert.match(renderResourcesSource, /<summary>Fahrzeuge anderer Einheiten \(\$\{external\.size\}\)<\/summary>/);
-assert.match(renderResourcesSource, /filterResourceMembers\(root,showInactive\)/);
+assert.match(renderResourcesSource, /filterResourceMembers\(root, showInactive\)/);
 assert.match(css, /\.resource-filter\s*\{[\s\S]*?border-inline-start:\s*4px solid/);
 assert.match(css, /\.resource-section > summary\s*\{[\s\S]*?min-height:\s*var\(--control-height\)/);
 assert.match(css, /\.resource-section > summary:focus-visible\s*\{[\s\S]*?outline-offset:\s*-3px/);
@@ -905,12 +909,12 @@ assert.match(adminSource, /Letzte gespeicherte Anmeldung:/);
 assert.match(adminSource, /keine im Aufbewahrungszeitraum/);
 assert.doesNotMatch(adminSource, /noch keine/);
 assert.match(adminSource, /<h2>Einheiten \(\$\{units\.length\}\)<\/h2>/);
-assert.match(adminSource, /units\.map\(unit=>`<p><b>\$\{esc\(unit\.name\)\}<\/b><\/p>`\)/);
+assert.match(adminSource, /units\.map\(unit => `<p><b>\$\{esc\(unit\.name\)\}<\/b><\/p>`\)/);
 const systemOverviewSource = html.match(/async function systemOverview[\s\S]*?(?=\nfunction divera)/)?.[0];
 assert(systemOverviewSource, 'Systemübersicht fehlt');
 assert.match(systemOverviewSource, /<b>Build-ID:<\/b> \$\{esc\(data\.application\.buildId\)\}/);
 
-const inactivePreferenceSource = html.match(/function inactiveMembersPreference[^\n]+/)?.[0];
+const inactivePreferenceSource = declaration('inactiveMembersPreference');
 assert(inactivePreferenceSource, 'Speicherung des Mitgliederfilters fehlt');
 const storedInactivePreference = new Map();
 const inactiveMembersPreference = new Function('localStorage', 'me', `${inactivePreferenceSource}; return inactiveMembersPreference;`)(
@@ -930,7 +934,7 @@ const blockedInactivePreference = new Function('localStorage', 'me', `${inactive
 assert.equal(blockedInactivePreference(), false);
 assert.equal(blockedInactivePreference(true), true);
 
-const resourceFilterSource = html.match(/function filterResourceMembers[^\n]+/)?.[0];
+const resourceFilterSource = declaration('filterResourceMembers');
 assert(resourceFilterSource, 'Mitgliederfilter fehlt');
 const memberRows = [
   {dataset: {memberActive: '1'}, hidden: false},
@@ -951,8 +955,8 @@ assert.equal(memberCount.textContent, 2);
 
 const renderCrewSource = html.match(/async function renderCrew[\s\S]*?(?=\nfunction bindCrewBoard)/)?.[0];
 assert(renderCrewSource, 'renderCrew fehlt');
-assert.match(renderCrewSource, /if\(!root\.isConnected\|\|/);
-assert.match(renderCrewSource, /if\(restoreFocus\)root\.querySelector\('h3'\)\.focus\(\)/);
+assert.match(renderCrewSource, /if \(!root\.isConnected \|\|/);
+assert.match(renderCrewSource, /if \(restoreFocus\) root\.querySelector\('h3'\)\.focus\(\)/);
 
 // Historische Besatzungsnamen überleben Stammdatenänderungen und erneutes Rendern; neue Personen zeigen aktuelle Namen.
 const crewRoot = {isConnected: true, dataset: {}, contains: () => false};
@@ -985,9 +989,9 @@ assert(snapshotIdReads <= 12 * (crewResources.members.length + manySelected.leng
 assert.match(crewRoot.innerHTML, /data-name="Archiv 500"/);
 
 // Importwarnungen werden sofort in der DIVERA-Ansicht angekündigt und nicht erst bei späterer Navigation sichtbar.
-const syncSource = html.match(/async function syncDivera[^\n]+/)?.[0];
+const syncSource = declaration('syncDivera');
 assert(syncSource, 'DIVERA-Synchronisierung fehlt');
-const diveraRequestSource = html.match(/function diveraRequest[^\n]+/)?.[0];
+const diveraRequestSource = declaration('diveraRequest');
 assert(diveraRequestSource, 'DIVERA-Request-Identität fehlt');
 const syncOutput = {dataset: {}, isConnected: true, setAttribute() {}, removeAttribute() {}};
 const syncAnnouncer = {};
@@ -1039,7 +1043,7 @@ assert.equal(root.innerHTML, markup);
 
 // Der Importabgleich liest native Zuordnungen und ordnet gleichzeitige Alarme deterministisch nach Alarm- und Einheits-ID.
 {
-const importedSource = javascript.match(/function importedForUnit[^\n]+/)?.[0];
+const importedSource = declaration('importedForUnit');
 const pendingSource = javascript.match(/async function checkPendingDivera[\s\S]*?(?=\nasync function importPendingDivera)/)?.[0];
 assert(importedSource && pendingSource, 'DIVERA-Abgleich fehlt');
 const summary = {textContent: ''}, content = {innerHTML: ''};
@@ -1066,8 +1070,8 @@ assert.equal(summary.textContent, 'DIVERA Import – 4 neue Einsätze');
 
 const navigationSource = html.match(/function viewAllowed[\s\S]*?(?=\nasync function start)/)?.[0];
 assert(navigationSource, 'Deep-Link-Navigation fehlt');
-assert.match(html, /if\(e\.status===401\)return login\(\)/);
-assert.match(html, /addEventListener\('popstate',\(\)=>\{if\(me\)initialView\(\)\.catch\(showError\)\}\)/);
+assert.match(html, /if \(e\.status === 401\) return login\(\)/);
+assert.match(html, /addEventListener\('popstate', \(\) => \{\s*if \(me\) initialView\(\)\.catch\(showError\);\s*\}\)/);
 
 const requested = [];
 const location = {href: 'https://example.test/app/?view=resources', search: '?view=resources'};

@@ -1,238 +1,1671 @@
-const app=document.querySelector('#app'),nav=document.querySelector('#nav'),dialog=document.querySelector('#dialog'),announcer=document.querySelector('#announcer');
-let me,units=[],incidents=[],pendingDivera=[],incidentTypes=[],ranks={},reportClassifications={},classificationLabels={},diveraWritePending=false,viewRequest=0;
-const dragEnabled=matchMedia('(pointer:fine)').matches;
-const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const actions={reload:()=>location.reload(),forgotPassword:()=>forgotPassword(),login:()=>login(),home:()=>navigate('home'),resources:()=>navigate('resources'),statistics:()=>navigate('statistics'),admin:()=>navigate('admin'),systemOverview:()=>navigate('system'),divera:()=>navigate('divera'),logout:()=>logout(),incident:button=>navigate('incident',Number(button.dataset.id)),toggleExercise:button=>toggleExercise(Number(button.dataset.id)),deleteIncident:button=>deleteIncident(Number(button.dataset.id)),download:button=>downloadFile(button.dataset.href),editReport:button=>editReport(Number(button.dataset.id),button),submitReport:button=>submitReport(Number(button.dataset.id),Number(button.dataset.incident),button.dataset.workflow),returnReport:button=>returnReport(Number(button.dataset.id),Number(button.dataset.incident),button.dataset.workflow,button),closeDialog:()=>dialog.close(),editUser:button=>editUser(Number(button.dataset.id),button),resetUser:button=>resetUser(Number(button.dataset.id),button),pullDivera:()=>pullDivera(),syncDivera:button=>syncDivera(button.dataset.kind)};
-document.addEventListener('click',async event=>{const control=event.target.closest('[data-action]'),action=control&&actions[control.dataset.action];if(!action||control.disabled)return;const writing=['toggleExercise','deleteIncident','submitReport','resetUser','logout','syncDivera'].includes(control.dataset.action);if(writing)control.disabled=true;let current=viewContext(control);try{const result=action(control);current=viewContext(control);await result}catch(error){if(current())showError(error)}finally{if(writing&&control.isConnected)control.disabled=false}});
-addEventListener('popstate',()=>{if(me)initialView().catch(showError)});
-function viewContext(root){const request=viewRequest,form=dialog.open?dialog.querySelector('form'):null;return()=>request===viewRequest&&(!root||root.isConnected)&&form===(dialog.open?dialog.querySelector('form'):null)}
-async function api(path,options={}){const current=viewContext(app.querySelector('h1'));try{const r=await fetch(path.replace(/^\/api(?=\/|$)/,'api'),{...options,headers:{'content-type':'application/json',...options.headers}}),text=await r.text();if(!current())throw new DOMException('Ansicht verlassen','AbortError');let data={};if(text)try{data=JSON.parse(text)}catch{const error=Error(r.ok?'Ungültige Serverantwort':text);error.status=r.status;throw error}if(!r.ok){const error=Error(data.error||`HTTP ${r.status}`);error.status=r.status;throw error}return data}catch(error){if(!current())throw new DOMException('Ansicht verlassen','AbortError');throw error}}
-async function downloadFile(path){const r=await fetch(path),type=r.headers.get('content-type')||'';if(!r.ok){let message=`HTTP ${r.status}`;if(type.includes('application/json')){const text=await r.text();try{message=JSON.parse(text).error||message}catch{message=`Ungültige Serverantwort (HTTP ${r.status})`}}throw Error(message)}if(!type.includes('application/pdf'))throw Error('Ungültige Serverantwort: PDF erwartet.');const blob=await r.blob(),url=URL.createObjectURL(blob),link=document.createElement('a'),filename=r.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1]||'einsatzbericht.pdf';link.href=url;link.download=filename;try{document.body.append(link);link.click()}finally{link.remove();URL.revokeObjectURL(url)}}
-async function reportWrite(path,data,method='POST'){try{return await api(path,{method,body:JSON.stringify(data)})}catch(error){if(error.status===409)error.message+=' Ihre Eingaben bleiben unverändert geöffnet. Kopieren Sie ungespeicherte Texte und notieren Sie Ihre Auswahl, bevor Sie die Ansicht neu laden und die Änderungen abgleichen.';throw error}}
-async function refreshIncident(id,result={}){const current=viewContext();try{await load();await incident(id)}catch(error){if(current())showError(error);return false}finally{if(current()){if(announcer.textContent==='Wird verarbeitet')announcer.textContent='';showWarning(result.warning)}}}
-function apiArray(value){if(!Array.isArray(value))throw Error('Ungültige Serverantwort: Liste erwartet. Bitte laden Sie die Anwendung neu.');return value}
-function apiObject(value){if(value===null||typeof value!=='object'||Array.isArray(value))throw Error('Ungültige Serverantwort: Objekt erwartet. Bitte laden Sie die Anwendung neu.');return value}
-function formData(form){return Object.fromEntries(new FormData(form))}
-function showError(e){if(e.name==='AbortError')return;const root=dialog.open?dialog:app;root.querySelector('[role=alert]')?.remove();root.insertAdjacentHTML('afterbegin',`<p class="error" role="alert" tabindex="-1">${esc(e.message)}</p>`);root.querySelector('[role=alert]').focus()}
-function showWarning(message){if(!message)return;app.insertAdjacentHTML('afterbegin',`<p class="error" role="alert">${esc(message)}</p>`);announcer.textContent=message}
-function focusMain(){announcer.textContent='';const heading=app.querySelector('h1');if(!heading)return;heading.tabIndex=-1;heading.focus({preventScroll:true});document.title=`${heading.textContent} – Einsatzberichte`}
-function bindForm(id,handler){const form=document.querySelector(id);form.onsubmit=async e=>{e.preventDefault();if(form.getAttribute('aria-busy')==='true')return;const current=viewContext(form),button=e.submitter||form.querySelector('button[type=submit],button:not([type])');button?.setAttribute('disabled','');form.setAttribute('aria-busy','true');announcer.textContent='Wird verarbeitet';try{await handler(formData(form))}catch(x){if(current())showError(x)}finally{if(current()){button?.removeAttribute('disabled');form.removeAttribute('aria-busy');if(announcer.textContent==='Wird verarbeitet')announcer.textContent=''}}}}
-function unitPickerLabel(count){return count?`${count} ${count===1?'Einheit':'Einheiten'} ausgewählt`:'Einheiten auswählen'}
-function bindUnitPickers(root){root.querySelectorAll('.unit-picker').forEach(picker=>{const boxes=[...picker.querySelectorAll('[name=unitIds]')],summary=picker.querySelector('summary'),details=picker.querySelector('details'),update=()=>{const count=boxes.filter(box=>box.checked).length;summary.textContent=unitPickerLabel(count);boxes.forEach(box=>box.setCustomValidity(count?'':'Wählen Sie mindestens eine Einheit aus.'))};picker.onchange=update;picker.addEventListener('invalid',()=>details.open=true,true);update()})}
-function viewAllowed(view){return ['home','resources','divera'].includes(view)||(view==='statistics'&&['einheitsleitung','wehrleitung'].includes(me.role))||(['admin','system'].includes(view)&&me.role==='wehrleitung')}
-function setViewLocation(view,id=0,replace=false){const url=new URL(location.href);url.searchParams.delete('view');url.searchParams.delete('incident');if(view==='incident')url.searchParams.set('incident',id);else url.searchParams.set('view',view);history[replace||url.href===location.href?'replaceState':'pushState']({},'',url)}
-async function navigate(view,id=0,replace=false){const request=++viewRequest;let render;if(view==='incident'&&incidents.some(item=>item.id===id))render=()=>incident(id);else{if(!viewAllowed(view))view='home';render={home,resources,statistics,admin,system:systemOverview,divera}[view]}if(dialog.open)dialog.close();if(await render()===false||request!==viewRequest)return;setViewLocation(view,id,replace)}
-async function initialView(){const parameters=new URLSearchParams(location.search),value=parameters.get('incident'),id=/^[1-9]\d*$/.test(value||'')?Number(value):0;if(id)return navigate('incident',id,true);return navigate(parameters.get('view')||'home',0,true)}
-async function start(){
-  let state;
-  try{state=await api('/api/bootstrap')}catch(e){return databaseUnavailable(e.message)}
-  if(state.needsSetup){history.replaceState({},'',location.pathname);return setup()}
-  const parameters=new URLSearchParams(location.search),fragment=new URLSearchParams(location.hash.slice(1)),invite=fragment.get('invite')||parameters.get('invite'),resetToken=invite||fragment.get('reset')||parameters.get('reset');
-  if(resetToken)return resetPassword(resetToken,Boolean(invite));
-  try{me=await api('/api/me');await load();await initialView()}catch(e){if(e.name==='AbortError')return;if(e.status===401)return login();nav.innerHTML='';app.innerHTML=`<section class="card"><h1>Anwendung nicht verfügbar</h1><p class="error" role="alert">${esc(e.message)}</p><button data-action="reload">Erneut versuchen</button></section>`;focusMain()}
+const app = document.querySelector('#app'),
+  nav = document.querySelector('#nav'),
+  dialog = document.querySelector('#dialog'),
+  announcer = document.querySelector('#announcer');
+let me,
+  units = [],
+  incidents = [],
+  pendingDivera = [],
+  incidentTypes = [],
+  ranks = {},
+  reportClassifications = {},
+  classificationLabels = {},
+  diveraWritePending = false,
+  viewRequest = 0;
+const dragEnabled = matchMedia('(pointer:fine)').matches;
+const esc = s =>
+  String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'})[c]);
+const actions = {
+  reload: () => location.reload(),
+  forgotPassword: () => forgotPassword(),
+  login: () => login(),
+  home: () => navigate('home'),
+  resources: () => navigate('resources'),
+  statistics: () => navigate('statistics'),
+  admin: () => navigate('admin'),
+  systemOverview: () => navigate('system'),
+  divera: () => navigate('divera'),
+  logout: () => logout(),
+  incident: button => navigate('incident', Number(button.dataset.id)),
+  toggleExercise: button => toggleExercise(Number(button.dataset.id)),
+  deleteIncident: button => deleteIncident(Number(button.dataset.id)),
+  download: button => downloadFile(button.dataset.href),
+  editReport: button => editReport(Number(button.dataset.id), button),
+  submitReport: button =>
+    submitReport(Number(button.dataset.id), Number(button.dataset.incident), button.dataset.workflow),
+  returnReport: button =>
+    returnReport(Number(button.dataset.id), Number(button.dataset.incident), button.dataset.workflow, button),
+  closeDialog: () => dialog.close(),
+  editUser: button => editUser(Number(button.dataset.id), button),
+  resetUser: button => resetUser(Number(button.dataset.id), button),
+  pullDivera: () => pullDivera(),
+  syncDivera: button => syncDivera(button.dataset.kind)
+};
+document.addEventListener('click', async event => {
+  const control = event.target.closest('[data-action]'),
+    action = control && actions[control.dataset.action];
+  if (!action || control.disabled) return;
+  const writing = ['toggleExercise', 'deleteIncident', 'submitReport', 'resetUser', 'logout', 'syncDivera'].includes(
+    control.dataset.action
+  );
+  if (writing) control.disabled = true;
+  let current = viewContext(control);
+  try {
+    const result = action(control);
+    current = viewContext(control);
+    await result;
+  } catch (error) {
+    if (current()) showError(error);
+  } finally {
+    if (writing && control.isConnected) control.disabled = false;
+  }
+});
+addEventListener('popstate', () => {
+  if (me) initialView().catch(showError);
+});
+function viewContext(root) {
+  const request = viewRequest,
+    form = dialog.open ? dialog.querySelector('form') : null;
+  return () =>
+    request === viewRequest &&
+    (!root || root.isConnected) &&
+    form === (dialog.open ? dialog.querySelector('form') : null);
 }
-function databaseUnavailable(message){nav.innerHTML='';app.innerHTML=`<section class="card"><h1>Datenbank nicht verfügbar</h1><p class="error" role="alert">${esc(message)}</p><p>Prüfen Sie die Datenbankwerte in <code>config.local.php</code> oder den Umgebungsvariablen und importieren Sie fehlende SQL-Migrationen.</p><button data-action="reload">Erneut prüfen</button></section>`;focusMain()}
-function setup(){nav.innerHTML='';app.innerHTML=`<section class="card"><h1>Ersteinrichtung</h1><form id="setup" class="grid">
+async function api(path, options = {}) {
+  const current = viewContext(app.querySelector('h1'));
+  try {
+    const r = await fetch(path.replace(/^\/api(?=\/|$)/, 'api'), {
+        ...options,
+        headers: {'content-type': 'application/json', ...options.headers}
+      }),
+      text = await r.text();
+    if (!current()) throw new DOMException('Ansicht verlassen', 'AbortError');
+    let data = {};
+    if (text)
+      try {
+        data = JSON.parse(text);
+      } catch {
+        const error = Error(r.ok ? 'Ungültige Serverantwort' : text);
+        error.status = r.status;
+        throw error;
+      }
+    if (!r.ok) {
+      const error = Error(data.error || `HTTP ${r.status}`);
+      error.status = r.status;
+      throw error;
+    }
+    return data;
+  } catch (error) {
+    if (!current()) throw new DOMException('Ansicht verlassen', 'AbortError');
+    throw error;
+  }
+}
+async function downloadFile(path) {
+  const r = await fetch(path),
+    type = r.headers.get('content-type') || '';
+  if (!r.ok) {
+    let message = `HTTP ${r.status}`;
+    if (type.includes('application/json')) {
+      const text = await r.text();
+      try {
+        message = JSON.parse(text).error || message;
+      } catch {
+        message = `Ungültige Serverantwort (HTTP ${r.status})`;
+      }
+    }
+    throw Error(message);
+  }
+  if (!type.includes('application/pdf')) throw Error('Ungültige Serverantwort: PDF erwartet.');
+  const blob = await r.blob(),
+    url = URL.createObjectURL(blob),
+    link = document.createElement('a'),
+    filename = r.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] || 'einsatzbericht.pdf';
+  link.href = url;
+  link.download = filename;
+  try {
+    document.body.append(link);
+    link.click();
+  } finally {
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+}
+async function reportWrite(path, data, method = 'POST') {
+  try {
+    return await api(path, {method, body: JSON.stringify(data)});
+  } catch (error) {
+    if (error.status === 409)
+      error.message +=
+        ' Ihre Eingaben bleiben unverändert geöffnet. Kopieren Sie ungespeicherte Texte und notieren Sie Ihre Auswahl, bevor Sie die Ansicht neu laden und die Änderungen abgleichen.';
+    throw error;
+  }
+}
+async function refreshIncident(id, result = {}) {
+  const current = viewContext();
+  try {
+    await load();
+    await incident(id);
+  } catch (error) {
+    if (current()) showError(error);
+    return false;
+  } finally {
+    if (current()) {
+      if (announcer.textContent === 'Wird verarbeitet') announcer.textContent = '';
+      showWarning(result.warning);
+    }
+  }
+}
+function apiArray(value) {
+  if (!Array.isArray(value)) throw Error('Ungültige Serverantwort: Liste erwartet. Bitte laden Sie die Anwendung neu.');
+  return value;
+}
+function apiObject(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    throw Error('Ungültige Serverantwort: Objekt erwartet. Bitte laden Sie die Anwendung neu.');
+  return value;
+}
+function formData(form) {
+  return Object.fromEntries(new FormData(form));
+}
+function showError(e) {
+  if (e.name === 'AbortError') return;
+  const root = dialog.open ? dialog : app;
+  root.querySelector('[role=alert]')?.remove();
+  root.insertAdjacentHTML('afterbegin', `<p class="error" role="alert" tabindex="-1">${esc(e.message)}</p>`);
+  root.querySelector('[role=alert]').focus();
+}
+function showWarning(message) {
+  if (!message) return;
+  app.insertAdjacentHTML('afterbegin', `<p class="error" role="alert">${esc(message)}</p>`);
+  announcer.textContent = message;
+}
+function focusMain() {
+  announcer.textContent = '';
+  const heading = app.querySelector('h1');
+  if (!heading) return;
+  heading.tabIndex = -1;
+  heading.focus({preventScroll: true});
+  document.title = `${heading.textContent} – Einsatzberichte`;
+}
+function bindForm(id, handler) {
+  const form = document.querySelector(id);
+  form.onsubmit = async e => {
+    e.preventDefault();
+    if (form.getAttribute('aria-busy') === 'true') return;
+    const current = viewContext(form),
+      button = e.submitter || form.querySelector('button[type=submit],button:not([type])');
+    button?.setAttribute('disabled', '');
+    form.setAttribute('aria-busy', 'true');
+    announcer.textContent = 'Wird verarbeitet';
+    try {
+      await handler(formData(form));
+    } catch (x) {
+      if (current()) showError(x);
+    } finally {
+      if (current()) {
+        button?.removeAttribute('disabled');
+        form.removeAttribute('aria-busy');
+        if (announcer.textContent === 'Wird verarbeitet') announcer.textContent = '';
+      }
+    }
+  };
+}
+function unitPickerLabel(count) {
+  return count ? `${count} ${count === 1 ? 'Einheit' : 'Einheiten'} ausgewählt` : 'Einheiten auswählen';
+}
+function bindUnitPickers(root) {
+  root.querySelectorAll('.unit-picker').forEach(picker => {
+    const boxes = [...picker.querySelectorAll('[name=unitIds]')],
+      summary = picker.querySelector('summary'),
+      details = picker.querySelector('details'),
+      update = () => {
+        const count = boxes.filter(box => box.checked).length;
+        summary.textContent = unitPickerLabel(count);
+        boxes.forEach(box => box.setCustomValidity(count ? '' : 'Wählen Sie mindestens eine Einheit aus.'));
+      };
+    picker.onchange = update;
+    picker.addEventListener('invalid', () => (details.open = true), true);
+    update();
+  });
+}
+function viewAllowed(view) {
+  return (
+    ['home', 'resources', 'divera'].includes(view) ||
+    (view === 'statistics' && ['einheitsleitung', 'wehrleitung'].includes(me.role)) ||
+    (['admin', 'system'].includes(view) && me.role === 'wehrleitung')
+  );
+}
+function setViewLocation(view, id = 0, replace = false) {
+  const url = new URL(location.href);
+  url.searchParams.delete('view');
+  url.searchParams.delete('incident');
+  if (view === 'incident') url.searchParams.set('incident', id);
+  else url.searchParams.set('view', view);
+  history[replace || url.href === location.href ? 'replaceState' : 'pushState']({}, '', url);
+}
+async function navigate(view, id = 0, replace = false) {
+  const request = ++viewRequest;
+  let render;
+  if (view === 'incident' && incidents.some(item => item.id === id)) render = () => incident(id);
+  else {
+    if (!viewAllowed(view)) view = 'home';
+    render = {home, resources, statistics, admin, system: systemOverview, divera}[view];
+  }
+  if (dialog.open) dialog.close();
+  if ((await render()) === false || request !== viewRequest) return;
+  setViewLocation(view, id, replace);
+}
+async function initialView() {
+  const parameters = new URLSearchParams(location.search),
+    value = parameters.get('incident'),
+    id = /^[1-9]\d*$/.test(value || '') ? Number(value) : 0;
+  if (id) return navigate('incident', id, true);
+  return navigate(parameters.get('view') || 'home', 0, true);
+}
+async function start() {
+  let state;
+  try {
+    state = await api('/api/bootstrap');
+  } catch (e) {
+    return databaseUnavailable(e.message);
+  }
+  if (state.needsSetup) {
+    history.replaceState({}, '', location.pathname);
+    return setup();
+  }
+  const parameters = new URLSearchParams(location.search),
+    fragment = new URLSearchParams(location.hash.slice(1)),
+    invite = fragment.get('invite') || parameters.get('invite'),
+    resetToken = invite || fragment.get('reset') || parameters.get('reset');
+  if (resetToken) return resetPassword(resetToken, Boolean(invite));
+  try {
+    me = await api('/api/me');
+    await load();
+    await initialView();
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    if (e.status === 401) return login();
+    nav.innerHTML = '';
+    app.innerHTML = `<section class="card"><h1>Anwendung nicht verfügbar</h1><p class="error" role="alert">${esc(e.message)}</p><button data-action="reload">Erneut versuchen</button></section>`;
+    focusMain();
+  }
+}
+function databaseUnavailable(message) {
+  nav.innerHTML = '';
+  app.innerHTML = `<section class="card"><h1>Datenbank nicht verfügbar</h1><p class="error" role="alert">${esc(message)}</p><p>Prüfen Sie die Datenbankwerte in <code>config.local.php</code> oder den Umgebungsvariablen und importieren Sie fehlende SQL-Migrationen.</p><button data-action="reload">Erneut prüfen</button></section>`;
+  focusMain();
+}
+function setup() {
+  nav.innerHTML = '';
+  app.innerHTML = `<section class="card"><h1>Ersteinrichtung</h1><form id="setup" class="grid">
   <label>Wehr<input name="organization" required></label><label>Erste Einheit<input name="unit" required></label>
   <label>Ihr Name<input name="name" autocomplete="name" required></label><label>E-Mail<input name="email" type="email" autocomplete="email" required></label>
   <label>Einrichtungstoken<input name="setupToken" type="password" autocomplete="off" required></label>
   <label>Passwort (min. 10 Zeichen)<input name="password" type="password" minlength="10" required></label><button>Einrichten</button>
-  </form></section>`;focusMain();bindForm('#setup',async d=>{await api('/api/setup',{method:'POST',body:JSON.stringify(d)});login()})}
-function login(){viewRequest++;nav.innerHTML='';app.innerHTML=`<section class="card"><h1>Anmelden</h1><form id="login" class="grid">
-  <label>E-Mail<input name="email" type="email" autocomplete="email" required></label><label>Passwort<input name="password" type="password" autocomplete="current-password" required></label><button class="form-action">Anmelden</button>
-  </form><p><button type="button" class="secondary" data-action="forgotPassword">Passwort vergessen</button></p></section>`;focusMain();bindForm('#login',async d=>{await api('/api/login',{method:'POST',body:JSON.stringify(d)});me=await api('/api/me');await load();await initialView()})}
-function forgotPassword(){viewRequest++;nav.innerHTML='';app.innerHTML=`<section class="card"><h1>Passwort vergessen</h1><p>Wir senden einen Wiederherstellungslink an die hinterlegte Adresse.</p><form id="forgot" class="grid"><label>E-Mail<input name="email" type="email" autocomplete="email" required></label><button>Link anfordern</button><button type="button" class="secondary" data-action="login">Zurück</button></form></section>`;focusMain();bindForm('#forgot',async d=>{await api('/api/password-reset/request',{method:'POST',body:JSON.stringify(d)});app.innerHTML='<section class="card"><h1>E-Mail prüfen</h1><p>Falls ein Konto mit dieser Adresse existiert, wurde ein Wiederherstellungslink versendet.</p><button data-action="login">Zur Anmeldung</button></section>';focusMain()})}
-async function resetPassword(token,invitation=false){let context;try{context=await api('/api/password-reset/context',{method:'POST',body:JSON.stringify({token})})}catch(error){history.replaceState({},'',location.pathname);nav.innerHTML='';app.innerHTML=`<section class="card"><h1>Link nicht mehr gültig</h1><p class="error" role="alert">${esc(error.message)}</p><p>Fordern Sie einen neuen Link für Ihre E-Mail-Adresse an.</p><button data-action="forgotPassword">Neuen Link anfordern</button> <button class="secondary" data-action="login">Zur Anmeldung</button></section>`;focusMain();return}nav.innerHTML='';app.innerHTML=`<section class="card"><h1>${invitation?'Konto aktivieren':'Neues Passwort'}</h1><form id="reset" class="grid"><label>E-Mail<input name="username" type="email" autocomplete="username" value="${esc(context.email)}" readonly></label><label>Neues Passwort (min. 10 Zeichen)<input name="password" type="password" autocomplete="new-password" minlength="10" required></label><label>Passwort wiederholen<input name="confirmation" type="password" autocomplete="new-password" minlength="10" required></label><button>${invitation?'Konto aktivieren':'Passwort speichern'}</button></form></section>`;focusMain();bindForm('#reset',async d=>{if(d.password!==d.confirmation)throw Error('Passwörter stimmen nicht überein');await api('/api/password-reset/confirm',{method:'POST',body:JSON.stringify({token,password:d.password})});history.replaceState({},'',location.pathname);login()})}
-async function load(current=viewContext(app.querySelector('h1'))){const data=await Promise.all([api('/api/units'),api('/api/incidents'),api('/api/options')]);if(!current())throw new DOMException('Ansicht verlassen','AbortError');[units,incidents,{incidentTypes,ranks,classifications:reportClassifications,classificationLabels}]=data;nav.innerHTML=`
-  <button type="button" data-action="home">Einsätze</button><button type="button" data-action="resources">Mitglieder & Fahrzeuge</button>${['einheitsleitung','wehrleitung'].includes(me.role)?'<button type="button" data-action="statistics">Statistik</button>':''}${me.role==='wehrleitung'?'<button type="button" data-action="admin">Verwaltung</button><button type="button" data-action="systemOverview">System</button>':''}
-  <button type="button" data-action="divera">DIVERA</button><button type="button" class="secondary" data-action="logout">Abmelden</button>`}
-async function logout(){viewRequest++;await api('/api/logout',{method:'POST'});me=null;units=[];incidents=[];pendingDivera=[];history.replaceState({},'',location.pathname);login()}
-const incidentStatusFilterLabels={report_required:'Bericht erforderlich',report_exists:'Einsatzbericht vorhanden',awaiting_report:'Bericht der Führungskraft ausstehend',review_required:'Prüfung erforderlich',submitted:'Bericht abgegeben',reports_pending:'Berichte ausstehend',ready:'Bereit zur Konsolidierung',completed:'Abgeschlossen'};
-function incidentStatus(incident){return `<p class="incident-status"><b>Status:</b> ${esc(incident.reportStatus.label)}</p>`}
-function exerciseBadge(incident){return incident.is_exercise?'<p class="incident-exercise"><strong>Übung</strong></p>':''}
-function incidentFilterOptions(items,selected=''){const keys=new Set(items.map(item=>item.reportStatus.key));if(Object.prototype.hasOwnProperty.call(incidentStatusFilterLabels,selected))keys.add(selected);return [...keys].map(key=>`<option value="${esc(key)}">${esc(Object.prototype.hasOwnProperty.call(incidentStatusFilterLabels,key)?incidentStatusFilterLabels[key]:key)}</option>`).join('')}
-function incidentFilterPreference(value){
-  const key=`incidentStatusFilter:${me.id}:${me.role}`,defaultStatus=me.role==='fuehrungskraft'?'report_required':'';
-  // A new key distinguishes the old default from a later explicit selection of all statuses.
-  const preferenceKey=defaultStatus?`${key}:v2`:key;
-  try{
-    if(value===undefined)return localStorage.getItem(preferenceKey)??(defaultStatus?(localStorage.getItem(key)||defaultStatus):'');
-    localStorage.setItem(preferenceKey,value);
-  }catch{}
-  return value??defaultStatus;
+  </form></section>`;
+  focusMain();
+  bindForm('#setup', async d => {
+    await api('/api/setup', {method: 'POST', body: JSON.stringify(d)});
+    login();
+  });
 }
-function filterIncidents(status,exercise=''){incidentFilterPreference(status);let visible=0;document.querySelectorAll('[data-incident-status]').forEach(card=>{card.hidden=(!!status&&card.dataset.incidentStatus!==status)||(exercise!==''&&card.dataset.incidentExercise!==exercise);if(!card.hidden)visible++});document.querySelector('#noFilteredIncidents').hidden=visible>0}
-function home(){const selectedStatus=incidentFilterPreference();app.innerHTML=`<h1>${esc(me.organization_name)}</h1><p class="muted">${esc(me.name)} · ${esc(roleLabels[me.role]||me.role)}</p>
+function login() {
+  viewRequest++;
+  nav.innerHTML = '';
+  app.innerHTML = `<section class="card"><h1>Anmelden</h1><form id="login" class="grid">
+  <label>E-Mail<input name="email" type="email" autocomplete="email" required></label><label>Passwort<input name="password" type="password" autocomplete="current-password" required></label><button class="form-action">Anmelden</button>
+  </form><p><button type="button" class="secondary" data-action="forgotPassword">Passwort vergessen</button></p></section>`;
+  focusMain();
+  bindForm('#login', async d => {
+    await api('/api/login', {method: 'POST', body: JSON.stringify(d)});
+    me = await api('/api/me');
+    await load();
+    await initialView();
+  });
+}
+function forgotPassword() {
+  viewRequest++;
+  nav.innerHTML = '';
+  app.innerHTML = `<section class="card"><h1>Passwort vergessen</h1><p>Wir senden einen Wiederherstellungslink an die hinterlegte Adresse.</p><form id="forgot" class="grid"><label>E-Mail<input name="email" type="email" autocomplete="email" required></label><button>Link anfordern</button><button type="button" class="secondary" data-action="login">Zurück</button></form></section>`;
+  focusMain();
+  bindForm('#forgot', async d => {
+    await api('/api/password-reset/request', {method: 'POST', body: JSON.stringify(d)});
+    app.innerHTML =
+      '<section class="card"><h1>E-Mail prüfen</h1><p>Falls ein Konto mit dieser Adresse existiert, wurde ein Wiederherstellungslink versendet.</p><button data-action="login">Zur Anmeldung</button></section>';
+    focusMain();
+  });
+}
+async function resetPassword(token, invitation = false) {
+  let context;
+  try {
+    context = await api('/api/password-reset/context', {method: 'POST', body: JSON.stringify({token})});
+  } catch (error) {
+    history.replaceState({}, '', location.pathname);
+    nav.innerHTML = '';
+    app.innerHTML = `<section class="card"><h1>Link nicht mehr gültig</h1><p class="error" role="alert">${esc(error.message)}</p><p>Fordern Sie einen neuen Link für Ihre E-Mail-Adresse an.</p><button data-action="forgotPassword">Neuen Link anfordern</button> <button class="secondary" data-action="login">Zur Anmeldung</button></section>`;
+    focusMain();
+    return;
+  }
+  nav.innerHTML = '';
+  app.innerHTML = `<section class="card"><h1>${invitation ? 'Konto aktivieren' : 'Neues Passwort'}</h1><form id="reset" class="grid"><label>E-Mail<input name="username" type="email" autocomplete="username" value="${esc(context.email)}" readonly></label><label>Neues Passwort (min. 10 Zeichen)<input name="password" type="password" autocomplete="new-password" minlength="10" required></label><label>Passwort wiederholen<input name="confirmation" type="password" autocomplete="new-password" minlength="10" required></label><button>${invitation ? 'Konto aktivieren' : 'Passwort speichern'}</button></form></section>`;
+  focusMain();
+  bindForm('#reset', async d => {
+    if (d.password !== d.confirmation) throw Error('Passwörter stimmen nicht überein');
+    await api('/api/password-reset/confirm', {method: 'POST', body: JSON.stringify({token, password: d.password})});
+    history.replaceState({}, '', location.pathname);
+    login();
+  });
+}
+async function load(current = viewContext(app.querySelector('h1'))) {
+  const data = await Promise.all([api('/api/units'), api('/api/incidents'), api('/api/options')]);
+  if (!current()) throw new DOMException('Ansicht verlassen', 'AbortError');
+  [units, incidents, {incidentTypes, ranks, classifications: reportClassifications, classificationLabels}] = data;
+  nav.innerHTML = `
+  <button type="button" data-action="home">Einsätze</button><button type="button" data-action="resources">Mitglieder & Fahrzeuge</button>${['einheitsleitung', 'wehrleitung'].includes(me.role) ? '<button type="button" data-action="statistics">Statistik</button>' : ''}${me.role === 'wehrleitung' ? '<button type="button" data-action="admin">Verwaltung</button><button type="button" data-action="systemOverview">System</button>' : ''}
+  <button type="button" data-action="divera">DIVERA</button><button type="button" class="secondary" data-action="logout">Abmelden</button>`;
+}
+async function logout() {
+  viewRequest++;
+  await api('/api/logout', {method: 'POST'});
+  me = null;
+  units = [];
+  incidents = [];
+  pendingDivera = [];
+  history.replaceState({}, '', location.pathname);
+  login();
+}
+const incidentStatusFilterLabels = {
+  report_required: 'Bericht erforderlich',
+  report_exists: 'Einsatzbericht vorhanden',
+  awaiting_report: 'Bericht der Führungskraft ausstehend',
+  review_required: 'Prüfung erforderlich',
+  submitted: 'Bericht abgegeben',
+  reports_pending: 'Berichte ausstehend',
+  ready: 'Bereit zur Konsolidierung',
+  completed: 'Abgeschlossen'
+};
+function incidentStatus(incident) {
+  return `<p class="incident-status"><b>Status:</b> ${esc(incident.reportStatus.label)}</p>`;
+}
+function exerciseBadge(incident) {
+  return incident.is_exercise ? '<p class="incident-exercise"><strong>Übung</strong></p>' : '';
+}
+function incidentFilterOptions(items, selected = '') {
+  const keys = new Set(items.map(item => item.reportStatus.key));
+  if (Object.prototype.hasOwnProperty.call(incidentStatusFilterLabels, selected)) keys.add(selected);
+  return [...keys]
+    .map(
+      key =>
+        `<option value="${esc(key)}">${esc(Object.prototype.hasOwnProperty.call(incidentStatusFilterLabels, key) ? incidentStatusFilterLabels[key] : key)}</option>`
+    )
+    .join('');
+}
+function incidentFilterPreference(value) {
+  const key = `incidentStatusFilter:${me.id}:${me.role}`,
+    defaultStatus = me.role === 'fuehrungskraft' ? 'report_required' : '';
+  // A new key distinguishes the old default from a later explicit selection of all statuses.
+  const preferenceKey = defaultStatus ? `${key}:v2` : key;
+  try {
+    if (value === undefined)
+      return localStorage.getItem(preferenceKey) ?? (defaultStatus ? localStorage.getItem(key) || defaultStatus : '');
+    localStorage.setItem(preferenceKey, value);
+  } catch {}
+  return value ?? defaultStatus;
+}
+function filterIncidents(status, exercise = '') {
+  incidentFilterPreference(status);
+  let visible = 0;
+  document.querySelectorAll('[data-incident-status]').forEach(card => {
+    card.hidden =
+      (!!status && card.dataset.incidentStatus !== status) ||
+      (exercise !== '' && card.dataset.incidentExercise !== exercise);
+    if (!card.hidden) visible++;
+  });
+  document.querySelector('#noFilteredIncidents').hidden = visible > 0;
+}
+function home() {
+  const selectedStatus = incidentFilterPreference();
+  app.innerHTML = `<h1>${esc(me.organization_name)}</h1><p class="muted">${esc(me.name)} · ${esc(roleLabels[me.role] || me.role)}</p>
   <details class="card resource-section"><summary>Einsatz anlegen</summary><div class="resource-section-content"><p class="muted">Nur für Einsätze verwenden, die nicht über DIVERA alarmiert wurden.</p><form id="incident" class="grid">
   <label>Stichwort<input name="title" required></label><label>Zeitpunkt<input name="startedAt" type="datetime-local" required></label>
-  <label>Adresse<input name="address" autocomplete="street-address"></label><fieldset class="unit-picker"><legend>Einheiten</legend><details><summary>Einheiten auswählen</summary><div class="check-grid">${units.filter(u=>me.role==='wehrleitung'||me.unitIds.includes(u.id)).map(u=>`<label><input type="checkbox" name="unitIds" value="${u.id}">${esc(u.name)}</label>`).join('')}</div></details></fieldset><button class="form-action">Anlegen</button></form></div></details>
+  <label>Adresse<input name="address" autocomplete="street-address"></label><fieldset class="unit-picker"><legend>Einheiten</legend><details><summary>Einheiten auswählen</summary><div class="check-grid">${units
+    .filter(u => me.role === 'wehrleitung' || me.unitIds.includes(u.id))
+    .map(u => `<label><input type="checkbox" name="unitIds" value="${u.id}">${esc(u.name)}</label>`)
+    .join('')}</div></details></fieldset><button class="form-action">Anlegen</button></form></div></details>
   <details id="pendingDivera" class="card resource-section" hidden aria-live="polite"><summary>DIVERA Import</summary><div class="resource-section-content"></div></details>
-  <section><h2>Einsätze</h2>${incidents.length?`<div class="grid"><label>Status filtern<select id="incidentStatusFilter"><option value="">Alle Status</option>${incidentFilterOptions(incidents,selectedStatus)}</select></label><label>Art filtern<select id="incidentExerciseFilter"><option value="">Alle Einsätze</option><option value="0">Reguläre Einsätze</option><option value="1">Übungen</option></select></label></div>`:''}${incidents.map(i=>`<article class="card" data-incident-status="${esc(i.reportStatus.key)}" data-incident-exercise="${i.is_exercise?'1':'0'}"><h3>${esc(i.title)}</h3>${exerciseBadge(i)}${incidentStatus(i)}<p>${esc(formatDateTime(i.started_at))} · ${esc(i.address)}<br><span class="muted">${esc(i.foreign_id||'')} ${esc(i.units)}</span></p><button data-action="incident" data-id="${i.id}">Öffnen</button></article>`).join('')||'<p>Noch keine Einsätze.</p>'}<p id="noFilteredIncidents" role="status" hidden>Keine Einsätze mit diesen Filtern.</p></section>`;
-  const statusFilter=document.querySelector('#incidentStatusFilter'),exerciseFilter=document.querySelector('#incidentExerciseFilter');if(statusFilter&&exerciseFilter){statusFilter.value=selectedStatus;const applyFilters=()=>filterIncidents(statusFilter.value,exerciseFilter.value);statusFilter.addEventListener('change',applyFilters);exerciseFilter.addEventListener('change',applyFilters);applyFilters()}
-  focusMain();bindUnitPickers(app);bindForm('#incident',async d=>{d.unitIds=[...document.querySelectorAll('#incident [name=unitIds]:checked')].map(o=>o.value);d.startedAt=new Date(d.startedAt).toISOString();const result=await api('/api/incidents',{method:'POST',body:JSON.stringify(d)});await load();home();showWarning(result.warning)});checkPendingDivera().catch(showError)}
-async function checkPendingDivera(){
-  const current=viewContext();
-  const out=document.querySelector('#pendingDivera'),summary=out?.querySelector('summary'),content=out?.querySelector('.resource-section-content'),allowed=units.filter(unit=>unit.divera_configured&&(me.role==='wehrleitung'||me.unitIds.includes(unit.id)));
-  if(!out||!summary||!content||!allowed.length)return;
-  const importTimes=allowed.map(unit=>`${esc(unit.name)}: ${unit.last_divera_import_at?esc(formatDateTime(unit.last_divera_import_at)):'noch kein Import'}`).join('<br>');
-  out.hidden=false;summary.textContent='DIVERA Import – Prüfung läuft …';content.innerHTML=`<p><b>Letzter Import:</b><br>${importTimes}</p><p class="muted">Prüfe auf neue Einsätze …</p>`;
-  const results=await Promise.allSettled(allowed.map(async unit=>({unit,data:await api(`/api/units/${unit.id}/divera?summary=1`)})));
-  if(!current()||!out.isConnected)return;
-  pendingDivera=results.filter(result=>result.status==='fulfilled').flatMap(({value})=>{
-    const latest=incidents.filter(item=>item.divera_id&&apiArray(item.assignments).some(assignment=>assignment.unitId===value.unit.id)).reduce((time,item)=>Math.max(time,Date.parse(item.started_at)),0);
-    return value.data.alarms.filter(alarm=>!importedForUnit(alarm.id,value.unit.id)&&(!latest||Date.parse(alarm.startedAt)>latest)).map(alarm=>({unit:value.unit,alarm}));
-  }).sort((a,b)=>Date.parse(b.alarm.startedAt)-Date.parse(a.alarm.startedAt)||(String(a.alarm.id)<String(b.alarm.id)?-1:String(a.alarm.id)>String(b.alarm.id)?1:a.unit.id-b.unit.id));
-  const failures=results.filter(result=>result.status==='rejected').length;
-  const statuses=[];if(pendingDivera.length)statuses.push(pendingDivera.length===1?'1 neuer Einsatz':`${pendingDivera.length} neue Einsätze`);if(failures)statuses.push(failures===1?'1 Fehler':`${failures} Fehler`);summary.textContent=`DIVERA Import – ${statuses.join(', ')||'keine neuen Einsätze'}`;
-  content.innerHTML=`${pendingDivera.length?'<p><b>Neue DIVERA-Einsätze</b></p>':''}<p><b>Letzter Import:</b><br>${importTimes}</p>${pendingDivera.map(({unit,alarm},index)=>`<article class="report"><b>${esc(alarm.title)}</b><p>${esc(formatDateTime(alarm.startedAt))} · ${esc(alarm.address)}<br><span class="muted">${esc(unit.name)}</span></p><button data-pending="${index}">Importieren</button></article>`).join('')||(!failures?'<p>Keine neueren Einsätze vorhanden.</p>':'')}${failures?`<p class="error" role="alert">DIVERA konnte für ${failures} ${failures===1?'Einheit':'Einheiten'} nicht geprüft werden.</p>`:''}`;
-  out.querySelectorAll('[data-pending]').forEach(button=>button.onclick=()=>importPendingDivera(Number(button.dataset.pending),button));
+  <section><h2>Einsätze</h2>${incidents.length ? `<div class="grid"><label>Status filtern<select id="incidentStatusFilter"><option value="">Alle Status</option>${incidentFilterOptions(incidents, selectedStatus)}</select></label><label>Art filtern<select id="incidentExerciseFilter"><option value="">Alle Einsätze</option><option value="0">Reguläre Einsätze</option><option value="1">Übungen</option></select></label></div>` : ''}${incidents.map(i => `<article class="card" data-incident-status="${esc(i.reportStatus.key)}" data-incident-exercise="${i.is_exercise ? '1' : '0'}"><h3>${esc(i.title)}</h3>${exerciseBadge(i)}${incidentStatus(i)}<p>${esc(formatDateTime(i.started_at))} · ${esc(i.address)}<br><span class="muted">${esc(i.foreign_id || '')} ${esc(i.units)}</span></p><button data-action="incident" data-id="${i.id}">Öffnen</button></article>`).join('') || '<p>Noch keine Einsätze.</p>'}<p id="noFilteredIncidents" role="status" hidden>Keine Einsätze mit diesen Filtern.</p></section>`;
+  const statusFilter = document.querySelector('#incidentStatusFilter'),
+    exerciseFilter = document.querySelector('#incidentExerciseFilter');
+  if (statusFilter && exerciseFilter) {
+    statusFilter.value = selectedStatus;
+    const applyFilters = () => filterIncidents(statusFilter.value, exerciseFilter.value);
+    statusFilter.addEventListener('change', applyFilters);
+    exerciseFilter.addEventListener('change', applyFilters);
+    applyFilters();
+  }
+  focusMain();
+  bindUnitPickers(app);
+  bindForm('#incident', async d => {
+    d.unitIds = [...document.querySelectorAll('#incident [name=unitIds]:checked')].map(o => o.value);
+    d.startedAt = new Date(d.startedAt).toISOString();
+    const result = await api('/api/incidents', {method: 'POST', body: JSON.stringify(d)});
+    await load();
+    home();
+    showWarning(result.warning);
+  });
+  checkPendingDivera().catch(showError);
 }
-async function importPendingDivera(index,button){
-  if(button.disabled)return;const item=pendingDivera[index],current=viewContext(button);let imported=false;button.disabled=true;button.textContent='Importiere …';
-  try{const result=await api(`/api/units/${item.unit.id}/divera/import`,{method:'POST',body:JSON.stringify({id:item.alarm.id})});imported=true;button.textContent='Importiert';showWarning(result.warning);await load(current);if(current()){home();showWarning(result.warning)}}catch(error){if(current()){if(!imported){button.disabled=false;button.textContent='Importieren'}showError(error)}}
+async function checkPendingDivera() {
+  const current = viewContext();
+  const out = document.querySelector('#pendingDivera'),
+    summary = out?.querySelector('summary'),
+    content = out?.querySelector('.resource-section-content'),
+    allowed = units.filter(
+      unit => unit.divera_configured && (me.role === 'wehrleitung' || me.unitIds.includes(unit.id))
+    );
+  if (!out || !summary || !content || !allowed.length) return;
+  const importTimes = allowed
+    .map(
+      unit =>
+        `${esc(unit.name)}: ${unit.last_divera_import_at ? esc(formatDateTime(unit.last_divera_import_at)) : 'noch kein Import'}`
+    )
+    .join('<br>');
+  out.hidden = false;
+  summary.textContent = 'DIVERA Import – Prüfung läuft …';
+  content.innerHTML = `<p><b>Letzter Import:</b><br>${importTimes}</p><p class="muted">Prüfe auf neue Einsätze …</p>`;
+  const results = await Promise.allSettled(
+    allowed.map(async unit => ({unit, data: await api(`/api/units/${unit.id}/divera?summary=1`)}))
+  );
+  if (!current() || !out.isConnected) return;
+  pendingDivera = results
+    .filter(result => result.status === 'fulfilled')
+    .flatMap(({value}) => {
+      const latest = incidents
+        .filter(
+          item => item.divera_id && apiArray(item.assignments).some(assignment => assignment.unitId === value.unit.id)
+        )
+        .reduce((time, item) => Math.max(time, Date.parse(item.started_at)), 0);
+      return value.data.alarms
+        .filter(alarm => !importedForUnit(alarm.id, value.unit.id) && (!latest || Date.parse(alarm.startedAt) > latest))
+        .map(alarm => ({unit: value.unit, alarm}));
+    })
+    .sort(
+      (a, b) =>
+        Date.parse(b.alarm.startedAt) - Date.parse(a.alarm.startedAt) ||
+        (String(a.alarm.id) < String(b.alarm.id)
+          ? -1
+          : String(a.alarm.id) > String(b.alarm.id)
+            ? 1
+            : a.unit.id - b.unit.id)
+    );
+  const failures = results.filter(result => result.status === 'rejected').length;
+  const statuses = [];
+  if (pendingDivera.length)
+    statuses.push(pendingDivera.length === 1 ? '1 neuer Einsatz' : `${pendingDivera.length} neue Einsätze`);
+  if (failures) statuses.push(failures === 1 ? '1 Fehler' : `${failures} Fehler`);
+  summary.textContent = `DIVERA Import – ${statuses.join(', ') || 'keine neuen Einsätze'}`;
+  content.innerHTML = `${pendingDivera.length ? '<p><b>Neue DIVERA-Einsätze</b></p>' : ''}<p><b>Letzter Import:</b><br>${importTimes}</p>${pendingDivera.map(({unit, alarm}, index) => `<article class="report"><b>${esc(alarm.title)}</b><p>${esc(formatDateTime(alarm.startedAt))} · ${esc(alarm.address)}<br><span class="muted">${esc(unit.name)}</span></p><button data-pending="${index}">Importieren</button></article>`).join('') || (!failures ? '<p>Keine neueren Einsätze vorhanden.</p>' : '')}${failures ? `<p class="error" role="alert">DIVERA konnte für ${failures} ${failures === 1 ? 'Einheit' : 'Einheiten'} nicht geprüft werden.</p>` : ''}`;
+  out
+    .querySelectorAll('[data-pending]')
+    .forEach(button => (button.onclick = () => importPendingDivera(Number(button.dataset.pending), button)));
 }
-async function deleteIncident(id){const item=incidents.find(incident=>incident.id===id);if(!item?.canDelete||!confirm('Einsatz dauerhaft ausblenden? Der Einsatz bleibt intern erhalten, kann aber nicht wiederhergestellt werden.'))return;await api(`/api/incidents/${id}`,{method:'DELETE',body:JSON.stringify({revision:item.revision})});await load();await navigate('home');announcer.textContent='Einsatz gelöscht'}
-async function toggleExercise(id){const item=incidents.find(incident=>incident.id===id);if(!item)return;const current=viewContext(),revision=item.revision,isExercise=!item.is_exercise;await api(`/api/incidents/${id}/exercise`,{method:'PUT',body:JSON.stringify({isExercise,revision})});if(!current())return;item.is_exercise=isExercise;item.revision=revision+1;app.querySelector('[data-exercise-badge]').innerHTML=exerciseBadge(item);app.querySelectorAll('[data-report-exercise]').forEach(label=>label.innerHTML=isExercise?'<b>Übung</b> · ':'');app.querySelector('[data-action=toggleExercise]').textContent=isExercise?'Übungskennzeichnung entfernen':'Als Übung markieren';announcer.textContent=isExercise?'Einsatz als Übung markiert':'Übungskennzeichnung entfernt';const history=await api(`/api/incidents/${id}/exercise-history`);if(current())app.querySelector('[data-exercise-history]').innerHTML=exerciseHistory(apiArray(history))}
-const reportStatusLabels={author_draft:'Entwurf der Führungskraft',unit_review:'Prüfung durch Einheitsführung',wehr_review:'Prüfung durch Wehrführung'},roleLabels={fuehrungskraft:'Führungskraft',einheitsleitung:'Einheitsführung',wehrleitung:'Wehrführung'};
-function reportHistory(report){return `<details class="form-section"><summary>Prüfverlauf (${report.history.length})</summary><ol>${report.history.map(item=>`<li>${esc(formatDateTime(item.created_at))}: ${esc(item.actor_name)} (${esc(roleLabels[item.actor_role]||item.actor_role)}) · ${esc(reportStatusLabels[item.to_status]||item.to_status)}${item.comment?`<br><span class="muted">${esc(item.comment)}</span>`:''}</li>`).join('')}</ol></details>`}
-function exerciseHistory(history){return history.length?`<details class="form-section"><summary>Verlauf der Übungskennzeichnung (${history.length})</summary><ol>${history.map(item=>`<li>${esc(formatDateTime(item.created_at))}: ${esc(item.actor_name)} (${esc(roleLabels[item.actor_role]||item.actor_role)}) · ${item.new_value?'Als Übung markiert':'Übungskennzeichnung entfernt'}</li>`).join('')}</ol></details>`:''}
-function authorReportNotice(report){if(me.role!=='fuehrungskraft'||report.status==='author_draft')return'';const submissions=report.history.filter(item=>(item.from_status==='author_draft'&&item.to_status==='unit_review')||(item.from_status===null&&item.to_status==='wehr_review')),submitted=submissions[submissions.length-1];return `<p class="muted"><b>Abgeschickt${submitted?` am ${esc(formatDateTime(submitted.created_at))}`:''}.</b> Der Einsatzbericht ist für Sie jetzt nur noch lesbar.</p>`}
-function reportActions(report,incidentId){const actions=[`<button type="button" data-action="download" data-href="api/reports/${report.id}/pdf">PDF exportieren</button>`];if(report.editable)actions.push(`<button data-action="editReport" data-id="${report.id}">Bearbeiten</button>`);if(report.status==='author_draft'&&me.role==='fuehrungskraft'&&report.author_id===me.id)actions.push(`<button data-action="submitReport" data-id="${report.id}" data-incident="${incidentId}" data-workflow="submit-to-unit">An Einheitsführung senden</button>`);if(report.status==='unit_review'&&me.role==='einheitsleitung'&&me.unitIds.includes(report.unit_id)){if(report.history.some(item=>item.to_status==='author_draft'))actions.push(`<button class="secondary" data-action="returnReport" data-id="${report.id}" data-incident="${incidentId}" data-workflow="return-to-author">An Führungskraft zurückgeben</button>`);actions.push(`<button data-action="submitReport" data-id="${report.id}" data-incident="${incidentId}" data-workflow="submit-to-command">An Wehrführung senden</button>`)}if(report.status==='wehr_review'&&me.role==='wehrleitung')actions.push(`<button class="secondary" data-action="returnReport" data-id="${report.id}" data-incident="${incidentId}" data-workflow="return-to-unit">An Einheitsführung zurückgeben</button>`);return actions.join(' ')}
-function existingReportsNotice(){return me.role==='wehrleitung'||me.unitIds.length>1?'<section class="card"><p>Für alle verfügbaren Einheiten existiert bereits ein Einsatzbericht.</p></section>':''}
-function inaccessibleReportNotices(assignments){return me.role==='fuehrungskraft'?assignments.filter(item=>me.unitIds.includes(item.unitId)&&item.reportAuthorName).map(item=>`<article class="report"><strong>${esc(units.find(unit=>unit.id===item.unitId)?.name||`Einheit ${item.unitId}`)}</strong><p>Für diese Einheit wurde bereits ein Einsatzbericht durch ${esc(item.reportAuthorName)} verfasst. Die Berichtsinhalte sind nur für die verfassende Person, die Einheitsführung und die Wehrführung sichtbar.</p></article>`).join(''):''}
-async function submitReport(reportId,incidentId,action){const revision=currentReports.find(report=>report.id===reportId).revision;try{const result=await reportWrite(`/api/reports/${reportId}/${action}`,{revision});await refreshIncident(incidentId,result)}catch(error){showError(error)}}
-function returnReport(reportId,incidentId,action,opener){const revision=currentReports.find(report=>report.id===reportId).revision;dialog.innerHTML=`<form id="returnReport"><h2 id="dialogTitle" tabindex="-1">Bericht zurückgeben</h2><label>Kommentar<textarea name="comment" maxlength="2000" required></textarea></label><p><button>Zurückgeben</button> <button type="button" class="secondary" data-action="closeDialog">Abbrechen</button></p></form>`;restoreDialogFocus(opener);dialog.showModal();document.querySelector('#dialogTitle').focus();bindForm('#returnReport',async data=>{const result=await reportWrite(`/api/reports/${reportId}/${action}`,{...data,revision});dialog.close();await refreshIncident(incidentId,result)})}
-async function incident(id){
-  const current=viewContext();
-  try{
-    const item=incidents.find(i=>i.id===id);if(!item)return navigate('home',0,true);const [reports,exerciseChanges]=await Promise.all([api(`/api/incidents/${id}/reports`),api(`/api/incidents/${id}/exercise-history`)]);
-    if(!current())return false;
-    window.currentIncident=item;
-    window.currentReports=reports;
-    const assignments=apiArray(item.assignments);
-    window.currentAssignments=assignments;
-    const reportUnits=units.filter(u=>assignments.some(a=>a.unitId===u.id&&!a.hasReport)&&(me.role==='wehrleitung'||me.unitIds.includes(u.id)));
-    const pendingConsolidation=assignments.filter(assignment=>!reports.some(report=>report.unit_id===assignment.unitId&&report.status==='wehr_review')),mayConsolidate=assignments.length>0&&!pendingConsolidation.length,pendingUnitNames=pendingConsolidation.map(assignment=>units.find(unit=>unit.id===assignment.unitId)?.name||`Einheit ${assignment.unitId}`),inaccessibleReports=inaccessibleReportNotices(assignments);
-    app.innerHTML=`<button class="secondary" data-action="home">← Zurück</button><section class="card"><h1>${esc(item.title)}</h1><div data-exercise-badge>${exerciseBadge(item)}</div><p><b>${esc(item.foreign_id||'')}</b> · ${esc(formatDateTime(item.started_at))}<br>${esc(item.address)}${item.lat!==null&&item.lng!==null?` · <a href="https://www.openstreetmap.org/?mlat=${item.lat}&mlon=${item.lng}" target="_blank" rel="noopener" aria-label="Einsatzort auf der Karte öffnen (neues Fenster)">Karte</a>`:''}</p>${item.message?`<p><b>Meldung:</b> ${esc(item.message)}</p>`:''}${item.remark?`<p><b>Bemerkung:</b> ${esc(item.remark)}</p>`:''}${item.caller?`<p><b>Meldende Person:</b> ${esc(item.caller)}</p>`:''}${item.patient?`<p><b>Patient:</b> ${esc(item.patient)}</p>`:''}<p><b>Fahrzeuge beim Import:</b><br>${vehicleSummary(assignments)}</p><p class="muted">${esc(item.units)}</p><div data-exercise-history>${exerciseHistory(apiArray(exerciseChanges))}</div><p><button type="button" data-action="download" data-href="api/incidents/${id}/pdf">Einsatzakte als PDF</button> <button type="button" class="secondary" data-action="toggleExercise" data-id="${id}">${item.is_exercise?'Übungskennzeichnung entfernen':'Als Übung markieren'}</button>${item.canDelete?` <button type="button" class="secondary" data-action="deleteIncident" data-id="${id}">Einsatz löschen</button>`:''}</p></section>
-    ${reportUnits.length?`<section class="card"><h2>Bericht schreiben</h2><form id="report" class="grid">
-    <label>Einheit<select id="reportUnit" name="unitId">${reportUnits.map(u=>`<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></label>
-    ${reportDetailsFields('new',item)}
+async function importPendingDivera(index, button) {
+  if (button.disabled) return;
+  const item = pendingDivera[index],
+    current = viewContext(button);
+  let imported = false;
+  button.disabled = true;
+  button.textContent = 'Importiere …';
+  try {
+    const result = await api(`/api/units/${item.unit.id}/divera/import`, {
+      method: 'POST',
+      body: JSON.stringify({id: item.alarm.id})
+    });
+    imported = true;
+    button.textContent = 'Importiert';
+    showWarning(result.warning);
+    await load(current);
+    if (current()) {
+      home();
+      showWarning(result.warning);
+    }
+  } catch (error) {
+    if (current()) {
+      if (!imported) {
+        button.disabled = false;
+        button.textContent = 'Importieren';
+      }
+      showError(error);
+    }
+  }
+}
+async function deleteIncident(id) {
+  const item = incidents.find(incident => incident.id === id);
+  if (
+    !item?.canDelete ||
+    !confirm(
+      'Einsatz dauerhaft ausblenden? Der Einsatz bleibt intern erhalten, kann aber nicht wiederhergestellt werden.'
+    )
+  )
+    return;
+  await api(`/api/incidents/${id}`, {method: 'DELETE', body: JSON.stringify({revision: item.revision})});
+  await load();
+  await navigate('home');
+  announcer.textContent = 'Einsatz gelöscht';
+}
+async function toggleExercise(id) {
+  const item = incidents.find(incident => incident.id === id);
+  if (!item) return;
+  const current = viewContext(),
+    revision = item.revision,
+    isExercise = !item.is_exercise;
+  await api(`/api/incidents/${id}/exercise`, {method: 'PUT', body: JSON.stringify({isExercise, revision})});
+  if (!current()) return;
+  item.is_exercise = isExercise;
+  item.revision = revision + 1;
+  app.querySelector('[data-exercise-badge]').innerHTML = exerciseBadge(item);
+  app
+    .querySelectorAll('[data-report-exercise]')
+    .forEach(label => (label.innerHTML = isExercise ? '<b>Übung</b> · ' : ''));
+  app.querySelector('[data-action=toggleExercise]').textContent = isExercise
+    ? 'Übungskennzeichnung entfernen'
+    : 'Als Übung markieren';
+  announcer.textContent = isExercise ? 'Einsatz als Übung markiert' : 'Übungskennzeichnung entfernt';
+  const history = await api(`/api/incidents/${id}/exercise-history`);
+  if (current()) app.querySelector('[data-exercise-history]').innerHTML = exerciseHistory(apiArray(history));
+}
+const reportStatusLabels = {
+    author_draft: 'Entwurf der Führungskraft',
+    unit_review: 'Prüfung durch Einheitsführung',
+    wehr_review: 'Prüfung durch Wehrführung'
+  },
+  roleLabels = {fuehrungskraft: 'Führungskraft', einheitsleitung: 'Einheitsführung', wehrleitung: 'Wehrführung'};
+function reportHistory(report) {
+  return `<details class="form-section"><summary>Prüfverlauf (${report.history.length})</summary><ol>${report.history.map(item => `<li>${esc(formatDateTime(item.created_at))}: ${esc(item.actor_name)} (${esc(roleLabels[item.actor_role] || item.actor_role)}) · ${esc(reportStatusLabels[item.to_status] || item.to_status)}${item.comment ? `<br><span class="muted">${esc(item.comment)}</span>` : ''}</li>`).join('')}</ol></details>`;
+}
+function exerciseHistory(history) {
+  return history.length
+    ? `<details class="form-section"><summary>Verlauf der Übungskennzeichnung (${history.length})</summary><ol>${history.map(item => `<li>${esc(formatDateTime(item.created_at))}: ${esc(item.actor_name)} (${esc(roleLabels[item.actor_role] || item.actor_role)}) · ${item.new_value ? 'Als Übung markiert' : 'Übungskennzeichnung entfernt'}</li>`).join('')}</ol></details>`
+    : '';
+}
+function authorReportNotice(report) {
+  if (me.role !== 'fuehrungskraft' || report.status === 'author_draft') return '';
+  const submissions = report.history.filter(
+      item =>
+        (item.from_status === 'author_draft' && item.to_status === 'unit_review') ||
+        (item.from_status === null && item.to_status === 'wehr_review')
+    ),
+    submitted = submissions[submissions.length - 1];
+  return `<p class="muted"><b>Abgeschickt${submitted ? ` am ${esc(formatDateTime(submitted.created_at))}` : ''}.</b> Der Einsatzbericht ist für Sie jetzt nur noch lesbar.</p>`;
+}
+function reportActions(report, incidentId) {
+  const actions = [
+    `<button type="button" data-action="download" data-href="api/reports/${report.id}/pdf">PDF exportieren</button>`
+  ];
+  if (report.editable) actions.push(`<button data-action="editReport" data-id="${report.id}">Bearbeiten</button>`);
+  if (report.status === 'author_draft' && me.role === 'fuehrungskraft' && report.author_id === me.id)
+    actions.push(
+      `<button data-action="submitReport" data-id="${report.id}" data-incident="${incidentId}" data-workflow="submit-to-unit">An Einheitsführung senden</button>`
+    );
+  if (report.status === 'unit_review' && me.role === 'einheitsleitung' && me.unitIds.includes(report.unit_id)) {
+    if (report.history.some(item => item.to_status === 'author_draft'))
+      actions.push(
+        `<button class="secondary" data-action="returnReport" data-id="${report.id}" data-incident="${incidentId}" data-workflow="return-to-author">An Führungskraft zurückgeben</button>`
+      );
+    actions.push(
+      `<button data-action="submitReport" data-id="${report.id}" data-incident="${incidentId}" data-workflow="submit-to-command">An Wehrführung senden</button>`
+    );
+  }
+  if (report.status === 'wehr_review' && me.role === 'wehrleitung')
+    actions.push(
+      `<button class="secondary" data-action="returnReport" data-id="${report.id}" data-incident="${incidentId}" data-workflow="return-to-unit">An Einheitsführung zurückgeben</button>`
+    );
+  return actions.join(' ');
+}
+function existingReportsNotice() {
+  return me.role === 'wehrleitung' || me.unitIds.length > 1
+    ? '<section class="card"><p>Für alle verfügbaren Einheiten existiert bereits ein Einsatzbericht.</p></section>'
+    : '';
+}
+function inaccessibleReportNotices(assignments) {
+  return me.role === 'fuehrungskraft'
+    ? assignments
+        .filter(item => me.unitIds.includes(item.unitId) && item.reportAuthorName)
+        .map(
+          item =>
+            `<article class="report"><strong>${esc(units.find(unit => unit.id === item.unitId)?.name || `Einheit ${item.unitId}`)}</strong><p>Für diese Einheit wurde bereits ein Einsatzbericht durch ${esc(item.reportAuthorName)} verfasst. Die Berichtsinhalte sind nur für die verfassende Person, die Einheitsführung und die Wehrführung sichtbar.</p></article>`
+        )
+        .join('')
+    : '';
+}
+async function submitReport(reportId, incidentId, action) {
+  const revision = currentReports.find(report => report.id === reportId).revision;
+  try {
+    const result = await reportWrite(`/api/reports/${reportId}/${action}`, {revision});
+    await refreshIncident(incidentId, result);
+  } catch (error) {
+    showError(error);
+  }
+}
+function returnReport(reportId, incidentId, action, opener) {
+  const revision = currentReports.find(report => report.id === reportId).revision;
+  dialog.innerHTML = `<form id="returnReport"><h2 id="dialogTitle" tabindex="-1">Bericht zurückgeben</h2><label>Kommentar<textarea name="comment" maxlength="2000" required></textarea></label><p><button>Zurückgeben</button> <button type="button" class="secondary" data-action="closeDialog">Abbrechen</button></p></form>`;
+  restoreDialogFocus(opener);
+  dialog.showModal();
+  document.querySelector('#dialogTitle').focus();
+  bindForm('#returnReport', async data => {
+    const result = await reportWrite(`/api/reports/${reportId}/${action}`, {...data, revision});
+    dialog.close();
+    await refreshIncident(incidentId, result);
+  });
+}
+async function incident(id) {
+  const current = viewContext();
+  try {
+    const item = incidents.find(i => i.id === id);
+    if (!item) return navigate('home', 0, true);
+    const [reports, exerciseChanges] = await Promise.all([
+      api(`/api/incidents/${id}/reports`),
+      api(`/api/incidents/${id}/exercise-history`)
+    ]);
+    if (!current()) return false;
+    window.currentIncident = item;
+    window.currentReports = reports;
+    const assignments = apiArray(item.assignments);
+    window.currentAssignments = assignments;
+    const reportUnits = units.filter(
+      u =>
+        assignments.some(a => a.unitId === u.id && !a.hasReport) &&
+        (me.role === 'wehrleitung' || me.unitIds.includes(u.id))
+    );
+    const pendingConsolidation = assignments.filter(
+        assignment => !reports.some(report => report.unit_id === assignment.unitId && report.status === 'wehr_review')
+      ),
+      mayConsolidate = assignments.length > 0 && !pendingConsolidation.length,
+      pendingUnitNames = pendingConsolidation.map(
+        assignment => units.find(unit => unit.id === assignment.unitId)?.name || `Einheit ${assignment.unitId}`
+      ),
+      inaccessibleReports = inaccessibleReportNotices(assignments);
+    app.innerHTML = `<button class="secondary" data-action="home">← Zurück</button><section class="card"><h1>${esc(item.title)}</h1><div data-exercise-badge>${exerciseBadge(item)}</div><p><b>${esc(item.foreign_id || '')}</b> · ${esc(formatDateTime(item.started_at))}<br>${esc(item.address)}${item.lat !== null && item.lng !== null ? ` · <a href="https://www.openstreetmap.org/?mlat=${item.lat}&mlon=${item.lng}" target="_blank" rel="noopener" aria-label="Einsatzort auf der Karte öffnen (neues Fenster)">Karte</a>` : ''}</p>${item.message ? `<p><b>Meldung:</b> ${esc(item.message)}</p>` : ''}${item.remark ? `<p><b>Bemerkung:</b> ${esc(item.remark)}</p>` : ''}${item.caller ? `<p><b>Meldende Person:</b> ${esc(item.caller)}</p>` : ''}${item.patient ? `<p><b>Patient:</b> ${esc(item.patient)}</p>` : ''}<p><b>Fahrzeuge beim Import:</b><br>${vehicleSummary(assignments)}</p><p class="muted">${esc(item.units)}</p><div data-exercise-history>${exerciseHistory(apiArray(exerciseChanges))}</div><p><button type="button" data-action="download" data-href="api/incidents/${id}/pdf">Einsatzakte als PDF</button> <button type="button" class="secondary" data-action="toggleExercise" data-id="${id}">${item.is_exercise ? 'Übungskennzeichnung entfernen' : 'Als Übung markieren'}</button>${item.canDelete ? ` <button type="button" class="secondary" data-action="deleteIncident" data-id="${id}">Einsatz löschen</button>` : ''}</p></section>
+    ${
+      reportUnits.length
+        ? `<section class="card"><h2>Bericht schreiben</h2><form id="report" class="grid">
+    <label>Einheit<select id="reportUnit" name="unitId">${reportUnits.map(u => `<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></label>
+    ${reportDetailsFields('new', item)}
     <div id="reportCrew" class="full-width" aria-live="polite"></div>
-    <label class="full-width">Einsatzverlauf<textarea name="narrative" required></textarea></label><button type="submit" disabled>Speichern</button></form></section>`:existingReportsNotice()}
-    <section class="card"><h2>Einzelberichte</h2>${inaccessibleReports}${reports.map(r=>`<article class="report"><strong>${esc(r.unit_name)} · Nr. ${esc(r.running_number||'–')} · ${esc(r.author_name)}</strong> <span class="muted">${esc(reportStatusLabels[r.status]||r.status)}</span>
-    <p><span data-report-exercise>${item.is_exercise?'<b>Übung</b> · ':''}</span><b>${esc(r.incident_type||'Ohne Einsatzart')}</b></p>${reportTimes(r)}
-    ${commandSummary(r.incident_command)}${contactSummary('Geschädigt wurde',r.damaged_party)}${contactSummary('Schädiger',r.damaging_party)}
-    ${classificationSummary(r.classification)}${additionalVehicleSummary(r.additionalVehicles)}<p><b>Besatzung:</b><br>${crewSummary(r.crew)}</p><p>${esc(r.narrative).replace(/\n/g,'<br>')}</p>${authorReportNotice(r)}
-    ${reportHistory(r)}<p>${reportActions(r,id)}</p></article>`).join('')||(!inaccessibleReports?'<p>Noch keine Berichte.</p>':'')}</section>
-    ${me.role==='wehrleitung'?`<section class="card"><h2>Gesamtbericht</h2>${item.consolidated_at?`<p><button type="button" data-action="download" data-href="api/incidents/${id}/consolidation/pdf">Gesamtbericht als PDF</button></p>`:''}<h3>Fahrzeuge und Besatzung</h3>${consolidatedResources(assignments,reports,units)}${mayConsolidate?`<p class="muted">Alle alarmierten Einheiten haben einen Bericht zur Prüfung an die Wehrführung gesendet.</p><form id="consolidate"><label>Konsolidierter Bericht<textarea name="text" required>${esc(item.consolidated_text)}</textarea></label><button>Speichern</button></form>`:`<p class="muted">Die Konsolidierung ist erst möglich, wenn jede alarmierte Einheit einen Bericht an die Wehrführung gesendet hat. Noch nicht bereit: ${esc(pendingUnitNames.join(', ')||'keine alarmierte Einheit')}.</p>${item.consolidated_text?`<p><b>Bisheriger Arbeitsstand:</b><br>${esc(item.consolidated_text).replace(/\n/g,'<br>')}</p>`:''}`}</section>`:''}`;
+    <label class="full-width">Einsatzverlauf<textarea name="narrative" required></textarea></label><button type="submit" disabled>Speichern</button></form></section>`
+        : existingReportsNotice()
+    }
+    <section class="card"><h2>Einzelberichte</h2>${inaccessibleReports}${
+      reports
+        .map(
+          r => `<article class="report"><strong>${esc(r.unit_name)} · Nr. ${esc(r.running_number || '–')} · ${esc(r.author_name)}</strong> <span class="muted">${esc(reportStatusLabels[r.status] || r.status)}</span>
+    <p><span data-report-exercise>${item.is_exercise ? '<b>Übung</b> · ' : ''}</span><b>${esc(r.incident_type || 'Ohne Einsatzart')}</b></p>${reportTimes(r)}
+    ${commandSummary(r.incident_command)}${contactSummary('Geschädigt wurde', r.damaged_party)}${contactSummary('Schädiger', r.damaging_party)}
+    ${classificationSummary(r.classification)}${additionalVehicleSummary(r.additionalVehicles)}<p><b>Besatzung:</b><br>${crewSummary(r.crew)}</p><p>${esc(r.narrative).replace(/\n/g, '<br>')}</p>${authorReportNotice(r)}
+    ${reportHistory(r)}<p>${reportActions(r, id)}</p></article>`
+        )
+        .join('') || (!inaccessibleReports ? '<p>Noch keine Berichte.</p>' : '')
+    }</section>
+    ${me.role === 'wehrleitung' ? `<section class="card"><h2>Gesamtbericht</h2>${item.consolidated_at ? `<p><button type="button" data-action="download" data-href="api/incidents/${id}/consolidation/pdf">Gesamtbericht als PDF</button></p>` : ''}<h3>Fahrzeuge und Besatzung</h3>${consolidatedResources(assignments, reports, units)}${mayConsolidate ? `<p class="muted">Alle alarmierten Einheiten haben einen Bericht zur Prüfung an die Wehrführung gesendet.</p><form id="consolidate"><label>Konsolidierter Bericht<textarea name="text" required>${esc(item.consolidated_text)}</textarea></label><button>Speichern</button></form>` : `<p class="muted">Die Konsolidierung ist erst möglich, wenn jede alarmierte Einheit einen Bericht an die Wehrführung gesendet hat. Noch nicht bereit: ${esc(pendingUnitNames.join(', ') || 'keine alarmierte Einheit')}.</p>${item.consolidated_text ? `<p><b>Bisheriger Arbeitsstand:</b><br>${esc(item.consolidated_text).replace(/\n/g, '<br>')}</p>` : ''}`}</section>` : ''}`;
     focusMain();
-    const reportUnit=document.querySelector('#reportUnit');
-    if(reportUnit){const form=document.querySelector('#report');bindForm('#report',async d=>{Object.assign(d,reportDetailsPayload(form));d.additionalVehicles=selectedAdditionalVehicles('#reportCrew');d.crew=selectedCrew('#reportCrew');const result=await reportWrite(`/api/incidents/${id}/reports`,d);await refreshIncident(id,result)});bindDuration(form);reportUnit.onchange=()=>loadReportCrew(form,'#reportCrew',reportUnit.value,assignments,[],[],reportUnit);await loadReportCrew(form,'#reportCrew',reportUnit.value,assignments,[],[],reportUnit);if(!current()||!form.isConnected)return false}
-    if(me.role==='wehrleitung'&&mayConsolidate)bindForm('#consolidate',async d=>{const result=await reportWrite(`/api/incidents/${id}/consolidation`,{...d,revision:item.revision,reportVersions:reports.map(({id,revision})=>({id,revision}))},'PUT');await refreshIncident(id,result)})
-  }catch(e){if(current())showError(e);return false}
+    const reportUnit = document.querySelector('#reportUnit');
+    if (reportUnit) {
+      const form = document.querySelector('#report');
+      bindForm('#report', async d => {
+        Object.assign(d, reportDetailsPayload(form));
+        d.additionalVehicles = selectedAdditionalVehicles('#reportCrew');
+        d.crew = selectedCrew('#reportCrew');
+        const result = await reportWrite(`/api/incidents/${id}/reports`, d);
+        await refreshIncident(id, result);
+      });
+      bindDuration(form);
+      reportUnit.onchange = () =>
+        loadReportCrew(form, '#reportCrew', reportUnit.value, assignments, [], [], reportUnit);
+      await loadReportCrew(form, '#reportCrew', reportUnit.value, assignments, [], [], reportUnit);
+      if (!current() || !form.isConnected) return false;
+    }
+    if (me.role === 'wehrleitung' && mayConsolidate)
+      bindForm('#consolidate', async d => {
+        const result = await reportWrite(
+          `/api/incidents/${id}/consolidation`,
+          {...d, revision: item.revision, reportVersions: reports.map(({id, revision}) => ({id, revision}))},
+          'PUT'
+        );
+        await refreshIncident(id, result);
+      });
+  } catch (e) {
+    if (current()) showError(e);
+    return false;
+  }
 }
-function localDateTime(value){if(!value)return'';const date=new Date(value);return Number.isNaN(date.getTime())?'':new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16)}
-function dateTimeAttributes(value){const local=localDateTime(value);return`value="${local}" data-original-local="${local}" data-original-iso="${esc(value)}"`}
-function reportDateTime(input,name,required=false){if(!input.value){if(required)throw Error(`${name} ist erforderlich.`);return null}const value=input.type==='time'?`${input.form.elements[`${input.name}Date`].value}T${input.value}`:input.value;if(value===input.dataset.originalLocal&&input.dataset.originalIso)return input.dataset.originalIso;const match=value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);if(!match)throw Error(`${name} ist ungültig.`);const parts=match.slice(1).map(Number),date=new Date(parts[0],parts[1]-1,parts[2],parts[3],parts[4]);if(Number.isNaN(date.getTime())||date.getFullYear()!==parts[0]||date.getMonth()!==parts[1]-1||date.getDate()!==parts[2]||date.getHours()!==parts[3]||date.getMinutes()!==parts[4])throw Error(`${name} existiert in Ihrer Zeitzone nicht.`);const offsetChange=Math.abs(new Date(parts[0],parts[1]-1,parts[2]+1,parts[3],parts[4]).getTimezoneOffset()-new Date(parts[0],parts[1]-1,parts[2]-1,parts[3],parts[4]).getTimezoneOffset());if(offsetChange&&[-1,1].some(direction=>localDateTime(new Date(date.getTime()+direction*offsetChange*60000).toISOString())===value))throw Error(`${name} ist wegen der Zeitumstellung mehrdeutig.`);return date.toISOString()}
-function contactFields(key,title,value){const person=apiObject(value??{}),open=Object.values(person).some(Boolean);return `<details class="form-section" ${open?'open':''}><summary>${title}</summary><div class="grid"><label>Name<input name="${key}Name" value="${esc(person.name)}"></label><label>Telefon<input name="${key}Phone" type="tel" value="${esc(person.phone)}"></label><label>Adresse<input name="${key}Address" value="${esc(person.address)}"></label></div></details>`}
-function rankOptions(selected=''){const options=Object.entries(ranks);if(selected&&ranks[selected]===undefined)options.unshift([selected,'']);return `<option value="">Keine Angabe</option>${options.map(([code,name])=>`<option value="${esc(code)}" ${selected===code?'selected':''}>${esc(name?`${code} – ${name}`:code)}</option>`).join('')}`}
-function reportTimeFields(prefix,incident,report){const date=localDateTime(incident.started_at).slice(0,10);return `${prefix==='new'?`<div class="full-width"><label>Gemeinsames Datum<input name="reportDate" type="date" value="${date}" required></label><p class="muted">Gilt für Ausrücken, Eintreffen und Einsatzende. Einzelne Datumswerte können abweichen, etwa bei Einsätzen über Mitternacht. Die Alarmierung bleibt unverändert.</p></div>`:''}${[['departedAt','departed_at','Ausgerückt um'],['arrivedAt','arrived_at','Eingetroffen um'],['endedAt','ended_at','Einsatz beendet um']].map(([name,key,label])=>prefix==='new'?`<fieldset><legend>${label}</legend><label>Datum<input name="${name}Date" type="date" value="${date}" ${name==='endedAt'?'required':''}></label><label>Uhrzeit<input name="${name}" type="time" ${name==='endedAt'?'required':''}></label></fieldset>`:`<label>${label}<input name="${name}" type="datetime-local" ${dateTimeAttributes(report[key])} ${name==='endedAt'?'required':''}></label>`).join('')}`}
-function reportDetailsFields(prefix,incident,report={}){const selected=apiObject(report.classification??{}),command=apiObject(report.incident_command??{});return `<div class="report-fields"><div class="grid"><label>DIVERA-Einsatznummer<input value="${esc(incident.foreign_id||'Nicht vorhanden')}" readonly></label><label>Laufende Nummer<input name="runningNumber" maxlength="50" value="${esc(report.running_number)}" placeholder="z. B. 69/2026" required></label><label>Alarmiert um${incident.divera_id?' (aus DIVERA)':''}<input name="alarmedAt" type="datetime-local" ${dateTimeAttributes(report.alarmed_at||incident.started_at)} readonly></label>${reportTimeFields(prefix,incident,report)}<output class="duration" aria-live="polite">Einsatzdauer: –</output><label>Einsatzart<select name="incidentType" required><option value="">Bitte wählen</option>${incidentTypes.map(type=>`<option ${report.incident_type===type?'selected':''}>${esc(type)}</option>`).join('')}</select></label></div><details class="form-section" open><summary>Einsatzleitung</summary><div class="grid"><div class="command-row"><label>Dienstgrad Gesamteinsatzleitung<select name="commandRank">${rankOptions(command.rank)}</select></label><label>Name Gesamteinsatzleitung<input name="commandName" value="${esc(command.name)}"></label></div><div class="command-row"><label>Dienstgrad Einsatzleitung der Einheit<select name="additionalCommandRank">${rankOptions(command.additionalRank)}</select></label><label>Name Einsatzleitung der Einheit<input name="additionalCommandName" value="${esc(command.additionalName)}"></label></div></div></details>${contactFields('damaged','Geschädigte Person',report.damaged_party)}${contactFields('damaging','Schädiger',report.damaging_party)}<h3>Aufgliederung</h3>${Object.entries(reportClassifications).map(([key,values])=>`<details class="form-section" ${(selected[key]||[]).length?'open':''}><summary>${esc(classificationLabels[key]||key)}</summary><div class="check-grid">${values.map(value=>`<label><input type="checkbox" data-classification="${esc(key)}" value="${esc(value)}" ${(selected[key]||[]).includes(value)?'checked':''}>${esc(value)}</label>`).join('')}</div></details>`).join('')}</div>`}
-function bindDuration(form){const update=()=>{try{form.querySelector('.duration').textContent=`Einsatzdauer: ${durationText(reportDateTime(form.elements.alarmedAt,'Alarmierungszeit'),reportDateTime(form.elements.endedAt,'Einsatzende'))}`}catch(error){form.querySelector('.duration').textContent=`Einsatzdauer: ${error.message}`}};form.elements.endedAt.addEventListener('input',update);form.elements.endedAtDate?.addEventListener('input',update);const commonDate=form.elements.reportDate;if(commonDate){let previous=commonDate.value;commonDate.addEventListener('change',()=>{if(!commonDate.value)return;for(const name of ['departedAtDate','arrivedAtDate','endedAtDate']){const input=form.elements[name];if(input.value===previous)input.value=commonDate.value}previous=commonDate.value;update()})}update()}
-function reportDetailsPayload(form){const classification=Object.fromEntries(Object.keys(reportClassifications).map(key=>[key,[]]));form.querySelectorAll('[data-classification]:checked').forEach(input=>classification[input.dataset.classification].push(input.value));return{runningNumber:form.elements.runningNumber.value,departedAt:reportDateTime(form.elements.departedAt,'Ausrückezeit'),arrivedAt:reportDateTime(form.elements.arrivedAt,'Eintreffzeit'),endedAt:reportDateTime(form.elements.endedAt,'Einsatzende',true),incidentType:form.elements.incidentType.value,damagedParty:{name:form.elements.damagedName.value,phone:form.elements.damagedPhone.value,address:form.elements.damagedAddress.value},damagingParty:{name:form.elements.damagingName.value,phone:form.elements.damagingPhone.value,address:form.elements.damagingAddress.value},incidentCommand:{rank:form.elements.commandRank.value,name:form.elements.commandName.value,additionalRank:form.elements.additionalCommandRank.value,additionalName:form.elements.additionalCommandName.value},classification}}
-function durationText(start,end){if(!start||!end)return'–';const minutes=Math.round((new Date(end)-new Date(start))/60000);return Number.isFinite(minutes)&&minutes>=0?`${Math.floor(minutes/60)} Std. ${minutes%60} Min.`:'–'}
-function formatDateTime(value){if(!value)return'–';const date=new Date(value);return Number.isNaN(date.getTime())?'–':date.toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'})}
-function reportTimes(report){return `<dl class="report-times"><div><dt>Alarmiert</dt><dd>${formatDateTime(report.alarmed_at)}</dd></div><div><dt>Ausgerückt</dt><dd>${formatDateTime(report.departed_at)}</dd></div><div><dt>Eingetroffen</dt><dd>${formatDateTime(report.arrived_at)}</dd></div><div><dt>Beendet</dt><dd>${formatDateTime(report.ended_at)}</dd></div><div><dt>Dauer</dt><dd>${durationText(report.alarmed_at,report.ended_at)}</dd></div></dl>`}
-function contactSummary(title,value){const person=apiObject(value??{}),details=[person.name,person.phone,person.address].filter(Boolean);return details.length?`<p><b>${title}:</b> ${details.map(esc).join(' · ')}</p>`:''}
-function commandSummary(value){const command=apiObject(value??{}),people=[['Gesamteinsatzleitung',command.rank,command.name],['Einsatzleitung der Einheit',command.additionalRank,command.additionalName]].filter(([,rank,name])=>rank||name);return people.length?`<p><b>Einsatzleitung:</b><br>${people.map(([label,rank,name])=>`${label}: ${[rank,name].filter(Boolean).map(esc).join(' ')}`).join('<br>')}</p>`:''}
-function classificationSummary(value){const selected=apiObject(value??{}),rows=Object.entries(selected).filter(([,values])=>values?.length).map(([key,values])=>`<b>${esc(classificationLabels[key]||key)}:</b> ${values.map(esc).join(', ')}`);return rows.length?`<p>${rows.join('<br>')}</p>`:''}
-function additionalVehicleSummary(vehicles=[]){return vehicles.length?`<p><b>Zusätzliche Fahrzeuge:</b> ${vehicles.map(esc).join(', ')}</p>`:''}
-async function renderCrew(selector,unitId,assignments,selected=[],additionalVehicles=[],request=''){
-  const root=document.querySelector(selector),resources=root.crewResources?.unitId===String(unitId)?root.crewResources.data:await api(`/api/units/${unitId}/resources`),chosen=new Map(selected.map(person=>[person.memberId,{...person,role:person.role==='mannschaft'?'besatzung':person.role}])),members=resources.members.filter(member=>member.active||chosen.has(member.id)).map(member=>({...member,name:chosen.get(member.id)?.name??member.name}));
-  if(!root.isConnected||(request&&root.dataset.crewRequest!==request))return false;
-  root.crewResources={unitId:String(unitId),data:resources};
-  const memberIds=new Set(members.map(member=>member.id));
-  for(const person of chosen.values())if(!memberIds.has(person.memberId))members.push({id:person.memberId,name:person.name,qualifications:'',active:0});
-  const importedVehicles=apiArray(assignments.find(a=>a.unitId===Number(unitId))?.vehicles??[]).filter(vehicle=>typeof vehicle==='string'||vehicle.own!==false).map(vehicle=>typeof vehicle==='string'?vehicle:vehicle.name),catalogVehicles=[...new Set(resources.vehicles.map(vehicle=>vehicle.name))],additionalOptions=[...new Set([...catalogVehicles,...additionalVehicles])].filter(vehicle=>!importedVehicles.includes(vehicle)),assignableVehicles=[...new Set([...importedVehicles,...additionalVehicles.filter(vehicle=>catalogVehicles.includes(vehicle))])],vehicles=[...new Set([...importedVehicles,...additionalVehicles,...selected.map(person=>person.vehicle).filter(Boolean)])],roles=[['maschinist','Maschinist'],['einheitsfuehrer','Einheitsführer'],['besatzung','Besatzung']];
-  const zones=[{key:'available',vehicle:'',role:'',label:'Verfügbar'},{key:'none',vehicle:'',role:'besatzung',label:'Ohne Fahrzeug'},...vehicles.flatMap((vehicle,index)=>roles.map(([role,label])=>({key:`vehicle-${index}-${role}`,vehicle,role,label,historical:!assignableVehicles.includes(vehicle)})))];
-  const targetFor=member=>{const person=chosen.get(member.id);if(!person)return'available';if(!person.vehicle)return'none';return zones.find(zone=>zone.vehicle===person.vehicle&&zone.role===(person.role||'besatzung'))?.key||'available'};
-  const options=(current,inactive)=>zones.filter(zone=>(!zone.historical||zone.key===current)&&(!inactive||zone.key==='available'||zone.key===current)).map(zone=>`<option value="${zone.key}" ${current===zone.key?'selected':''}>${zone.key==='available'?'Nicht eingesetzt':zone.key==='none'?'Ohne Fahrzeug':`${esc(zone.vehicle)}: ${zone.label}`}</option>`).join('');
-  const card=member=>{const current=targetFor(member),inactive=member.active===0;return `<article class="crew-person" draggable="${dragEnabled&&!inactive}" data-person="${member.id}" data-name="${esc(member.name)}"><strong>${esc(member.name)}${inactive?' (inaktiv)':''}</strong>${member.qualifications?`<small class="muted">${esc(member.qualifications)}</small>`:''}<select data-member="${member.id}" aria-label="Zuordnung für ${esc(member.name)}">${options(current,inactive)}</select></article>`};
-  const cardsFor=key=>members.filter(member=>targetFor(member)===key).map(card).join('');
-  const roleZone=zone=>`<section class="crew-zone crew-role" data-target="${zone.key}" data-vehicle="${esc(zone.vehicle)}" data-role="${zone.role}" data-historical="${zone.historical||false}"><h5>${zone.label} <span data-count></span></h5><div class="crew-list">${cardsFor(zone.key)}</div></section>`;
-  const restoreFocus=root.contains(document.activeElement);
-  root.innerHTML=`<fieldset><legend>Weitere Fahrzeuge der eigenen Einheit</legend><div class="check-grid">${additionalOptions.map(vehicle=>`<label><input type="checkbox" data-additional-vehicle value="${esc(vehicle)}" ${additionalVehicles.includes(vehicle)?'checked':''}>${esc(vehicle)}${catalogVehicles.includes(vehicle)?'':' (nicht mehr im Fahrzeugstamm)'}</label>`).join('')||'<p class="muted">Keine weiteren Fahrzeuge verfügbar.</p>'}</div></fieldset><h3 tabindex="-1">Besatzung</h3><p class="muted">Auf Touch-Geräten oder mit Tastatur das Auswahlfeld verwenden; alternativ kann Personal mit der Maus gezogen werden.</p><div class="vehicle-board">${vehicles.map((vehicle,index)=>`<section class="vehicle-column"><h4>${esc(vehicle)}</h4>${roles.map(([role])=>roleZone(zones.find(zone=>zone.key===`vehicle-${index}-${role}`))).join('')}</section>`).join('')}<section class="vehicle-column"><h4>Ohne Fahrzeug</h4>${roleZone(zones.find(zone=>zone.key==='none'))}</section></div><details class="crew-available" open><summary>Verfügbares Personal</summary><section class="crew-zone crew-pool" data-target="available" data-vehicle="" data-role=""><h4>Mitglieder <span data-count></span></h4><div class="crew-list">${cardsFor('available')}</div></section></details>${members.length?'':'<p class="muted">Keine Mitglieder synchronisiert.</p>'}`;
+function localDateTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? ''
+    : new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+function dateTimeAttributes(value) {
+  const local = localDateTime(value);
+  return `value="${local}" data-original-local="${local}" data-original-iso="${esc(value)}"`;
+}
+function reportDateTime(input, name, required = false) {
+  if (!input.value) {
+    if (required) throw Error(`${name} ist erforderlich.`);
+    return null;
+  }
+  const value =
+    input.type === 'time' ? `${input.form.elements[`${input.name}Date`].value}T${input.value}` : input.value;
+  if (value === input.dataset.originalLocal && input.dataset.originalIso) return input.dataset.originalIso;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+  if (!match) throw Error(`${name} ist ungültig.`);
+  const parts = match.slice(1).map(Number),
+    date = new Date(parts[0], parts[1] - 1, parts[2], parts[3], parts[4]);
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== parts[0] ||
+    date.getMonth() !== parts[1] - 1 ||
+    date.getDate() !== parts[2] ||
+    date.getHours() !== parts[3] ||
+    date.getMinutes() !== parts[4]
+  )
+    throw Error(`${name} existiert in Ihrer Zeitzone nicht.`);
+  const offsetChange = Math.abs(
+    new Date(parts[0], parts[1] - 1, parts[2] + 1, parts[3], parts[4]).getTimezoneOffset() -
+      new Date(parts[0], parts[1] - 1, parts[2] - 1, parts[3], parts[4]).getTimezoneOffset()
+  );
+  if (
+    offsetChange &&
+    [-1, 1].some(
+      direction => localDateTime(new Date(date.getTime() + direction * offsetChange * 60000).toISOString()) === value
+    )
+  )
+    throw Error(`${name} ist wegen der Zeitumstellung mehrdeutig.`);
+  return date.toISOString();
+}
+function contactFields(key, title, value) {
+  const person = apiObject(value ?? {}),
+    open = Object.values(person).some(Boolean);
+  return `<details class="form-section" ${open ? 'open' : ''}><summary>${title}</summary><div class="grid"><label>Name<input name="${key}Name" value="${esc(person.name)}"></label><label>Telefon<input name="${key}Phone" type="tel" value="${esc(person.phone)}"></label><label>Adresse<input name="${key}Address" value="${esc(person.address)}"></label></div></details>`;
+}
+function rankOptions(selected = '') {
+  const options = Object.entries(ranks);
+  if (selected && ranks[selected] === undefined) options.unshift([selected, '']);
+  return `<option value="">Keine Angabe</option>${options.map(([code, name]) => `<option value="${esc(code)}" ${selected === code ? 'selected' : ''}>${esc(name ? `${code} – ${name}` : code)}</option>`).join('')}`;
+}
+function reportTimeFields(prefix, incident, report) {
+  const date = localDateTime(incident.started_at).slice(0, 10);
+  return `${prefix === 'new' ? `<div class="full-width"><label>Gemeinsames Datum<input name="reportDate" type="date" value="${date}" required></label><p class="muted">Gilt für Ausrücken, Eintreffen und Einsatzende. Einzelne Datumswerte können abweichen, etwa bei Einsätzen über Mitternacht. Die Alarmierung bleibt unverändert.</p></div>` : ''}${[
+    ['departedAt', 'departed_at', 'Ausgerückt um'],
+    ['arrivedAt', 'arrived_at', 'Eingetroffen um'],
+    ['endedAt', 'ended_at', 'Einsatz beendet um']
+  ]
+    .map(([name, key, label]) =>
+      prefix === 'new'
+        ? `<fieldset><legend>${label}</legend><label>Datum<input name="${name}Date" type="date" value="${date}" ${name === 'endedAt' ? 'required' : ''}></label><label>Uhrzeit<input name="${name}" type="time" ${name === 'endedAt' ? 'required' : ''}></label></fieldset>`
+        : `<label>${label}<input name="${name}" type="datetime-local" ${dateTimeAttributes(report[key])} ${name === 'endedAt' ? 'required' : ''}></label>`
+    )
+    .join('')}`;
+}
+function reportDetailsFields(prefix, incident, report = {}) {
+  const selected = apiObject(report.classification ?? {}),
+    command = apiObject(report.incident_command ?? {});
+  return `<div class="report-fields"><div class="grid"><label>DIVERA-Einsatznummer<input value="${esc(incident.foreign_id || 'Nicht vorhanden')}" readonly></label><label>Laufende Nummer<input name="runningNumber" maxlength="50" value="${esc(report.running_number)}" placeholder="z. B. 69/2026" required></label><label>Alarmiert um${incident.divera_id ? ' (aus DIVERA)' : ''}<input name="alarmedAt" type="datetime-local" ${dateTimeAttributes(report.alarmed_at || incident.started_at)} readonly></label>${reportTimeFields(prefix, incident, report)}<output class="duration" aria-live="polite">Einsatzdauer: –</output><label>Einsatzart<select name="incidentType" required><option value="">Bitte wählen</option>${incidentTypes.map(type => `<option ${report.incident_type === type ? 'selected' : ''}>${esc(type)}</option>`).join('')}</select></label></div><details class="form-section" open><summary>Einsatzleitung</summary><div class="grid"><div class="command-row"><label>Dienstgrad Gesamteinsatzleitung<select name="commandRank">${rankOptions(command.rank)}</select></label><label>Name Gesamteinsatzleitung<input name="commandName" value="${esc(command.name)}"></label></div><div class="command-row"><label>Dienstgrad Einsatzleitung der Einheit<select name="additionalCommandRank">${rankOptions(command.additionalRank)}</select></label><label>Name Einsatzleitung der Einheit<input name="additionalCommandName" value="${esc(command.additionalName)}"></label></div></div></details>${contactFields('damaged', 'Geschädigte Person', report.damaged_party)}${contactFields('damaging', 'Schädiger', report.damaging_party)}<h3>Aufgliederung</h3>${Object.entries(
+    reportClassifications
+  )
+    .map(
+      ([key, values]) =>
+        `<details class="form-section" ${(selected[key] || []).length ? 'open' : ''}><summary>${esc(classificationLabels[key] || key)}</summary><div class="check-grid">${values.map(value => `<label><input type="checkbox" data-classification="${esc(key)}" value="${esc(value)}" ${(selected[key] || []).includes(value) ? 'checked' : ''}>${esc(value)}</label>`).join('')}</div></details>`
+    )
+    .join('')}</div>`;
+}
+function bindDuration(form) {
+  const update = () => {
+    try {
+      form.querySelector('.duration').textContent =
+        `Einsatzdauer: ${durationText(reportDateTime(form.elements.alarmedAt, 'Alarmierungszeit'), reportDateTime(form.elements.endedAt, 'Einsatzende'))}`;
+    } catch (error) {
+      form.querySelector('.duration').textContent = `Einsatzdauer: ${error.message}`;
+    }
+  };
+  form.elements.endedAt.addEventListener('input', update);
+  form.elements.endedAtDate?.addEventListener('input', update);
+  const commonDate = form.elements.reportDate;
+  if (commonDate) {
+    let previous = commonDate.value;
+    commonDate.addEventListener('change', () => {
+      if (!commonDate.value) return;
+      for (const name of ['departedAtDate', 'arrivedAtDate', 'endedAtDate']) {
+        const input = form.elements[name];
+        if (input.value === previous) input.value = commonDate.value;
+      }
+      previous = commonDate.value;
+      update();
+    });
+  }
+  update();
+}
+function reportDetailsPayload(form) {
+  const classification = Object.fromEntries(Object.keys(reportClassifications).map(key => [key, []]));
+  form
+    .querySelectorAll('[data-classification]:checked')
+    .forEach(input => classification[input.dataset.classification].push(input.value));
+  return {
+    runningNumber: form.elements.runningNumber.value,
+    departedAt: reportDateTime(form.elements.departedAt, 'Ausrückezeit'),
+    arrivedAt: reportDateTime(form.elements.arrivedAt, 'Eintreffzeit'),
+    endedAt: reportDateTime(form.elements.endedAt, 'Einsatzende', true),
+    incidentType: form.elements.incidentType.value,
+    damagedParty: {
+      name: form.elements.damagedName.value,
+      phone: form.elements.damagedPhone.value,
+      address: form.elements.damagedAddress.value
+    },
+    damagingParty: {
+      name: form.elements.damagingName.value,
+      phone: form.elements.damagingPhone.value,
+      address: form.elements.damagingAddress.value
+    },
+    incidentCommand: {
+      rank: form.elements.commandRank.value,
+      name: form.elements.commandName.value,
+      additionalRank: form.elements.additionalCommandRank.value,
+      additionalName: form.elements.additionalCommandName.value
+    },
+    classification
+  };
+}
+function durationText(start, end) {
+  if (!start || !end) return '–';
+  const minutes = Math.round((new Date(end) - new Date(start)) / 60000);
+  return Number.isFinite(minutes) && minutes >= 0 ? `${Math.floor(minutes / 60)} Std. ${minutes % 60} Min.` : '–';
+}
+function formatDateTime(value) {
+  if (!value) return '–';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '–' : date.toLocaleString(undefined, {dateStyle: 'medium', timeStyle: 'short'});
+}
+function reportTimes(report) {
+  return `<dl class="report-times"><div><dt>Alarmiert</dt><dd>${formatDateTime(report.alarmed_at)}</dd></div><div><dt>Ausgerückt</dt><dd>${formatDateTime(report.departed_at)}</dd></div><div><dt>Eingetroffen</dt><dd>${formatDateTime(report.arrived_at)}</dd></div><div><dt>Beendet</dt><dd>${formatDateTime(report.ended_at)}</dd></div><div><dt>Dauer</dt><dd>${durationText(report.alarmed_at, report.ended_at)}</dd></div></dl>`;
+}
+function contactSummary(title, value) {
+  const person = apiObject(value ?? {}),
+    details = [person.name, person.phone, person.address].filter(Boolean);
+  return details.length ? `<p><b>${title}:</b> ${details.map(esc).join(' · ')}</p>` : '';
+}
+function commandSummary(value) {
+  const command = apiObject(value ?? {}),
+    people = [
+      ['Gesamteinsatzleitung', command.rank, command.name],
+      ['Einsatzleitung der Einheit', command.additionalRank, command.additionalName]
+    ].filter(([, rank, name]) => rank || name);
+  return people.length
+    ? `<p><b>Einsatzleitung:</b><br>${people.map(([label, rank, name]) => `${label}: ${[rank, name].filter(Boolean).map(esc).join(' ')}`).join('<br>')}</p>`
+    : '';
+}
+function classificationSummary(value) {
+  const selected = apiObject(value ?? {}),
+    rows = Object.entries(selected)
+      .filter(([, values]) => values?.length)
+      .map(([key, values]) => `<b>${esc(classificationLabels[key] || key)}:</b> ${values.map(esc).join(', ')}`);
+  return rows.length ? `<p>${rows.join('<br>')}</p>` : '';
+}
+function additionalVehicleSummary(vehicles = []) {
+  return vehicles.length ? `<p><b>Zusätzliche Fahrzeuge:</b> ${vehicles.map(esc).join(', ')}</p>` : '';
+}
+async function renderCrew(selector, unitId, assignments, selected = [], additionalVehicles = [], request = '') {
+  const root = document.querySelector(selector),
+    resources =
+      root.crewResources?.unitId === String(unitId)
+        ? root.crewResources.data
+        : await api(`/api/units/${unitId}/resources`),
+    chosen = new Map(
+      selected.map(person => [
+        person.memberId,
+        {...person, role: person.role === 'mannschaft' ? 'besatzung' : person.role}
+      ])
+    ),
+    members = resources.members
+      .filter(member => member.active || chosen.has(member.id))
+      .map(member => ({...member, name: chosen.get(member.id)?.name ?? member.name}));
+  if (!root.isConnected || (request && root.dataset.crewRequest !== request)) return false;
+  root.crewResources = {unitId: String(unitId), data: resources};
+  const memberIds = new Set(members.map(member => member.id));
+  for (const person of chosen.values())
+    if (!memberIds.has(person.memberId))
+      members.push({id: person.memberId, name: person.name, qualifications: '', active: 0});
+  const importedVehicles = apiArray(assignments.find(a => a.unitId === Number(unitId))?.vehicles ?? [])
+      .filter(vehicle => typeof vehicle === 'string' || vehicle.own !== false)
+      .map(vehicle => (typeof vehicle === 'string' ? vehicle : vehicle.name)),
+    catalogVehicles = [...new Set(resources.vehicles.map(vehicle => vehicle.name))],
+    additionalOptions = [...new Set([...catalogVehicles, ...additionalVehicles])].filter(
+      vehicle => !importedVehicles.includes(vehicle)
+    ),
+    assignableVehicles = [
+      ...new Set([...importedVehicles, ...additionalVehicles.filter(vehicle => catalogVehicles.includes(vehicle))])
+    ],
+    vehicles = [
+      ...new Set([
+        ...importedVehicles,
+        ...additionalVehicles,
+        ...selected.map(person => person.vehicle).filter(Boolean)
+      ])
+    ],
+    roles = [
+      ['maschinist', 'Maschinist'],
+      ['einheitsfuehrer', 'Einheitsführer'],
+      ['besatzung', 'Besatzung']
+    ];
+  const zones = [
+    {key: 'available', vehicle: '', role: '', label: 'Verfügbar'},
+    {key: 'none', vehicle: '', role: 'besatzung', label: 'Ohne Fahrzeug'},
+    ...vehicles.flatMap((vehicle, index) =>
+      roles.map(([role, label]) => ({
+        key: `vehicle-${index}-${role}`,
+        vehicle,
+        role,
+        label,
+        historical: !assignableVehicles.includes(vehicle)
+      }))
+    )
+  ];
+  const targetFor = member => {
+    const person = chosen.get(member.id);
+    if (!person) return 'available';
+    if (!person.vehicle) return 'none';
+    return (
+      zones.find(zone => zone.vehicle === person.vehicle && zone.role === (person.role || 'besatzung'))?.key ||
+      'available'
+    );
+  };
+  const options = (current, inactive) =>
+    zones
+      .filter(
+        zone =>
+          (!zone.historical || zone.key === current) && (!inactive || zone.key === 'available' || zone.key === current)
+      )
+      .map(
+        zone =>
+          `<option value="${zone.key}" ${current === zone.key ? 'selected' : ''}>${zone.key === 'available' ? 'Nicht eingesetzt' : zone.key === 'none' ? 'Ohne Fahrzeug' : `${esc(zone.vehicle)}: ${zone.label}`}</option>`
+      )
+      .join('');
+  const card = member => {
+    const current = targetFor(member),
+      inactive = member.active === 0;
+    return `<article class="crew-person" draggable="${dragEnabled && !inactive}" data-person="${member.id}" data-name="${esc(member.name)}"><strong>${esc(member.name)}${inactive ? ' (inaktiv)' : ''}</strong>${member.qualifications ? `<small class="muted">${esc(member.qualifications)}</small>` : ''}<select data-member="${member.id}" aria-label="Zuordnung für ${esc(member.name)}">${options(current, inactive)}</select></article>`;
+  };
+  const cardsFor = key =>
+    members
+      .filter(member => targetFor(member) === key)
+      .map(card)
+      .join('');
+  const roleZone = zone =>
+    `<section class="crew-zone crew-role" data-target="${zone.key}" data-vehicle="${esc(zone.vehicle)}" data-role="${zone.role}" data-historical="${zone.historical || false}"><h5>${zone.label} <span data-count></span></h5><div class="crew-list">${cardsFor(zone.key)}</div></section>`;
+  const restoreFocus = root.contains(document.activeElement);
+  root.innerHTML = `<fieldset><legend>Weitere Fahrzeuge der eigenen Einheit</legend><div class="check-grid">${additionalOptions.map(vehicle => `<label><input type="checkbox" data-additional-vehicle value="${esc(vehicle)}" ${additionalVehicles.includes(vehicle) ? 'checked' : ''}>${esc(vehicle)}${catalogVehicles.includes(vehicle) ? '' : ' (nicht mehr im Fahrzeugstamm)'}</label>`).join('') || '<p class="muted">Keine weiteren Fahrzeuge verfügbar.</p>'}</div></fieldset><h3 tabindex="-1">Besatzung</h3><p class="muted">Auf Touch-Geräten oder mit Tastatur das Auswahlfeld verwenden; alternativ kann Personal mit der Maus gezogen werden.</p><div class="vehicle-board">${vehicles.map((vehicle, index) => `<section class="vehicle-column"><h4>${esc(vehicle)}</h4>${roles.map(([role]) => roleZone(zones.find(zone => zone.key === `vehicle-${index}-${role}`))).join('')}</section>`).join('')}<section class="vehicle-column"><h4>Ohne Fahrzeug</h4>${roleZone(zones.find(zone => zone.key === 'none'))}</section></div><details class="crew-available" open><summary>Verfügbares Personal</summary><section class="crew-zone crew-pool" data-target="available" data-vehicle="" data-role=""><h4>Mitglieder <span data-count></span></h4><div class="crew-list">${cardsFor('available')}</div></section></details>${members.length ? '' : '<p class="muted">Keine Mitglieder synchronisiert.</p>'}`;
   bindCrewBoard(root);
-  if(restoreFocus)root.querySelector('h3').focus();
+  if (restoreFocus) root.querySelector('h3').focus();
   return true;
 }
-function bindCrewBoard(root){
-  const zones=[...root.querySelectorAll('.crew-zone')],cards=[...root.querySelectorAll('.crew-person')];
-  const move=(card,target)=>{const zone=zones.find(item=>item.dataset.target===target);if(!card||!zone)return;if(['maschinist','einheitsfuehrer'].includes(zone.dataset.role)){const previous=zone.querySelector('.crew-person');if(previous&&previous!==card){const available=zones.find(item=>item.dataset.target==='available');previous.querySelector('[data-member]').value='available';available.querySelector('.crew-list').append(previous)}}card.querySelector('[data-member]').value=target;zone.querySelector('.crew-list').append(card);zones.forEach(updateCrewCount)};
-  cards.forEach(card=>{if(dragEnabled){card.ondragstart=e=>{card.classList.add('dragging');e.dataTransfer.setData('text/plain',card.dataset.person)};card.ondragend=()=>card.classList.remove('dragging')}card.querySelector('[data-member]').onchange=e=>move(card,e.target.value)});
-  zones.forEach(zone=>{if(zone.dataset.historical==='true'){updateCrewCount(zone);return}zone.ondragover=e=>{e.preventDefault();zone.classList.add('over')};zone.ondragleave=()=>zone.classList.remove('over');zone.ondrop=e=>{e.preventDefault();zone.classList.remove('over');move(cards.find(card=>card.dataset.person===e.dataTransfer.getData('text/plain')),zone.dataset.target)};updateCrewCount(zone)});
+function bindCrewBoard(root) {
+  const zones = [...root.querySelectorAll('.crew-zone')],
+    cards = [...root.querySelectorAll('.crew-person')];
+  const move = (card, target) => {
+    const zone = zones.find(item => item.dataset.target === target);
+    if (!card || !zone) return;
+    if (['maschinist', 'einheitsfuehrer'].includes(zone.dataset.role)) {
+      const previous = zone.querySelector('.crew-person');
+      if (previous && previous !== card) {
+        const available = zones.find(item => item.dataset.target === 'available');
+        previous.querySelector('[data-member]').value = 'available';
+        available.querySelector('.crew-list').append(previous);
+      }
+    }
+    card.querySelector('[data-member]').value = target;
+    zone.querySelector('.crew-list').append(card);
+    zones.forEach(updateCrewCount);
+  };
+  cards.forEach(card => {
+    if (dragEnabled) {
+      card.ondragstart = e => {
+        card.classList.add('dragging');
+        e.dataTransfer.setData('text/plain', card.dataset.person);
+      };
+      card.ondragend = () => card.classList.remove('dragging');
+    }
+    card.querySelector('[data-member]').onchange = e => move(card, e.target.value);
+  });
+  zones.forEach(zone => {
+    if (zone.dataset.historical === 'true') {
+      updateCrewCount(zone);
+      return;
+    }
+    zone.ondragover = e => {
+      e.preventDefault();
+      zone.classList.add('over');
+    };
+    zone.ondragleave = () => zone.classList.remove('over');
+    zone.ondrop = e => {
+      e.preventDefault();
+      zone.classList.remove('over');
+      move(
+        cards.find(card => card.dataset.person === e.dataTransfer.getData('text/plain')),
+        zone.dataset.target
+      );
+    };
+    updateCrewCount(zone);
+  });
 }
-function updateCrewCount(zone){zone.querySelector('[data-count]').textContent=zone.querySelectorAll('.crew-person').length}
-function crewSummary(value,vehicleNames=[]){const labels={einheitsfuehrer:'Einheitsführer',maschinist:'Maschinist',besatzung:'Besatzung'},order=Object.keys(labels),vehicles=new Map([...new Set(vehicleNames)].map(name=>[name,{}]));for(const person of apiArray(value??[])){const vehicle=person.vehicle||'Ohne Fahrzeug',role=person.role==='mannschaft'?'besatzung':order.includes(person.role)?person.role:'besatzung';if(!vehicles.has(vehicle))vehicles.set(vehicle,{});const roles=vehicles.get(vehicle);(roles[role]??=[]).push(person.name)}return [...vehicles].sort(([a],[b])=>a.localeCompare(b,'de')||(a<b?-1:a>b?1:0)).map(([vehicle,roles])=>`${esc(vehicle)}: ${order.filter(role=>roles[role]?.length).map(role=>`${roles[role].map(esc).join(', ')} (${labels[role]})`).join('; ')||'Keine Besatzung'}`).join('<br>')||'Keine Besatzung'}
-function consolidatedResources(assignments,reports,availableUnits){const unitName=assignment=>availableUnits.find(unit=>unit.id===assignment.unitId)?.name||`Einheit ${assignment.unitId}`;return [...assignments].sort((a,b)=>unitName(a).localeCompare(unitName(b),'de')||a.unitId-b.unitId).map(assignment=>{const report=reports.find(item=>item.unit_id===assignment.unitId),vehicles=[...apiArray(assignment.vehicles).map(vehicle=>typeof vehicle==='string'?vehicle:vehicle.name).filter(Boolean),...(report?.additionalVehicles||[])];return`<article class="report"><strong>${esc(unitName(assignment))}</strong><p>${crewSummary(report?.crew??[],vehicles)}</p></article>`}).join('')||'<p>Keine alarmierten Einheiten.</p>'}
-function vehicleSummary(assignments){return assignments.flatMap(assignment=>apiArray(assignment.vehicles).map(vehicle=>typeof vehicle==='string'?esc(vehicle):`${esc(vehicle.name)} · ${vehicle.own?'eigene Einheit':'andere Einheit'}`)).join('<br>')||'Keine Fahrzeuge'}
-function selectedAdditionalVehicles(selector){return [...document.querySelector(selector).querySelectorAll('[data-additional-vehicle]:checked')].map(input=>input.value)}
-function selectedCrew(selector){const root=document.querySelector(selector);return [...root.querySelectorAll('[data-member]')].filter(select=>select.value!=='available').map(select=>{const zone=[...root.querySelectorAll('.crew-zone')].find(item=>item.dataset.target===select.value),card=select.closest('.crew-person');return{memberId:Number(select.dataset.member),name:card.dataset.name,vehicle:zone.dataset.vehicle,role:zone.dataset.role}})}
-async function loadReportCrew(form,selector,unitId,assignments,selected=[],additionalVehicles=[],unitSelect=null,focusVehicle=''){const root=document.querySelector(selector),submit=form.querySelector('button[type=submit]'),request=String((Number(root.dataset.crewRequest)||0)+1);root.dataset.crewRequest=request;root.inert=root.crewResources?.unitId!==String(unitId);submit.disabled=true;try{if(await renderCrew(selector,unitId,assignments,selected,additionalVehicles,request)&&root.isConnected&&root.dataset.crewRequest===request&&(!form.closest('dialog')||dialog.open)){submit.disabled=false;root.querySelectorAll('[data-additional-vehicle]').forEach(input=>input.onchange=()=>{const crew=selectedCrew(selector);if(!input.checked&&crew.some(person=>person.vehicle===input.value)){input.checked=true;announcer.textContent='Entfernen Sie zuerst die Besatzung vom Fahrzeug.';return}loadReportCrew(form,selector,unitId,assignments,crew,selectedAdditionalVehicles(selector),unitSelect,input.value)});if(focusVehicle)[...root.querySelectorAll('[data-additional-vehicle]')].find(input=>input.value===focusVehicle)?.focus()}}catch(error){if(error.name==='AbortError'||root.dataset.crewRequest!==request||!root.isConnected||(form.closest('dialog')&&!dialog.open))return;const restoreFocus=root.contains(document.activeElement);root.innerHTML=`<p class="error" role="alert">${esc(error.message)}</p><button type="button">Erneut laden</button>`;root.inert=false;const retry=root.querySelector('button');retry.onclick=()=>loadReportCrew(form,selector,unitSelect?.value||unitId,assignments,selected,additionalVehicles,unitSelect);if(restoreFocus)retry.focus()}finally{if(root.dataset.crewRequest===request)root.inert=false}}
-function restoreDialogFocus(opener){dialog.addEventListener('close',()=>{if(!dialog.open&&opener?.isConnected&&!document.activeElement?.matches('[role=alert]'))opener.focus()},{once:true})}
-async function editReport(id,opener){const r=currentReports.find(x=>x.id===id),crew=apiArray(r.crew);dialog.innerHTML=`<form id="edit"><h2 id="dialogTitle" tabindex="-1">Bericht bearbeiten</h2>${reportDetailsFields('edit',currentIncident,r)}<div id="editCrew" aria-live="polite"></div><label>Einsatzverlauf<textarea name="narrative" required>${esc(r.narrative)}</textarea></label><p><button type="submit" disabled>Speichern</button> <button type="button" class="secondary" data-action="closeDialog">Abbrechen</button></p></form>`;restoreDialogFocus(opener);dialog.showModal();document.querySelector('#dialogTitle').focus();const form=document.querySelector('#edit');bindForm('#edit',async d=>{Object.assign(d,reportDetailsPayload(form));d.additionalVehicles=selectedAdditionalVehicles('#editCrew');d.crew=selectedCrew('#editCrew');const result=await reportWrite(`/api/reports/${r.id}`,{...d,revision:r.revision},'PUT');dialog.close();await refreshIncident(r.incident_id,result)});bindDuration(form);await loadReportCrew(form,'#editCrew',r.unit_id,currentAssignments,crew,r.additionalVehicles)}
-function inactiveMembersPreference(value){try{const key=`inactiveMembers:${me.id}:${me.role}`;if(value===undefined)return localStorage.getItem(key)==='1';localStorage.setItem(key,value?'1':'0')}catch{}return Boolean(value)}
-function filterResourceMembers(root,showInactive){inactiveMembersPreference(showInactive);let visible=0;root.querySelectorAll('[data-member-active]').forEach(member=>{member.hidden=!showInactive&&member.dataset.memberActive==='0';if(!member.hidden)visible++});const count=root.querySelector('#memberCount');if(count)count.textContent=visible}
-function resources(){const allowed=me.role==='wehrleitung'?units:units.filter(unit=>me.unitIds.includes(unit.id)),showInactive=inactiveMembersPreference();app.innerHTML=`<section class="card"><h1>Mitglieder & Fahrzeuge</h1><div class="grid"><label>Einheit<select id="resourceUnit">${allowed.map(unit=>`<option value="${unit.id}">${esc(unit.name)}</option>`).join('')}</select></label><fieldset class="resource-filter"><legend>Ansicht</legend><label><input id="showInactiveMembers" type="checkbox" ${showInactive?'checked':''}> Inaktive Mitglieder anzeigen</label></fieldset></div></section><div id="resources" aria-live="polite"></div>`;focusMain();const select=document.querySelector('#resourceUnit'),toggle=document.querySelector('#showInactiveMembers');select.onchange=()=>renderResources(select.value).catch(showError);toggle.onchange=()=>filterResourceMembers(document.querySelector('#resources'),toggle.checked);renderResources(select.value).catch(showError)}
-async function renderResources(unitId){const root=document.querySelector('#resources'),request=String((Number(root.dataset.request)||0)+1);root.dataset.request=request;let data;try{data=await api(`/api/units/${unitId}/resources`)}catch(error){if(!root.isConnected||root.dataset.request!==request)return;throw error}if(!root.isConnected||root.dataset.request!==request)return;const {members,vehicles:own}=data,showInactive=inactiveMembersPreference(),external=new Map();for(const incident of incidents)for(const assignment of apiArray(incident.assignments))if(assignment.unitId===Number(unitId))for(const vehicle of apiArray(assignment.vehicles)){const item=typeof vehicle==='string'?{id:vehicle,name:vehicle,own:true}:vehicle,key=item.id||item.name;if(item.own===false&&!external.has(key))external.set(key,item)}const rows=list=>list.map(vehicle=>`<p><b>${esc(vehicle.name)}</b>${vehicle.fullname?` · ${esc(vehicle.fullname)}`:''}</p>`).join('')||'<p class="muted">Keine Fahrzeuge synchronisiert.</p>';root.innerHTML=`<details class="card resource-section" open><summary>Mitglieder (<span id="memberCount"></span>)</summary><div class="resource-section-content">${members.map(member=>`<p data-member-active="${member.active}"><b>${esc(member.name)}${member.active?'':' (inaktiv)'}</b>${member.qualifications?`<br><span class="muted">Qualifikationen: ${esc(member.qualifications)}</span>`:''}</p>`).join('')||'<p class="muted">Keine Mitglieder synchronisiert.</p>'}</div></details><details class="card resource-section" open><summary>Eigene Fahrzeuge (${own.length})</summary><div class="resource-section-content">${rows(own)}<p class="muted">Aktueller DIVERA-Stammdatenstand.</p></div></details>${external.size?`<details class="card resource-section" open><summary>Fahrzeuge anderer Einheiten (${external.size})</summary><div class="resource-section-content">${rows([...external.values()])}<p class="muted">Historische Snapshots aus Einsatzimporten.</p></div></details>`:''}`;filterResourceMembers(root,showInactive)}
-function statisticsDateValue(date){return new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,10)}
-function statisticsWeekday(day){const date=new Date(2024,0,Number(day),12);return date.toLocaleDateString(undefined,{weekday:'long'})}
-function statisticsMonth(month){const [year,value]=month.split('-').map(Number);return new Date(year,value-1,1,12).toLocaleDateString(undefined,{month:'long',year:'numeric'})}
-function statisticsTable(title,headers,rows){return `<section class="card"><h2>${esc(title)}</h2>${rows.length?`<div class="table-scroll" tabindex="0" role="region" aria-label="${esc(title)}"><table><caption class="sr-only">${esc(title)}</caption><thead><tr>${headers.map(header=>`<th scope="col">${esc(header)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map(value=>`<td>${esc(value)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`:'<p class="muted">Keine Daten in diesem Zeitraum.</p>'}</section>`}
-function statisticsMarkup(data){if(!data.totals.incidents)return'<section class="card"><h2>Keine Einsätze</h2><p>Für den gewählten Zeitraum liegen keine Einsätze vor.</p></section>';const number=value=>Number(value).toLocaleString('de-DE'),average=value=>value===null?'–':Number(value).toLocaleString('de-DE',{maximumFractionDigits:2}),organization=data.scope==='organization';return`<section class="statistics-summary"><article class="card"><h2>Einsätze gesamt</h2><strong>${number(data.totals.incidents)}</strong></article><article class="card"><h2>Reguläre Einsätze</h2><strong>${number(data.totals.regularIncidents)}</strong></article><article class="card"><h2>Übungen</h2><strong>${number(data.totals.exercises)}</strong></article><article class="card"><h2>Einheitsberichte</h2><strong>${number(data.totals.reports)}</strong></article><article class="card"><h2>Ø eingesetzte Mitglieder</h2><strong>${average(data.totals.averageCrew)}</strong><p class="muted">${number(data.totals.crewAssignments)} Besatzungszuordnungen in ${number(data.totals.reports)} vorhandenen Berichten.</p></article></section>
-${organization?statisticsTable('Einheiten im Vergleich',['Einheit','Alarmierte Einsätze','Einheitsberichte','Ø eingesetzte Mitglieder'],data.units.map(item=>[item.name,number(item.incidents),number(item.reports),average(item.averageCrew)])):''}
-${statisticsTable('Alarmierte Fahrzeuge',organization?['Einheit','Fahrzeug','Alarmierungen']:['Fahrzeug','Zuordnung','Alarmierungen'],data.alarmedVehicles.map(item=>organization?[item.unitName,item.name,number(item.count)]:[item.name,item.own?'Eigene Einheit':'Andere Einheit',number(item.count)]))}
-${statisticsTable('Zusätzliche tatsächlich eingesetzte Fahrzeuge',organization?['Einheit','Fahrzeug','Einheitsberichte']:['Fahrzeug','Einheitsberichte'],data.additionalVehicles.map(item=>organization?[item.unitName,item.name,number(item.count)]:[item.name,number(item.count)]))}
-${statisticsTable('Einsatzbeteiligung der Mitglieder',['Mitglied','Einheitsberichte'],data.members.map(item=>[item.name,number(item.count)]))}
-${statisticsTable('Einsätze nach Jahr',['Jahr','Einsätze'],data.years.map(item=>[item.key,number(item.count)]))}
-${statisticsTable('Einsätze nach Monat',['Monat','Einsätze'],data.months.map(item=>[statisticsMonth(item.key),number(item.count)]))}
-${statisticsTable('Einsätze nach Wochentag',['Wochentag','Einsätze'],data.weekdays.map(item=>[statisticsWeekday(item.key),number(item.count)]))}
-${statisticsTable('Werktag und Wochenende',['Zeitraum','Einsätze'],[['Werktag',number(data.workPeriods.workday)],['Wochenende',number(data.workPeriods.weekend)]])}
-${statisticsTable('Tag und Nacht',['Zeitraum','Einsätze'],[['Tag',number(data.dayPeriods.day)],['Nacht',number(data.dayPeriods.night)]])}
-<section class="card"><h2>Berechnungsgrundlage</h2><p>Alle weiteren Auswertungen enthalten reguläre Einsätze und Übungen gemeinsam. Vorhandene Einheitsberichte zählen unabhängig von ihrem aktuellen Prüfstatus. Tag: ${esc(data.periods.dayStart)} bis vor ${esc(data.periods.nightStart)} Uhr. Wochenende: ${esc(statisticsWeekday(data.periods.weekendStartDay))} ${esc(data.periods.weekendStart)} Uhr bis ${esc(statisticsWeekday(data.periods.weekendEndDay))} ${esc(data.periods.weekendEnd)} Uhr. Zeitzone: ${esc(data.range.timezone)}.</p></section>`}
-async function renderStatistics(from,to,unit=''){const root=document.querySelector('#statisticsResults'),request=String((Number(root.dataset.request)||0)+1);root.dataset.request=request;root.setAttribute('aria-busy','true');root.innerHTML='<p class="muted">Statistik wird geladen …</p>';announcer.textContent='Statistik wird geladen';const query=new URLSearchParams({from,to});if(unit)query.set('unit',unit);try{const data=await api(`/api/statistics?${query}`);if(!root.isConnected||root.dataset.request!==request)return;root.innerHTML=statisticsMarkup(data);announcer.textContent='Statistik aktualisiert'}catch(error){if(error.name==='AbortError'||!root.isConnected||root.dataset.request!==request)return;root.innerHTML='';throw error}finally{if(root.isConnected&&root.dataset.request===request)root.removeAttribute('aria-busy')}}
-function statistics(){const today=new Date(),from=new Date(today.getFullYear(),0,1),organization=me.role==='wehrleitung';app.innerHTML=`<h1>Statistik</h1><p class="muted">${organization?'Auswertung für die gesamte Wehr oder eine ausgewählte Einheit.':'Auswertung für die eigene Einheit.'} Alarmierungen und tatsächliche Beteiligung werden getrennt dargestellt.</p><section class="card"><form id="statisticsFilter" class="grid">${organization?`<label>Einheit<select name="unit"><option value="">Alle Einheiten</option>${units.map(unit=>`<option value="${unit.id}">${esc(unit.name)}</option>`).join('')}</select></label>`:''}<label>Von<input name="from" type="date" value="${statisticsDateValue(from)}" required></label><label>Bis<input name="to" type="date" value="${statisticsDateValue(today)}" required></label><button class="form-action">Auswerten</button></form></section><div id="statisticsResults"></div>`;focusMain();bindForm('#statisticsFilter',data=>renderStatistics(data.from,data.to,data.unit));renderStatistics(statisticsDateValue(from),statisticsDateValue(today)).catch(showError)}
-function membershipFields(role,selected=[]){if(role==='wehrleitung')return'<p class="muted">Die Wehrführung hat wehrweiten Zugriff und wird keiner Einheit zugeordnet.</p>';const type=role==='einheitsleitung'?'radio':'checkbox',fields=`<div class="check-grid">${units.map(unit=>`<label><input type="${type}" name="unitIds" value="${unit.id}" ${selected.includes(unit.id)?'checked':''} ${type==='radio'?'required':''}>${esc(unit.name)}</label>`).join('')}</div>`;return type==='checkbox'?`<fieldset class="unit-picker"><legend>Einheiten</legend><details><summary>Einheiten auswählen</summary>${fields}</details></fieldset>`:`<fieldset><legend>Einheit</legend>${fields}</fieldset>`}
-async function admin(){
-  const current=viewContext();
-  try{const users=await api('/api/users');if(!current())return false;window.currentUsers=users;app.innerHTML=`<section class="card"><h1>Verwaltung</h1><h2>Einheit anlegen</h2><form id="unit" class="grid"><label>Name<input name="name" required></label><button class="form-action">Anlegen</button></form></section>
-  <section class="card"><h2>Einheiten (${units.length})</h2>${units.map(unit=>`<p><b>${esc(unit.name)}</b></p>`).join('')||'<p>Keine Einheiten angelegt.</p>'}</section>
+function updateCrewCount(zone) {
+  zone.querySelector('[data-count]').textContent = zone.querySelectorAll('.crew-person').length;
+}
+function crewSummary(value, vehicleNames = []) {
+  const labels = {einheitsfuehrer: 'Einheitsführer', maschinist: 'Maschinist', besatzung: 'Besatzung'},
+    order = Object.keys(labels),
+    vehicles = new Map([...new Set(vehicleNames)].map(name => [name, {}]));
+  for (const person of apiArray(value ?? [])) {
+    const vehicle = person.vehicle || 'Ohne Fahrzeug',
+      role = person.role === 'mannschaft' ? 'besatzung' : order.includes(person.role) ? person.role : 'besatzung';
+    if (!vehicles.has(vehicle)) vehicles.set(vehicle, {});
+    const roles = vehicles.get(vehicle);
+    (roles[role] ??= []).push(person.name);
+  }
+  return (
+    [...vehicles]
+      .sort(([a], [b]) => a.localeCompare(b, 'de') || (a < b ? -1 : a > b ? 1 : 0))
+      .map(
+        ([vehicle, roles]) =>
+          `${esc(vehicle)}: ${
+            order
+              .filter(role => roles[role]?.length)
+              .map(role => `${roles[role].map(esc).join(', ')} (${labels[role]})`)
+              .join('; ') || 'Keine Besatzung'
+          }`
+      )
+      .join('<br>') || 'Keine Besatzung'
+  );
+}
+function consolidatedResources(assignments, reports, availableUnits) {
+  const unitName = assignment =>
+    availableUnits.find(unit => unit.id === assignment.unitId)?.name || `Einheit ${assignment.unitId}`;
+  return (
+    [...assignments]
+      .sort((a, b) => unitName(a).localeCompare(unitName(b), 'de') || a.unitId - b.unitId)
+      .map(assignment => {
+        const report = reports.find(item => item.unit_id === assignment.unitId),
+          vehicles = [
+            ...apiArray(assignment.vehicles)
+              .map(vehicle => (typeof vehicle === 'string' ? vehicle : vehicle.name))
+              .filter(Boolean),
+            ...(report?.additionalVehicles || [])
+          ];
+        return `<article class="report"><strong>${esc(unitName(assignment))}</strong><p>${crewSummary(report?.crew ?? [], vehicles)}</p></article>`;
+      })
+      .join('') || '<p>Keine alarmierten Einheiten.</p>'
+  );
+}
+function vehicleSummary(assignments) {
+  return (
+    assignments
+      .flatMap(assignment =>
+        apiArray(assignment.vehicles).map(vehicle =>
+          typeof vehicle === 'string'
+            ? esc(vehicle)
+            : `${esc(vehicle.name)} · ${vehicle.own ? 'eigene Einheit' : 'andere Einheit'}`
+        )
+      )
+      .join('<br>') || 'Keine Fahrzeuge'
+  );
+}
+function selectedAdditionalVehicles(selector) {
+  return [...document.querySelector(selector).querySelectorAll('[data-additional-vehicle]:checked')].map(
+    input => input.value
+  );
+}
+function selectedCrew(selector) {
+  const root = document.querySelector(selector);
+  return [...root.querySelectorAll('[data-member]')]
+    .filter(select => select.value !== 'available')
+    .map(select => {
+      const zone = [...root.querySelectorAll('.crew-zone')].find(item => item.dataset.target === select.value),
+        card = select.closest('.crew-person');
+      return {
+        memberId: Number(select.dataset.member),
+        name: card.dataset.name,
+        vehicle: zone.dataset.vehicle,
+        role: zone.dataset.role
+      };
+    });
+}
+async function loadReportCrew(
+  form,
+  selector,
+  unitId,
+  assignments,
+  selected = [],
+  additionalVehicles = [],
+  unitSelect = null,
+  focusVehicle = ''
+) {
+  const root = document.querySelector(selector),
+    submit = form.querySelector('button[type=submit]'),
+    request = String((Number(root.dataset.crewRequest) || 0) + 1);
+  root.dataset.crewRequest = request;
+  root.inert = root.crewResources?.unitId !== String(unitId);
+  submit.disabled = true;
+  try {
+    if (
+      (await renderCrew(selector, unitId, assignments, selected, additionalVehicles, request)) &&
+      root.isConnected &&
+      root.dataset.crewRequest === request &&
+      (!form.closest('dialog') || dialog.open)
+    ) {
+      submit.disabled = false;
+      root.querySelectorAll('[data-additional-vehicle]').forEach(
+        input =>
+          (input.onchange = () => {
+            const crew = selectedCrew(selector);
+            if (!input.checked && crew.some(person => person.vehicle === input.value)) {
+              input.checked = true;
+              announcer.textContent = 'Entfernen Sie zuerst die Besatzung vom Fahrzeug.';
+              return;
+            }
+            loadReportCrew(
+              form,
+              selector,
+              unitId,
+              assignments,
+              crew,
+              selectedAdditionalVehicles(selector),
+              unitSelect,
+              input.value
+            );
+          })
+      );
+      if (focusVehicle)
+        [...root.querySelectorAll('[data-additional-vehicle]')].find(input => input.value === focusVehicle)?.focus();
+    }
+  } catch (error) {
+    if (
+      error.name === 'AbortError' ||
+      root.dataset.crewRequest !== request ||
+      !root.isConnected ||
+      (form.closest('dialog') && !dialog.open)
+    )
+      return;
+    const restoreFocus = root.contains(document.activeElement);
+    root.innerHTML = `<p class="error" role="alert">${esc(error.message)}</p><button type="button">Erneut laden</button>`;
+    root.inert = false;
+    const retry = root.querySelector('button');
+    retry.onclick = () =>
+      loadReportCrew(
+        form,
+        selector,
+        unitSelect?.value || unitId,
+        assignments,
+        selected,
+        additionalVehicles,
+        unitSelect
+      );
+    if (restoreFocus) retry.focus();
+  } finally {
+    if (root.dataset.crewRequest === request) root.inert = false;
+  }
+}
+function restoreDialogFocus(opener) {
+  dialog.addEventListener(
+    'close',
+    () => {
+      if (!dialog.open && opener?.isConnected && !document.activeElement?.matches('[role=alert]')) opener.focus();
+    },
+    {once: true}
+  );
+}
+async function editReport(id, opener) {
+  const r = currentReports.find(x => x.id === id),
+    crew = apiArray(r.crew);
+  dialog.innerHTML = `<form id="edit"><h2 id="dialogTitle" tabindex="-1">Bericht bearbeiten</h2>${reportDetailsFields('edit', currentIncident, r)}<div id="editCrew" aria-live="polite"></div><label>Einsatzverlauf<textarea name="narrative" required>${esc(r.narrative)}</textarea></label><p><button type="submit" disabled>Speichern</button> <button type="button" class="secondary" data-action="closeDialog">Abbrechen</button></p></form>`;
+  restoreDialogFocus(opener);
+  dialog.showModal();
+  document.querySelector('#dialogTitle').focus();
+  const form = document.querySelector('#edit');
+  bindForm('#edit', async d => {
+    Object.assign(d, reportDetailsPayload(form));
+    d.additionalVehicles = selectedAdditionalVehicles('#editCrew');
+    d.crew = selectedCrew('#editCrew');
+    const result = await reportWrite(`/api/reports/${r.id}`, {...d, revision: r.revision}, 'PUT');
+    dialog.close();
+    await refreshIncident(r.incident_id, result);
+  });
+  bindDuration(form);
+  await loadReportCrew(form, '#editCrew', r.unit_id, currentAssignments, crew, r.additionalVehicles);
+}
+function inactiveMembersPreference(value) {
+  try {
+    const key = `inactiveMembers:${me.id}:${me.role}`;
+    if (value === undefined) return localStorage.getItem(key) === '1';
+    localStorage.setItem(key, value ? '1' : '0');
+  } catch {}
+  return Boolean(value);
+}
+function filterResourceMembers(root, showInactive) {
+  inactiveMembersPreference(showInactive);
+  let visible = 0;
+  root.querySelectorAll('[data-member-active]').forEach(member => {
+    member.hidden = !showInactive && member.dataset.memberActive === '0';
+    if (!member.hidden) visible++;
+  });
+  const count = root.querySelector('#memberCount');
+  if (count) count.textContent = visible;
+}
+function resources() {
+  const allowed = me.role === 'wehrleitung' ? units : units.filter(unit => me.unitIds.includes(unit.id)),
+    showInactive = inactiveMembersPreference();
+  app.innerHTML = `<section class="card"><h1>Mitglieder & Fahrzeuge</h1><div class="grid"><label>Einheit<select id="resourceUnit">${allowed.map(unit => `<option value="${unit.id}">${esc(unit.name)}</option>`).join('')}</select></label><fieldset class="resource-filter"><legend>Ansicht</legend><label><input id="showInactiveMembers" type="checkbox" ${showInactive ? 'checked' : ''}> Inaktive Mitglieder anzeigen</label></fieldset></div></section><div id="resources" aria-live="polite"></div>`;
+  focusMain();
+  const select = document.querySelector('#resourceUnit'),
+    toggle = document.querySelector('#showInactiveMembers');
+  select.onchange = () => renderResources(select.value).catch(showError);
+  toggle.onchange = () => filterResourceMembers(document.querySelector('#resources'), toggle.checked);
+  renderResources(select.value).catch(showError);
+}
+async function renderResources(unitId) {
+  const root = document.querySelector('#resources'),
+    request = String((Number(root.dataset.request) || 0) + 1);
+  root.dataset.request = request;
+  let data;
+  try {
+    data = await api(`/api/units/${unitId}/resources`);
+  } catch (error) {
+    if (!root.isConnected || root.dataset.request !== request) return;
+    throw error;
+  }
+  if (!root.isConnected || root.dataset.request !== request) return;
+  const {members, vehicles: own} = data,
+    showInactive = inactiveMembersPreference(),
+    external = new Map();
+  for (const incident of incidents)
+    for (const assignment of apiArray(incident.assignments))
+      if (assignment.unitId === Number(unitId))
+        for (const vehicle of apiArray(assignment.vehicles)) {
+          const item = typeof vehicle === 'string' ? {id: vehicle, name: vehicle, own: true} : vehicle,
+            key = item.id || item.name;
+          if (item.own === false && !external.has(key)) external.set(key, item);
+        }
+  const rows = list =>
+    list
+      .map(vehicle => `<p><b>${esc(vehicle.name)}</b>${vehicle.fullname ? ` · ${esc(vehicle.fullname)}` : ''}</p>`)
+      .join('') || '<p class="muted">Keine Fahrzeuge synchronisiert.</p>';
+  root.innerHTML = `<details class="card resource-section" open><summary>Mitglieder (<span id="memberCount"></span>)</summary><div class="resource-section-content">${members.map(member => `<p data-member-active="${member.active}"><b>${esc(member.name)}${member.active ? '' : ' (inaktiv)'}</b>${member.qualifications ? `<br><span class="muted">Qualifikationen: ${esc(member.qualifications)}</span>` : ''}</p>`).join('') || '<p class="muted">Keine Mitglieder synchronisiert.</p>'}</div></details><details class="card resource-section" open><summary>Eigene Fahrzeuge (${own.length})</summary><div class="resource-section-content">${rows(own)}<p class="muted">Aktueller DIVERA-Stammdatenstand.</p></div></details>${external.size ? `<details class="card resource-section" open><summary>Fahrzeuge anderer Einheiten (${external.size})</summary><div class="resource-section-content">${rows([...external.values()])}<p class="muted">Historische Snapshots aus Einsatzimporten.</p></div></details>` : ''}`;
+  filterResourceMembers(root, showInactive);
+}
+function statisticsDateValue(date) {
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+function statisticsWeekday(day) {
+  const date = new Date(2024, 0, Number(day), 12);
+  return date.toLocaleDateString(undefined, {weekday: 'long'});
+}
+function statisticsMonth(month) {
+  const [year, value] = month.split('-').map(Number);
+  return new Date(year, value - 1, 1, 12).toLocaleDateString(undefined, {month: 'long', year: 'numeric'});
+}
+function statisticsTable(title, headers, rows) {
+  return `<section class="card"><h2>${esc(title)}</h2>${rows.length ? `<div class="table-scroll" tabindex="0" role="region" aria-label="${esc(title)}"><table><caption class="sr-only">${esc(title)}</caption><thead><tr>${headers.map(header => `<th scope="col">${esc(header)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${row.map(value => `<td>${esc(value)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '<p class="muted">Keine Daten in diesem Zeitraum.</p>'}</section>`;
+}
+function statisticsMarkup(data) {
+  if (!data.totals.incidents)
+    return '<section class="card"><h2>Keine Einsätze</h2><p>Für den gewählten Zeitraum liegen keine Einsätze vor.</p></section>';
+  const number = value => Number(value).toLocaleString('de-DE'),
+    average = value => (value === null ? '–' : Number(value).toLocaleString('de-DE', {maximumFractionDigits: 2})),
+    organization = data.scope === 'organization';
+  return `<section class="statistics-summary"><article class="card"><h2>Einsätze gesamt</h2><strong>${number(data.totals.incidents)}</strong></article><article class="card"><h2>Reguläre Einsätze</h2><strong>${number(data.totals.regularIncidents)}</strong></article><article class="card"><h2>Übungen</h2><strong>${number(data.totals.exercises)}</strong></article><article class="card"><h2>Einheitsberichte</h2><strong>${number(data.totals.reports)}</strong></article><article class="card"><h2>Ø eingesetzte Mitglieder</h2><strong>${average(data.totals.averageCrew)}</strong><p class="muted">${number(data.totals.crewAssignments)} Besatzungszuordnungen in ${number(data.totals.reports)} vorhandenen Berichten.</p></article></section>
+${
+  organization
+    ? statisticsTable(
+        'Einheiten im Vergleich',
+        ['Einheit', 'Alarmierte Einsätze', 'Einheitsberichte', 'Ø eingesetzte Mitglieder'],
+        data.units.map(item => [item.name, number(item.incidents), number(item.reports), average(item.averageCrew)])
+      )
+    : ''
+}
+${statisticsTable(
+  'Alarmierte Fahrzeuge',
+  organization ? ['Einheit', 'Fahrzeug', 'Alarmierungen'] : ['Fahrzeug', 'Zuordnung', 'Alarmierungen'],
+  data.alarmedVehicles.map(item =>
+    organization
+      ? [item.unitName, item.name, number(item.count)]
+      : [item.name, item.own ? 'Eigene Einheit' : 'Andere Einheit', number(item.count)]
+  )
+)}
+${statisticsTable(
+  'Zusätzliche tatsächlich eingesetzte Fahrzeuge',
+  organization ? ['Einheit', 'Fahrzeug', 'Einheitsberichte'] : ['Fahrzeug', 'Einheitsberichte'],
+  data.additionalVehicles.map(item =>
+    organization ? [item.unitName, item.name, number(item.count)] : [item.name, number(item.count)]
+  )
+)}
+${statisticsTable(
+  'Einsatzbeteiligung der Mitglieder',
+  ['Mitglied', 'Einheitsberichte'],
+  data.members.map(item => [item.name, number(item.count)])
+)}
+${statisticsTable(
+  'Einsätze nach Jahr',
+  ['Jahr', 'Einsätze'],
+  data.years.map(item => [item.key, number(item.count)])
+)}
+${statisticsTable(
+  'Einsätze nach Monat',
+  ['Monat', 'Einsätze'],
+  data.months.map(item => [statisticsMonth(item.key), number(item.count)])
+)}
+${statisticsTable(
+  'Einsätze nach Wochentag',
+  ['Wochentag', 'Einsätze'],
+  data.weekdays.map(item => [statisticsWeekday(item.key), number(item.count)])
+)}
+${statisticsTable(
+  'Werktag und Wochenende',
+  ['Zeitraum', 'Einsätze'],
+  [
+    ['Werktag', number(data.workPeriods.workday)],
+    ['Wochenende', number(data.workPeriods.weekend)]
+  ]
+)}
+${statisticsTable(
+  'Tag und Nacht',
+  ['Zeitraum', 'Einsätze'],
+  [
+    ['Tag', number(data.dayPeriods.day)],
+    ['Nacht', number(data.dayPeriods.night)]
+  ]
+)}
+<section class="card"><h2>Berechnungsgrundlage</h2><p>Alle weiteren Auswertungen enthalten reguläre Einsätze und Übungen gemeinsam. Vorhandene Einheitsberichte zählen unabhängig von ihrem aktuellen Prüfstatus. Tag: ${esc(data.periods.dayStart)} bis vor ${esc(data.periods.nightStart)} Uhr. Wochenende: ${esc(statisticsWeekday(data.periods.weekendStartDay))} ${esc(data.periods.weekendStart)} Uhr bis ${esc(statisticsWeekday(data.periods.weekendEndDay))} ${esc(data.periods.weekendEnd)} Uhr. Zeitzone: ${esc(data.range.timezone)}.</p></section>`;
+}
+async function renderStatistics(from, to, unit = '') {
+  const root = document.querySelector('#statisticsResults'),
+    request = String((Number(root.dataset.request) || 0) + 1);
+  root.dataset.request = request;
+  root.setAttribute('aria-busy', 'true');
+  root.innerHTML = '<p class="muted">Statistik wird geladen …</p>';
+  announcer.textContent = 'Statistik wird geladen';
+  const query = new URLSearchParams({from, to});
+  if (unit) query.set('unit', unit);
+  try {
+    const data = await api(`/api/statistics?${query}`);
+    if (!root.isConnected || root.dataset.request !== request) return;
+    root.innerHTML = statisticsMarkup(data);
+    announcer.textContent = 'Statistik aktualisiert';
+  } catch (error) {
+    if (error.name === 'AbortError' || !root.isConnected || root.dataset.request !== request) return;
+    root.innerHTML = '';
+    throw error;
+  } finally {
+    if (root.isConnected && root.dataset.request === request) root.removeAttribute('aria-busy');
+  }
+}
+function statistics() {
+  const today = new Date(),
+    from = new Date(today.getFullYear(), 0, 1),
+    organization = me.role === 'wehrleitung';
+  app.innerHTML = `<h1>Statistik</h1><p class="muted">${organization ? 'Auswertung für die gesamte Wehr oder eine ausgewählte Einheit.' : 'Auswertung für die eigene Einheit.'} Alarmierungen und tatsächliche Beteiligung werden getrennt dargestellt.</p><section class="card"><form id="statisticsFilter" class="grid">${organization ? `<label>Einheit<select name="unit"><option value="">Alle Einheiten</option>${units.map(unit => `<option value="${unit.id}">${esc(unit.name)}</option>`).join('')}</select></label>` : ''}<label>Von<input name="from" type="date" value="${statisticsDateValue(from)}" required></label><label>Bis<input name="to" type="date" value="${statisticsDateValue(today)}" required></label><button class="form-action">Auswerten</button></form></section><div id="statisticsResults"></div>`;
+  focusMain();
+  bindForm('#statisticsFilter', data => renderStatistics(data.from, data.to, data.unit));
+  renderStatistics(statisticsDateValue(from), statisticsDateValue(today)).catch(showError);
+}
+function membershipFields(role, selected = []) {
+  if (role === 'wehrleitung')
+    return '<p class="muted">Die Wehrführung hat wehrweiten Zugriff und wird keiner Einheit zugeordnet.</p>';
+  const type = role === 'einheitsleitung' ? 'radio' : 'checkbox',
+    fields = `<div class="check-grid">${units.map(unit => `<label><input type="${type}" name="unitIds" value="${unit.id}" ${selected.includes(unit.id) ? 'checked' : ''} ${type === 'radio' ? 'required' : ''}>${esc(unit.name)}</label>`).join('')}</div>`;
+  return type === 'checkbox'
+    ? `<fieldset class="unit-picker"><legend>Einheiten</legend><details><summary>Einheiten auswählen</summary>${fields}</details></fieldset>`
+    : `<fieldset><legend>Einheit</legend>${fields}</fieldset>`;
+}
+async function admin() {
+  const current = viewContext();
+  try {
+    const users = await api('/api/users');
+    if (!current()) return false;
+    window.currentUsers = users;
+    app.innerHTML = `<section class="card"><h1>Verwaltung</h1><h2>Einheit anlegen</h2><form id="unit" class="grid"><label>Name<input name="name" required></label><button class="form-action">Anlegen</button></form></section>
+  <section class="card"><h2>Einheiten (${units.length})</h2>${units.map(unit => `<p><b>${esc(unit.name)}</b></p>`).join('') || '<p>Keine Einheiten angelegt.</p>'}</section>
   <section class="card"><h2>Benutzer anlegen</h2><p class="muted">Der Benutzer erhält per E-Mail einen sieben Tage gültigen Link, um sein Konto zu aktivieren und ein Passwort festzulegen.</p><form id="user" class="grid"><label>Name<input name="name" autocomplete="name" required></label><label>E-Mail<input name="email" type="email" autocomplete="email" required></label>
   <label>Rolle<select name="role"><option value="fuehrungskraft">Führungskraft</option><option value="einheitsleitung">Einheitsführung</option><option value="wehrleitung">Wehrführung</option></select></label>
   <div id="userMemberships">${membershipFields('fuehrungskraft')}</div>
   <button class="form-action">Einladung senden</button></form></section>
-  <section class="card"><h2>Benutzer</h2><ul class="user-list">${users.map(u=>`<li><b>${esc(u.name)}</b> · ${esc(roleLabels[u.role]||u.role)} · ${esc(u.unit_names||'wehrweit')} <button data-action="editUser" data-id="${u.id}">Bearbeiten</button><br><small class="muted">Letzte gespeicherte Anmeldung: ${u.loginHistory.length?formatDateTime(u.loginHistory[0]):'keine im Aufbewahrungszeitraum'}</small></li>`).join('')}</ul></section>`;
-  focusMain();bindUnitPickers(app);
-  const role=document.querySelector('#user [name=role]');role.onchange=()=>{const memberships=document.querySelector('#userMemberships');memberships.innerHTML=membershipFields(role.value);bindUnitPickers(memberships)};
-  bindForm('#unit',async d=>{await api('/api/units',{method:'POST',body:JSON.stringify(d)});await load();await admin()});
-  bindForm('#user',async d=>{d.unitIds=[...document.querySelectorAll('#user [name=unitIds]:checked')].map(o=>o.value);await api('/api/users',{method:'POST',body:JSON.stringify(d)});await admin()})}catch(e){if(current())showError(e);return false}
+  <section class="card"><h2>Benutzer</h2><ul class="user-list">${users.map(u => `<li><b>${esc(u.name)}</b> · ${esc(roleLabels[u.role] || u.role)} · ${esc(u.unit_names || 'wehrweit')} <button data-action="editUser" data-id="${u.id}">Bearbeiten</button><br><small class="muted">Letzte gespeicherte Anmeldung: ${u.loginHistory.length ? formatDateTime(u.loginHistory[0]) : 'keine im Aufbewahrungszeitraum'}</small></li>`).join('')}</ul></section>`;
+    focusMain();
+    bindUnitPickers(app);
+    const role = document.querySelector('#user [name=role]');
+    role.onchange = () => {
+      const memberships = document.querySelector('#userMemberships');
+      memberships.innerHTML = membershipFields(role.value);
+      bindUnitPickers(memberships);
+    };
+    bindForm('#unit', async d => {
+      await api('/api/units', {method: 'POST', body: JSON.stringify(d)});
+      await load();
+      await admin();
+    });
+    bindForm('#user', async d => {
+      d.unitIds = [...document.querySelectorAll('#user [name=unitIds]:checked')].map(o => o.value);
+      await api('/api/users', {method: 'POST', body: JSON.stringify(d)});
+      await admin();
+    });
+  } catch (e) {
+    if (current()) showError(e);
+    return false;
+  }
 }
-function editUser(id,opener){const u=currentUsers.find(x=>x.id===id),ids=apiArray(u.unit_ids),reset=u.id===me.id?'<p class="muted">Für den eigenen Zugang kann keine neue Einladung versendet werden.</p>':`<p><button type="button" class="secondary" data-action="resetUser" data-id="${u.id}">Zugang zurücksetzen und neu einladen</button><br><small class="muted">Verwendet die gespeicherte E-Mail-Adresse. Änderungen zuerst speichern.</small></p>`;dialog.innerHTML=`<form id="editUser"><h2 id="dialogTitle" tabindex="-1">Benutzer bearbeiten</h2><div class="grid"><label>Name<input name="name" value="${esc(u.name)}" autocomplete="name" required></label><label>E-Mail<input name="email" type="email" value="${esc(u.email)}" autocomplete="email" required></label><label>Rolle<select name="role">${['fuehrungskraft','einheitsleitung','wehrleitung'].map(r=>`<option value="${r}" ${u.role===r?'selected':''}>${roleLabels[r]}</option>`).join('')}</select></label><div id="editMemberships">${membershipFields(u.role,ids)}</div><label>Neues Passwort (optional)<input name="password" type="password" autocomplete="new-password" minlength="10"></label></div><p><button>Speichern</button> <button type="button" class="secondary" data-action="closeDialog">Abbrechen</button></p>${reset}</form>`;restoreDialogFocus(opener);dialog.showModal();document.querySelector('#dialogTitle').focus();bindUnitPickers(dialog);const role=dialog.querySelector('[name=role]');role.onchange=()=>{const memberships=document.querySelector('#editMemberships');memberships.innerHTML=membershipFields(role.value);bindUnitPickers(memberships)};bindForm('#editUser',async d=>{d.unitIds=[...document.querySelectorAll('#editUser [name=unitIds]:checked')].map(o=>o.value);await api(`/api/users/${id}`,{method:'PUT',body:JSON.stringify(d)});dialog.close();admin()})}
-async function resetUser(id,button){const user=currentUsers.find(item=>item.id===id);if(!user||!confirm(`Zugang von ${user.name} zurücksetzen? Das aktuelle Passwort wird ungültig, alle Sitzungen werden beendet und eine neue sieben Tage gültige Einladung wird versendet.`))return;button.disabled=true;try{await api(`/api/users/${id}/invitation`,{method:'POST'});dialog.close();if(await admin()!==false)announcer.textContent=`Neue Einladung an ${user.name} versendet.`}finally{if(button.isConnected)button.disabled=false}}
-async function systemOverview(){const current=viewContext();try{const data=await api('/api/system'),yes=value=>value?'Ja':'Nein';if(!current())return false;app.innerHTML=`<h1>System</h1>
-  <section class="card"><h2>Anwendung</h2><p><b>Adresse:</b> ${esc(data.application.url||'Nicht konfiguriert')}<br><b>Build-ID:</b> ${esc(data.application.buildId)}<br><b>PHP:</b> ${esc(data.application.phpVersion)}<br><b>Einrichtungstoken:</b> ${yes(data.application.setupConfigured)}</p></section>
-  <section class="card"><h2>Datenbank</h2><p><b>Status:</b> ${esc(data.database.status)}<br><b>Datenbank:</b> ${esc(data.database.name||'–')}<br><b>Server:</b> ${esc(data.database.serverVersion||'–')}</p></section>
-  <section class="card"><h2>E-Mail</h2><p><b>Konfiguriert:</b> ${yes(data.email.configured)}<br><b>Transport:</b> ${esc(data.email.transport)}<br><b>Absender:</b> ${esc(data.email.from||'–')}${data.email.host?`<br><b>Server:</b> ${esc(data.email.host)}:${esc(data.email.port)}<br><b>Benutzer:</b> ${esc(data.email.username)}`:''}${data.email.error?`<br><span class="error">${esc(data.email.error)}</span>`:''}</p></section>
-  <section class="card"><h2>Einheiten (${data.units.length})</h2>${data.units.map(unit=>`<p><b>${esc(unit.name)}</b> · DIVERA ${unit.diveraConfigured?'konfiguriert':'nicht konfiguriert'}</p>`).join('')||'<p>Keine Einheiten angelegt.</p>'}</section>
-  <section class="card"><h2>Benutzer (${data.users.length})</h2>${data.users.map(user=>`<p><b>${esc(user.name)}</b> · ${esc(user.email)} · ${esc(roleLabels[user.role]||user.role)} · ${esc(user.units||'wehrweit')}</p>`).join('')||'<p>Keine Benutzer angelegt.</p>'}</section>`;focusMain()}catch(e){if(current())showError(e);return false}}
-function divera(){const allowed=me.role==='wehrleitung'?units:units.filter(u=>me.unitIds.includes(u.id)),maySync=me.role!=='fuehrungskraft';app.innerHTML=`<h1>DIVERA 24/7</h1>${maySync?`<section class="card"><h2>Konfiguration</h2><form id="divera" class="grid">
-  <label>Einheit<select name="unitId">${allowed.map(u=>`<option value="${u.id}">${esc(u.name)}${u.divera_configured?' ✓':''}</option>`).join('')}</select></label>
-  <label>Access-Key<input name="accessKey" type="password" required autocomplete="off"></label><button class="form-action">Speichern</button></form></section>`:''}
-  <section class="card"><h2>Daten abrufen</h2><label>Einheit<select id="pullUnit">${allowed.map(u=>`<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></label><p><button data-action="pullDivera">Einsätze abrufen</button>${maySync?' <button data-action="syncDivera" data-kind="members">Mitglieder synchronisieren</button> <button data-action="syncDivera" data-kind="vehicles">Fahrzeuge synchronisieren</button> <button data-action="syncDivera" data-kind="all">Alles synchronisieren</button>':''}</p><div id="diveraResults" role="status" aria-live="polite"></div></section>`;
-  focusMain();const select=document.querySelector('#pullUnit'),out=document.querySelector('#diveraResults');select.onchange=()=>{out.dataset.request=String((Number(out.dataset.request)||0)+1);delete out.dataset.busy;out.removeAttribute('aria-busy');out.replaceChildren()};if(maySync)bindForm('#divera',async d=>{await api(`/api/units/${d.unitId}/divera`,{method:'PUT',body:JSON.stringify(d)});await load();divera()})}
-function importedForUnit(diveraId,unitId){return incidents.some(incident=>incident.divera_id===String(diveraId)&&apiArray(incident.assignments).some(assignment=>assignment.unitId===Number(unitId)))}
-function diveraRequest(){const select=document.querySelector('#pullUnit'),out=document.querySelector('#diveraResults');if(out.dataset.busy)return null;const unitId=select.value,request=String((Number(out.dataset.request)||0)+1),active=viewContext(out);out.dataset.request=request;out.dataset.busy='true';out.setAttribute('aria-busy','true');const current=()=>active()&&out.dataset.request===request&&select.value===unitId;return{unitId,out,current,finish(){if(current()){delete out.dataset.busy;out.removeAttribute('aria-busy')}}}}
-async function pullDivera(){const request=diveraRequest();if(!request)return;const {unitId,out,current}=request;out.textContent='Lade …';try{const data=await api(`/api/units/${unitId}/divera`);if(!current())return;out.innerHTML=data.alarms.map((a,i)=>{const imported=importedForUnit(a.id,unitId);return `<article class="report"><b>${esc(a.title)}</b><p>${esc(a.address)}<br><span class="muted">${a.vehicles.map(v=>`${esc(v.name)} · ${v.own?'eigene Einheit':'andere Einheit'}`).join(', ')}</span></p><button data-import="${i}" ${imported?'disabled':''}>${imported?'Bereits importiert':'Importieren'}</button></article>`}).join('')||'<p>Keine Einsätze gefunden.</p>';out.querySelectorAll('[data-import]').forEach(button=>button.onclick=()=>importDivera(data.alarms[Number(button.dataset.import)].id,button))}catch(e){if(current()&&e.name!=='AbortError')out.innerHTML=`<p class="error" role="alert">${esc(e.message)}</p>`}finally{request.finish()}}
-async function importDivera(id,button){if(diveraWritePending||button.disabled||!button.isConnected)return;const request=diveraRequest();if(!request)return;diveraWritePending=true;const {unitId,out,current}=request;button.disabled=true;button.textContent='Importiere …';out.querySelector('[data-import-message]')?.remove();let imported=false;try{const result=await api(`/api/units/${unitId}/divera/import`,{method:'POST',body:JSON.stringify({id})});if(!current())return;imported=true;button.textContent='Bereits importiert';out.insertAdjacentHTML('beforeend',`<div data-import-message><p>Einsatz importiert.</p>${result.warning?`<p class="error" role="alert">${esc(result.warning)}</p>`:''}</div>`);announcer.textContent=result.warning||'Einsatz importiert';await load(current)}catch(error){if(current()&&error.name!=='AbortError')out.insertAdjacentHTML('beforeend',`<p data-import-message class="error" role="alert">${esc(error.message)}</p>`)}finally{diveraWritePending=false;if(current()&&!imported){button.disabled=false;button.textContent='Importieren'}request.finish()}}
-async function syncDivera(kind){if(diveraWritePending)return;const request=diveraRequest();if(!request)return;diveraWritePending=true;const {unitId,out,current}=request,path=kind==='all'?'sync':`${kind}/sync`;let completed=false;out.textContent='Synchronisiere …';try{const result=await api(`/api/units/${unitId}/divera/${path}`,{method:'POST'});if(!current())return;completed=true;out.innerHTML=(kind==='all'?`<p>${result.members} Mitglieder, ${result.qualifications} Qualifikationen und ${result.vehicles} Fahrzeuge synchronisiert. ${result.incidentsCreated} Einsätze neu importiert, ${result.incidentsUpdated} aktualisiert, ${result.incidentsUnchanged} unverändert.</p>`:`<p>${result.count} ${kind==='members'?'Mitglieder':'Fahrzeuge'} synchronisiert.</p>`)+(result.warning?`<p class="error" role="alert">${esc(result.warning)}</p>`:'');announcer.textContent=result.warning||'Synchronisation abgeschlossen';if(kind==='all')await load(current)}catch(e){if(current()&&e.name!=='AbortError'){if(!completed)out.textContent='';out.insertAdjacentHTML('beforeend',`<p class="error" role="alert">${esc(e.message)}</p>`)}}finally{diveraWritePending=false;request.finish()}}
+function editUser(id, opener) {
+  const u = currentUsers.find(x => x.id === id),
+    ids = apiArray(u.unit_ids),
+    reset =
+      u.id === me.id
+        ? '<p class="muted">Für den eigenen Zugang kann keine neue Einladung versendet werden.</p>'
+        : `<p><button type="button" class="secondary" data-action="resetUser" data-id="${u.id}">Zugang zurücksetzen und neu einladen</button><br><small class="muted">Verwendet die gespeicherte E-Mail-Adresse. Änderungen zuerst speichern.</small></p>`;
+  dialog.innerHTML = `<form id="editUser"><h2 id="dialogTitle" tabindex="-1">Benutzer bearbeiten</h2><div class="grid"><label>Name<input name="name" value="${esc(u.name)}" autocomplete="name" required></label><label>E-Mail<input name="email" type="email" value="${esc(u.email)}" autocomplete="email" required></label><label>Rolle<select name="role">${['fuehrungskraft', 'einheitsleitung', 'wehrleitung'].map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${roleLabels[r]}</option>`).join('')}</select></label><div id="editMemberships">${membershipFields(u.role, ids)}</div><label>Neues Passwort (optional)<input name="password" type="password" autocomplete="new-password" minlength="10"></label></div><p><button>Speichern</button> <button type="button" class="secondary" data-action="closeDialog">Abbrechen</button></p>${reset}</form>`;
+  restoreDialogFocus(opener);
+  dialog.showModal();
+  document.querySelector('#dialogTitle').focus();
+  bindUnitPickers(dialog);
+  const role = dialog.querySelector('[name=role]');
+  role.onchange = () => {
+    const memberships = document.querySelector('#editMemberships');
+    memberships.innerHTML = membershipFields(role.value);
+    bindUnitPickers(memberships);
+  };
+  bindForm('#editUser', async d => {
+    d.unitIds = [...document.querySelectorAll('#editUser [name=unitIds]:checked')].map(o => o.value);
+    await api(`/api/users/${id}`, {method: 'PUT', body: JSON.stringify(d)});
+    dialog.close();
+    admin();
+  });
+}
+async function resetUser(id, button) {
+  const user = currentUsers.find(item => item.id === id);
+  if (
+    !user ||
+    !confirm(
+      `Zugang von ${user.name} zurücksetzen? Das aktuelle Passwort wird ungültig, alle Sitzungen werden beendet und eine neue sieben Tage gültige Einladung wird versendet.`
+    )
+  )
+    return;
+  button.disabled = true;
+  try {
+    await api(`/api/users/${id}/invitation`, {method: 'POST'});
+    dialog.close();
+    if ((await admin()) !== false) announcer.textContent = `Neue Einladung an ${user.name} versendet.`;
+  } finally {
+    if (button.isConnected) button.disabled = false;
+  }
+}
+async function systemOverview() {
+  const current = viewContext();
+  try {
+    const data = await api('/api/system'),
+      yes = value => (value ? 'Ja' : 'Nein');
+    if (!current()) return false;
+    app.innerHTML = `<h1>System</h1>
+  <section class="card"><h2>Anwendung</h2><p><b>Adresse:</b> ${esc(data.application.url || 'Nicht konfiguriert')}<br><b>Build-ID:</b> ${esc(data.application.buildId)}<br><b>PHP:</b> ${esc(data.application.phpVersion)}<br><b>Einrichtungstoken:</b> ${yes(data.application.setupConfigured)}</p></section>
+  <section class="card"><h2>Datenbank</h2><p><b>Status:</b> ${esc(data.database.status)}<br><b>Datenbank:</b> ${esc(data.database.name || '–')}<br><b>Server:</b> ${esc(data.database.serverVersion || '–')}</p></section>
+  <section class="card"><h2>E-Mail</h2><p><b>Konfiguriert:</b> ${yes(data.email.configured)}<br><b>Transport:</b> ${esc(data.email.transport)}<br><b>Absender:</b> ${esc(data.email.from || '–')}${data.email.host ? `<br><b>Server:</b> ${esc(data.email.host)}:${esc(data.email.port)}<br><b>Benutzer:</b> ${esc(data.email.username)}` : ''}${data.email.error ? `<br><span class="error">${esc(data.email.error)}</span>` : ''}</p></section>
+  <section class="card"><h2>Einheiten (${data.units.length})</h2>${data.units.map(unit => `<p><b>${esc(unit.name)}</b> · DIVERA ${unit.diveraConfigured ? 'konfiguriert' : 'nicht konfiguriert'}</p>`).join('') || '<p>Keine Einheiten angelegt.</p>'}</section>
+  <section class="card"><h2>Benutzer (${data.users.length})</h2>${data.users.map(user => `<p><b>${esc(user.name)}</b> · ${esc(user.email)} · ${esc(roleLabels[user.role] || user.role)} · ${esc(user.units || 'wehrweit')}</p>`).join('') || '<p>Keine Benutzer angelegt.</p>'}</section>`;
+    focusMain();
+  } catch (e) {
+    if (current()) showError(e);
+    return false;
+  }
+}
+function divera() {
+  const allowed = me.role === 'wehrleitung' ? units : units.filter(u => me.unitIds.includes(u.id)),
+    maySync = me.role !== 'fuehrungskraft';
+  app.innerHTML = `<h1>DIVERA 24/7</h1>${
+    maySync
+      ? `<section class="card"><h2>Konfiguration</h2><form id="divera" class="grid">
+  <label>Einheit<select name="unitId">${allowed.map(u => `<option value="${u.id}">${esc(u.name)}${u.divera_configured ? ' ✓' : ''}</option>`).join('')}</select></label>
+  <label>Access-Key<input name="accessKey" type="password" required autocomplete="off"></label><button class="form-action">Speichern</button></form></section>`
+      : ''
+  }
+  <section class="card"><h2>Daten abrufen</h2><label>Einheit<select id="pullUnit">${allowed.map(u => `<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></label><p><button data-action="pullDivera">Einsätze abrufen</button>${maySync ? ' <button data-action="syncDivera" data-kind="members">Mitglieder synchronisieren</button> <button data-action="syncDivera" data-kind="vehicles">Fahrzeuge synchronisieren</button> <button data-action="syncDivera" data-kind="all">Alles synchronisieren</button>' : ''}</p><div id="diveraResults" role="status" aria-live="polite"></div></section>`;
+  focusMain();
+  const select = document.querySelector('#pullUnit'),
+    out = document.querySelector('#diveraResults');
+  select.onchange = () => {
+    out.dataset.request = String((Number(out.dataset.request) || 0) + 1);
+    delete out.dataset.busy;
+    out.removeAttribute('aria-busy');
+    out.replaceChildren();
+  };
+  if (maySync)
+    bindForm('#divera', async d => {
+      await api(`/api/units/${d.unitId}/divera`, {method: 'PUT', body: JSON.stringify(d)});
+      await load();
+      divera();
+    });
+}
+function importedForUnit(diveraId, unitId) {
+  return incidents.some(
+    incident =>
+      incident.divera_id === String(diveraId) &&
+      apiArray(incident.assignments).some(assignment => assignment.unitId === Number(unitId))
+  );
+}
+function diveraRequest() {
+  const select = document.querySelector('#pullUnit'),
+    out = document.querySelector('#diveraResults');
+  if (out.dataset.busy) return null;
+  const unitId = select.value,
+    request = String((Number(out.dataset.request) || 0) + 1),
+    active = viewContext(out);
+  out.dataset.request = request;
+  out.dataset.busy = 'true';
+  out.setAttribute('aria-busy', 'true');
+  const current = () => active() && out.dataset.request === request && select.value === unitId;
+  return {
+    unitId,
+    out,
+    current,
+    finish() {
+      if (current()) {
+        delete out.dataset.busy;
+        out.removeAttribute('aria-busy');
+      }
+    }
+  };
+}
+async function pullDivera() {
+  const request = diveraRequest();
+  if (!request) return;
+  const {unitId, out, current} = request;
+  out.textContent = 'Lade …';
+  try {
+    const data = await api(`/api/units/${unitId}/divera`);
+    if (!current()) return;
+    out.innerHTML =
+      data.alarms
+        .map((a, i) => {
+          const imported = importedForUnit(a.id, unitId);
+          return `<article class="report"><b>${esc(a.title)}</b><p>${esc(a.address)}<br><span class="muted">${a.vehicles.map(v => `${esc(v.name)} · ${v.own ? 'eigene Einheit' : 'andere Einheit'}`).join(', ')}</span></p><button data-import="${i}" ${imported ? 'disabled' : ''}>${imported ? 'Bereits importiert' : 'Importieren'}</button></article>`;
+        })
+        .join('') || '<p>Keine Einsätze gefunden.</p>';
+    out
+      .querySelectorAll('[data-import]')
+      .forEach(button => (button.onclick = () => importDivera(data.alarms[Number(button.dataset.import)].id, button)));
+  } catch (e) {
+    if (current() && e.name !== 'AbortError') out.innerHTML = `<p class="error" role="alert">${esc(e.message)}</p>`;
+  } finally {
+    request.finish();
+  }
+}
+async function importDivera(id, button) {
+  if (diveraWritePending || button.disabled || !button.isConnected) return;
+  const request = diveraRequest();
+  if (!request) return;
+  diveraWritePending = true;
+  const {unitId, out, current} = request;
+  button.disabled = true;
+  button.textContent = 'Importiere …';
+  out.querySelector('[data-import-message]')?.remove();
+  let imported = false;
+  try {
+    const result = await api(`/api/units/${unitId}/divera/import`, {method: 'POST', body: JSON.stringify({id})});
+    if (!current()) return;
+    imported = true;
+    button.textContent = 'Bereits importiert';
+    out.insertAdjacentHTML(
+      'beforeend',
+      `<div data-import-message><p>Einsatz importiert.</p>${result.warning ? `<p class="error" role="alert">${esc(result.warning)}</p>` : ''}</div>`
+    );
+    announcer.textContent = result.warning || 'Einsatz importiert';
+    await load(current);
+  } catch (error) {
+    if (current() && error.name !== 'AbortError')
+      out.insertAdjacentHTML(
+        'beforeend',
+        `<p data-import-message class="error" role="alert">${esc(error.message)}</p>`
+      );
+  } finally {
+    diveraWritePending = false;
+    if (current() && !imported) {
+      button.disabled = false;
+      button.textContent = 'Importieren';
+    }
+    request.finish();
+  }
+}
+async function syncDivera(kind) {
+  if (diveraWritePending) return;
+  const request = diveraRequest();
+  if (!request) return;
+  diveraWritePending = true;
+  const {unitId, out, current} = request,
+    path = kind === 'all' ? 'sync' : `${kind}/sync`;
+  let completed = false;
+  out.textContent = 'Synchronisiere …';
+  try {
+    const result = await api(`/api/units/${unitId}/divera/${path}`, {method: 'POST'});
+    if (!current()) return;
+    completed = true;
+    out.innerHTML =
+      (kind === 'all'
+        ? `<p>${result.members} Mitglieder, ${result.qualifications} Qualifikationen und ${result.vehicles} Fahrzeuge synchronisiert. ${result.incidentsCreated} Einsätze neu importiert, ${result.incidentsUpdated} aktualisiert, ${result.incidentsUnchanged} unverändert.</p>`
+        : `<p>${result.count} ${kind === 'members' ? 'Mitglieder' : 'Fahrzeuge'} synchronisiert.</p>`) +
+      (result.warning ? `<p class="error" role="alert">${esc(result.warning)}</p>` : '');
+    announcer.textContent = result.warning || 'Synchronisation abgeschlossen';
+    if (kind === 'all') await load(current);
+  } catch (e) {
+    if (current() && e.name !== 'AbortError') {
+      if (!completed) out.textContent = '';
+      out.insertAdjacentHTML('beforeend', `<p class="error" role="alert">${esc(e.message)}</p>`);
+    }
+  } finally {
+    diveraWritePending = false;
+    request.finish();
+  }
+}
 start().catch(showError);

@@ -25,6 +25,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Changed
 
+- `public/app.js` ist einmalig lesbar formatiert (eine Anweisung pro Zeile), damit Reviews einschließlich des Copilot-Reviews die Browserlogik nicht mehr als generierte Datei überspringen. Der minifizierte Code ist vor und nach der Formatierung identisch; HTML-Template-Strings bleiben bytegleich. Quelltextprüfungen lesen Funktionen jetzt vollständig über mehrere Zeilen aus, und `.git-blame-ignore-revs` blendet den Formatierungscommit in `git blame` aus (#126).
 - Browserprüfungen und die unverändert 17 Screenshots laufen für alle Pull Requests und Pushs auf `main`, auch bei reinen Backendänderungen. Der DIVERA-Vertragscheck läuft zusätzlich bei Pull Requests mit Änderungen an API, Fake, Vertragstest oder dessen Workflow.
 - Die Smoke-Suite verweigert den Start bei abgeschalteten PHP-Assertions; CI aktiviert sie ausdrücklich.
 
