@@ -72,10 +72,13 @@ export async function checkUiLifecycle(browser, coverage) {
       await page.evaluate(() => Promise.allSettled(uiOperations));
     }
     async function close() {
-      await settle();
-      assert.deepEqual(errors, [], 'Keine unbehandelten Promise-Ablehnungen');
-      await coverage.collect(page, 'lifecycle');
-      await context.close();
+      try {
+        await settle();
+        await coverage.collect(page, 'lifecycle');
+      } finally {
+        await context.close();
+      }
+      assert.deepEqual(errors, [], 'Keine unbehandelten Browserfehler');
     }
     return {page, calls, handlers, hold, settle, close};
   }

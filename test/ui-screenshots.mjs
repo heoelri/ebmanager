@@ -41,8 +41,11 @@ async function login(email) {
 }
 
 async function close({context, page, errors}) {
-  await coverage.collect(page, 'backend');
-  await context.close();
+  try {
+    await coverage.collect(page, 'backend');
+  } finally {
+    await context.close();
+  }
   assert.deepEqual(errors, [], 'Keine unbehandelten Browserfehler');
 }
 
