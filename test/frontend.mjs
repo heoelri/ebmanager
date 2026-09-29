@@ -36,10 +36,15 @@ process.env.TZ = 'Europe/Berlin';
 const documentHtml = fs.readFileSync('public/index.html', 'utf8');
 const javascript = fs.readFileSync('public/app.js', 'utf8');
 const html = `${documentHtml}\n${javascript}`;
-// Liest eine vollständige Top-Level-Deklaration aus dem formatierten public/app.js; eingerückte Zeilen und mehrzeilige Signaturen gehören zum Rumpf.
-const declaration = name => javascript.match(
-  new RegExp(`^(?:(?:async )?function ${name}\\b|const ${name} =).*(?:\\n(?:[ \\t]|\\)).*)*(?:\\n[}\\]].*)?`, 'm')
+// Liest eine vollständige Top-Level-Deklaration aus dem formatierten public/app.js; eingerückte Zeilen, Leerzeilen und mehrzeilige Signaturen gehören zum Rumpf.
+const declaration = (name, source = javascript) => source.match(
+  new RegExp(`^(?:(?:async )?function ${name}\\b|const ${name} =).*(?:\\n(?:(?=[ \\t)])|(?=\\n)).*)*(?:\\n[}\\]].*)?`, 'm')
 )?.[0];
+// Leerzeilen im Rumpf kürzen die Deklaration nicht; die folgende Top-Level-Funktion gehört nicht dazu.
+assert.equal(
+  declaration('first', 'function first(\n  a\n) {\n  one();\n\n  two();\n}\n\nfunction second() {}\n'),
+  'function first(\n  a\n) {\n  one();\n\n  two();\n}'
+);
 const css = fs.readFileSync('public/styles.css', 'utf8');
 const deployment = fs.readFileSync('.github/workflows/deploy.yml', 'utf8');
 const screenshotsWorkflow = fs.readFileSync('.github/workflows/ui-screenshots.yml', 'utf8');
