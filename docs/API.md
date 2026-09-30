@@ -257,7 +257,11 @@ Ein initial durch W angelegter Bericht ist für E und F der berichtenden
 Einheit lesbar. Bei `is_restricted=true` liefern Berichtslisten und
 Berichts-PDFs für E/F keine Berichtsdaten; `assignments[].reportRestricted`
 bleibt als boolean sichtbar, damit der Browser neben Einsatz und
-Fahrzeug-Snapshot einen Einschränkungshinweis anzeigen kann.
+Fahrzeug-Snapshot einen Einschränkungshinweis anzeigen kann. Die Einschränkung
+kann nur im aktuellen `wehr_review` geändert werden und muss vor einer
+Rückgabe aufgehoben sein. Statistiken zählen den Einsatz und seine alarmierten
+Fahrzeuge weiterhin; für E bleiben Berichtszahl, Besatzung und zusätzliche
+Fahrzeuge des eingeschränkten Berichts ausgeschlossen.
 
 **Breaking Change (#92):** Die genannten Strukturen waren teilweise
 JSON-kodierte **Strings innerhalb der JSON-Antwort**. Clients müssen sie nun

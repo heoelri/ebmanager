@@ -478,6 +478,10 @@ gespeichert.
 Von der Wehrführung angelegte Berichte sind für die zugeordneten
 Führungskräfte und die Einheitsführung lesbar. `is_restricted=1` übersteuert
 diese und alle anderen Nicht-Wehrführungs-Sichten einschließlich PDF-Export.
+Das Merkmal kann nur im aktuellen `wehr_review` geändert werden und muss vor
+einer Rückgabe aufgehoben sein. Der Einsatz und seine Alarmfahrzeuge bleiben
+in der Statistik; berichtsbezogene Werte werden für Nicht-Wehrführungen nicht
+ausgewertet.
 
 Die Anwendung setzt die MySQL-Sitzungszeitzone jeder PDO-Verbindung auf UTC.
 Damit schreiben auch die `CURRENT_TIMESTAMP`-Defaults von `created_at` und

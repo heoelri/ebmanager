@@ -320,13 +320,14 @@ function unitStatistics(array $user, mixed $fromValue, mixed $toValue, mixed $un
         $unitFilter = ' AND iu.unit_id=?';
         $params[] = $unitId;
     }
+    $reportFilter = $user['role'] === 'wehrleitung' ? '' : ' AND r.is_restricted=0';
 
     $incidents = query(
         'SELECT i.id,i.started_at,i.is_exercise,iu.unit_id,u.name unit_name,iu.vehicles,r.id report_id
          FROM incident_units iu
          JOIN incidents i ON i.id=iu.incident_id
          JOIN units u ON u.id=iu.unit_id AND u.organization_id=i.organization_id
-         LEFT JOIN reports r ON r.incident_id=i.id AND r.unit_id=iu.unit_id
+         LEFT JOIN reports r ON r.incident_id=i.id AND r.unit_id=iu.unit_id' . $reportFilter . '
          WHERE i.organization_id=? AND i.deleted_at IS NULL AND i.started_at>=? AND i.started_at<?' . $unitFilter . '
          ORDER BY i.started_at,i.id,iu.unit_id',
         $params
@@ -2052,9 +2053,12 @@ try {
             );
             if (!$reference) throw new ApiError(404, 'Bericht nicht gefunden');
             query('SELECT id FROM incidents WHERE id=? FOR UPDATE', [$reference['incident_id']]);
-            $report = one('SELECT is_restricted,revision FROM reports WHERE id=? FOR UPDATE', [$reportId]);
+            $report = one('SELECT status,is_restricted,revision FROM reports WHERE id=? FOR UPDATE', [$reportId]);
             if (!$report) throw new ApiError(404, 'Bericht nicht gefunden');
             assertRevision($data['revision'] ?? null, (int)$report['revision']);
+            if ($report['status'] !== 'wehr_review') {
+                throw new ApiError(409, 'Die Einschränkung kann nur während der Prüfung durch die Wehrführung geändert werden.');
+            }
             if ((bool)$report['is_restricted'] === $data['isRestricted']) return;
             query('UPDATE reports SET is_restricted=?,revision=revision+1 WHERE id=?', [(int)$data['isRestricted'], $reportId]);
             query('UPDATE incidents SET revision=revision+1 WHERE id=?', [$reference['incident_id']]);

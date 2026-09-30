@@ -628,7 +628,7 @@ function reportActions(report, incidentId) {
     actions.push(
       `<button class="secondary" data-action="returnReport" data-id="${report.id}" data-incident="${incidentId}" data-workflow="return-to-unit">An Einheitsführung zurückgeben</button>`
     );
-  if (me.role === 'wehrleitung')
+  if (me.role === 'wehrleitung' && report.status === 'wehr_review')
     actions.push(
       `<button class="secondary" data-action="toggleReportRestriction" data-id="${report.id}" data-incident="${incidentId}">${report.is_restricted ? 'Einschränkung aufheben' : 'Einschränken'}</button>`
     );
@@ -639,12 +639,13 @@ function existingReportsNotice() {
     ? '<section class="card"><p>Für alle verfügbaren Einheiten existiert bereits ein Einsatzbericht.</p></section>'
     : '';
 }
-function inaccessibleReportNotices(assignments) {
+function inaccessibleReportNotices(assignments, reports) {
   return me.role !== 'wehrleitung'
     ? assignments
         .filter(
           item =>
             me.unitIds.includes(item.unitId) &&
+            !reports.some(report => report.unit_id === item.unitId) &&
             (item.reportRestricted || (me.role === 'fuehrungskraft' && item.reportAuthorName))
         )
         .map(
@@ -711,7 +712,7 @@ async function incident(id) {
       pendingUnitNames = pendingConsolidation.map(
         assignment => units.find(unit => unit.id === assignment.unitId)?.name || `Einheit ${assignment.unitId}`
       ),
-      inaccessibleReports = inaccessibleReportNotices(assignments);
+      inaccessibleReports = inaccessibleReportNotices(assignments, reports);
     app.innerHTML = `<button class="secondary" data-action="home">← Zurück</button><section class="card"><h1>${esc(item.title)}</h1><div data-exercise-badge>${exerciseBadge(item)}</div><p><b>${esc(item.foreign_id || '')}</b> · ${esc(formatDateTime(item.started_at))}<br>${esc(item.address)}${item.lat !== null && item.lng !== null ? ` · <a href="https://www.openstreetmap.org/?mlat=${item.lat}&mlon=${item.lng}" target="_blank" rel="noopener" aria-label="Einsatzort auf der Karte öffnen (neues Fenster)">Karte</a>` : ''}</p>${item.message ? `<p><b>Meldung:</b> ${esc(item.message)}</p>` : ''}${item.remark ? `<p><b>Bemerkung:</b> ${esc(item.remark)}</p>` : ''}${item.caller ? `<p><b>Meldende Person:</b> ${esc(item.caller)}</p>` : ''}${item.patient ? `<p><b>Patient:</b> ${esc(item.patient)}</p>` : ''}<p><b>Fahrzeuge beim Import:</b><br>${vehicleSummary(assignments)}</p><p class="muted">${esc(item.units)}</p><div data-exercise-history>${exerciseHistory(apiArray(exerciseChanges))}</div><p><button type="button" data-action="download" data-href="api/incidents/${id}/pdf">Einsatzakte als PDF</button> <button type="button" class="secondary" data-action="toggleExercise" data-id="${id}">${item.is_exercise ? 'Übungskennzeichnung entfernen' : 'Als Übung markieren'}</button>${item.canDelete ? ` <button type="button" class="secondary" data-action="deleteIncident" data-id="${id}">Einsatz löschen</button>` : ''}</p></section>
     ${
       reportUnits.length

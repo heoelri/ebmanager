@@ -1171,7 +1171,7 @@ admin_incident_id=$(curl --insecure --silent --fail \
   php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $data["id"];')
 MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-character-set=utf8mb4 --host="$db_host" --user="$DB_USER" einsatzberichte \
   --execute="UPDATE incident_units SET vehicles=JSON_ARRAY(JSON_OBJECT('name','Admin-HLF','own',TRUE)) WHERE incident_id=$admin_incident_id AND unit_id=1"
-admin_report_payload="${report_payload/69\/2026/98\/Admin}"
+admin_report_payload="${report_with_additional_vehicle/69\/2026/98\/Admin}"
 admin_report_payload="${admin_report_payload/Ursprünglich/Adminbericht sichtbar}"
 admin_report_payload="${admin_report_payload/2026-08-22T18:05:00.000Z/2026-08-24T18:05:00.000Z}"
 admin_report_payload="${admin_report_payload/2026-08-22T18:10:00.000Z/2026-08-24T18:10:00.000Z}"
@@ -1201,6 +1201,11 @@ for token in "$force_token" "$other_force_token" "$leader_token"; do
     INCIDENT_ID="$admin_incident_id" php -r '$items=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); $incident=array_values(array_filter($items,fn($item)=>$item["id"]===(int)getenv("INCIDENT_ID")))[0]; $assignment=$incident["assignments"][0]; assert($assignment["reportRestricted"]===true); assert(!array_key_exists("reportAuthorName",$assignment)); assert($assignment["vehicles"][0]["name"]==="Admin-HLF");'
 done
 assert_pdf "$force_token" "/api/incidents/$admin_incident_id/pdf" 'Administrativer Bericht|Admin-HLF' 'Adminbericht sichtbar'
+# Eingeschränkte Einsätze zählen für die Einheitsführung weiter; berichtsbezogene Personal-, Fahrzeug- und Berichtswerte bleiben ausschließlich der Wehrführung vorbehalten.
+curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_url/api/statistics?from=2026-08-24&to=2026-08-24" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($data["totals"]===["incidents"=>1,"regularIncidents"=>1,"exercises"=>0,"reports"=>0,"crewAssignments"=>0,"averageCrew"=>null]); assert($data["alarmedVehicles"]===[["name"=>"Admin-HLF","own"=>true,"count"=>1]]); assert($data["additionalVehicles"]===[] && $data["members"]===[]);'
+curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/statistics?from=2026-08-24&to=2026-08-24&unit=1" |
+  php -r '$data=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($data["totals"]===["incidents"=>1,"regularIncidents"=>1,"exercises"=>0,"reports"=>1,"crewAssignments"=>1,"averageCrew"=>1]); assert($data["additionalVehicles"]===[["name"=>"Zusatzfahrzeug","count"=>1]]); assert(array_column($data["members"],"name")===["Person 100"]);'
 admin_restricted_revision=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$admin_incident_id/reports" |
   php -r '$reports=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($reports[0]["is_restricted"]===true); echo $reports[0]["revision"];')
 test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
@@ -1211,6 +1216,19 @@ curl --insecure --silent --fail \
   --data "{\"isRestricted\":false,\"revision\":$admin_restricted_revision}" "$base_url/api/reports/$admin_report_id/restricted" >/dev/null
 curl --insecure --silent --fail --cookie "$session_cookie=$leader_token" "$base_url/api/incidents/$admin_incident_id/reports" |
   php -r '$reports=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert(count($reports)===1 && $reports[0]["is_restricted"]===false);'
+# Nach aufgehobener Einschränkung darf die Wehrführung zurückgeben; im aktiven unit_review kann sie keine neue Einschränkung setzen.
+admin_unrestricted_revision=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$admin_incident_id/reports" |
+  php -r '$reports=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); echo $reports[0]["revision"];')
+curl --insecure --silent --fail \
+  --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request POST \
+  --data "{\"revision\":$admin_unrestricted_revision,\"comment\":\"Korrektur\"}" "$base_url/api/reports/$admin_report_id/return-to-unit" >/dev/null
+admin_returned_revision=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/incidents/$admin_incident_id/reports" |
+  php -r '$reports=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR); assert($reports[0]["status"]==="unit_review"); echo $reports[0]["revision"];')
+test "$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+  --cookie "$session_cookie=$session_token" --header 'Content-Type: application/json' --request PUT \
+  --data "{\"isRestricted\":true,\"revision\":$admin_returned_revision}" "$base_url/api/reports/$admin_report_id/restricted")" = 409
+MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --host="$db_host" --user="$DB_USER" einsatzberichte \
+  --execute="DELETE FROM incidents WHERE id=$admin_incident_id"
 
 report_id=$(curl --insecure --silent --fail \
   --cookie "$session_cookie=$force_token" \

@@ -694,6 +694,17 @@ for (const me of [
   assert.match(actions, /api\/reports\/1\/pdf/);
   assert.doesNotMatch(actions, /Bearbeiten/);
 }
+const commandReportActions = new Function('me', `${reportActionsSource}; return reportActions;`)({
+  id: 3, role: 'wehrleitung', unitIds: []
+});
+assert.match(commandReportActions(
+  {id: 1, unit_id: 1, author_id: 3, status: 'wehr_review', is_restricted: false, editable: false, history: []},
+  1
+), /Einschränken/);
+assert.doesNotMatch(commandReportActions(
+  {id: 1, unit_id: 1, author_id: 3, status: 'unit_review', is_restricted: false, editable: false, history: []},
+  1
+), /Einschränken|Einschränkung aufheben/);
 assert.match(html, /data-action="download" data-href="api\/incidents\/\$\{id\}\/pdf">Einsatzakte als PDF/);
 assert.match(html, /item\.consolidated_at \? `<p><button type="button" data-action="download" data-href="api\/incidents\/\$\{id\}\/consolidation\/pdf">Gesamtbericht als PDF/);
 assert.match(html, /item\.canDelete \? ` <button type="button" class="secondary" data-action="deleteIncident"/);
@@ -789,9 +800,17 @@ const inaccessibleReportNotices = new Function(
 const inaccessibleNotice = inaccessibleReportNotices([
   {unitId: 1, reportAuthorName: 'Franziska <Roth>'},
   {unitId: 2, reportAuthorName: 'Nils Weber'}
-]);
+], []);
 assert.match(inaccessibleNotice, /Löschzug Mitte.*Franziska &lt;Roth>.*Berichtsinhalte/s);
 assert.doesNotMatch(inaccessibleNotice, /Nils Weber|Löschgruppe Nord/);
+assert.equal(inaccessibleReportNotices(
+  [{unitId: 1, reportAuthorName: 'Wehrführung'}],
+  [{unit_id: 1}]
+), '');
+assert.match(inaccessibleReportNotices(
+  [{unitId: 1, reportRestricted: true}],
+  []
+), /eingeschränkt.*nur für die Wehrführung/s);
 assert.doesNotMatch(html, /\/release/);
 const membershipFieldsSource = declaration('membershipFields');
 assert(membershipFieldsSource, 'Einheitsauswahl für Benutzer fehlt');
