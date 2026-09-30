@@ -592,15 +592,19 @@ Die erlaubten Richtungen sind `author_draft → unit_review`, `unit_review → a
 | `report_id` | BIGINT UNSIGNED, FK, PK | Bericht |
 | `member_id` | BIGINT UNSIGNED, FK, PK | Eingesetztes Mitglied |
 | `member_name` | VARCHAR(200), NOT NULL, ohne Default | Name beim Aufnehmen in die Besatzung, unabhängig von späteren Stammdaten |
-| `vehicle` | VARCHAR(200), NOT NULL | Fahrzeugname; leer bedeutet „Ohne Fahrzeug“, `Vor Ort` eine Anreise ohne Fahrzeug |
+| `vehicle` | VARCHAR(200), NOT NULL | Fahrzeugname bei `target_type=vehicle`, sonst leer |
+| `target_type` | ENUM, NOT NULL | `vehicle`, `without_vehicle` oder `on_scene` |
 | `role` | ENUM, NOT NULL | `maschinist`, `einheitsfuehrer` oder `besatzung` |
 
 Ein Mitglied kann pro Bericht nur einmal vorkommen. Pro Fahrzeug sind
 höchstens ein Maschinist und ein Einheitsführer zulässig; die Besatzung ist
-unbegrenzt. Für „Ohne Fahrzeug“ und „Vor Ort“ ist nur die Rolle `besatzung`
-erlaubt. `Vor Ort` wird in Besatzungsansichten ausgegeben, aber nicht in die
-abgeleitete Fahrzeugliste des Berichts aufgenommen. Diese Regeln und die
-Zugehörigkeit des Mitglieds zur Einheit werden von der Anwendung validiert.
+unbegrenzt. Für `without_vehicle` („Ohne Fahrzeug“) und `on_scene` („Vor
+Ort“) ist nur die Rolle `besatzung` erlaubt. Bei beiden bleibt `vehicle`
+leer; dadurch bleibt ein echtes Fahrzeug mit dem Namen „Vor Ort“ eindeutig
+als `vehicle` unterscheidbar. `on_scene` wird in Besatzungsansichten
+ausgegeben, aber nicht in die abgeleitete Fahrzeugliste des Berichts
+aufgenommen. Diese Regeln und die Zugehörigkeit des Mitglieds zur Einheit
+werden von der Anwendung validiert.
 
 ### `report_additional_vehicles`
 

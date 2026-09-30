@@ -634,13 +634,19 @@ const resourceOverviewSource = html.match(/function crewSummary[\s\S]*?(?=\nfunc
 assert(resourceOverviewSource, 'Konsolidierte Fahrzeug- und Besatzungsübersicht fehlt');
 const consolidatedResources = new Function(
   'esc',
+  'crewOnScene',
   `${apiTypesSource}; ${resourceOverviewSource}; return consolidatedResources;`
-)(value => String(value ?? '').replaceAll('<', '&lt;'));
+)(value => String(value ?? '').replaceAll('<', '&lt;'), 'Vor Ort (ohne Fahrzeug)');
 const resourceOverview = consolidatedResources([
   {unitId: 2, vehicles: [{name: 'LF 20'}, {name: 'ELW <1>'}]},
   {unitId: 1, vehicles: ['MTF']}
 ], [
-  {unit_id: 2, crew: [{name: 'Mia', vehicle: 'LF 20', role: 'maschinist'}, {name: 'Noah', vehicle: '', role: 'besatzung'}]},
+  {unit_id: 2, crew: [
+    {name: 'Mia', vehicle: 'LF 20', target: 'vehicle', role: 'maschinist'},
+    {name: 'Vera', vehicle: 'Vor Ort', target: 'vehicle', role: 'besatzung'},
+    {name: 'Oskar', vehicle: '', target: 'on_scene', role: 'besatzung'},
+    {name: 'Noah', vehicle: '', target: 'without_vehicle', role: 'besatzung'}
+  ]},
   {unit_id: 1, crew: []}
 ], [
   {id: 2, name: 'Löschzug Süd'},
@@ -651,13 +657,18 @@ assert(resourceOverview.indexOf('ELW &lt;1>') < resourceOverview.indexOf('LF 20'
 assert.match(resourceOverview, /MTF: Keine Besatzung/);
 assert.match(resourceOverview, /LF 20: Mia \(Maschinist\)/);
 assert.match(resourceOverview, /Ohne Fahrzeug: Noah \(Besatzung\)/);
+assert.match(resourceOverview, /Vor Ort: Vera \(Besatzung\)/);
+assert.match(resourceOverview, /Vor Ort \(ohne Fahrzeug\): Oskar \(Besatzung\)/);
 // Bei gleicher angezeigter Einheit entscheidet die ID; auch kollationsgleiche Fahrzeugnamen besitzen eine feste Reihenfolge.
 const tiedUnits = [{id: 2, name: 'Gleicher Name'}, {id: 1, name: 'Gleicher Name'}];
 const tiedAssignments = [{unitId: 2, vehicles: ['Zweites Fahrzeug']}, {unitId: 1, vehicles: ['Erstes Fahrzeug']}];
 const tiedOverview = consolidatedResources(tiedAssignments, [], tiedUnits);
 assert(tiedOverview.indexOf('Erstes Fahrzeug') < tiedOverview.indexOf('Zweites Fahrzeug'));
 assert.equal(tiedOverview, consolidatedResources([...tiedAssignments].reverse(), [], tiedUnits));
-const crewSummary = new Function('esc', `${apiTypesSource}; ${resourceOverviewSource}; return crewSummary;`)(value => value);
+const crewSummary = new Function('esc', 'crewOnScene', `${apiTypesSource}; ${resourceOverviewSource}; return crewSummary;`)(
+  value => value,
+  'Vor Ort (ohne Fahrzeug)'
+);
 assert.equal(crewSummary([], ['Ä', 'A\u0308']), crewSummary([], ['A\u0308', 'Ä']));
 assert.throws(() => crewSummary('[]'), /Liste erwartet/);
 assert.match(html, /<h3>Fahrzeuge und Besatzung<\/h3>\$\{consolidatedResources\(assignments, reports, units\)\}/);
@@ -982,11 +993,11 @@ const crewResources = {members: [
 ], vehicles: []};
 const historicalCrew = [{memberId: 1, name: 'Anna Historisch', vehicle: '', role: 'besatzung'}];
 const crewRenderer = new Function('document', 'api', 'esc', 'bindCrewBoard', 'dragEnabled', 'crewOnScene',
-  `${apiTypesSource};${renderCrewSource};return renderCrew;`)({querySelector: () => crewRoot}, async () => crewResources, value => String(value ?? ''), () => {}, false, 'Vor Ort');
+  `${apiTypesSource};${renderCrewSource};return renderCrew;`)({querySelector: () => crewRoot}, async () => crewResources, value => String(value ?? ''), () => {}, false, 'Vor Ort (ohne Fahrzeug)');
 await crewRenderer('#crew', 1, [], historicalCrew);
 assert.match(crewRoot.innerHTML, /data-name="Anna Historisch"/);
 assert.match(crewRoot.innerHTML, /data-name="Bernd Aktuell"/);
-assert.match(crewRoot.innerHTML, /data-target="on-scene" data-vehicle="Vor Ort"/);
+assert.match(crewRoot.innerHTML, /data-target="on-scene" data-vehicle="" data-target-type="on_scene"/);
 assert(!crewRoot.innerHTML.includes('Anna Neu'));
 crewResources.members[0].name = 'Anna Noch Neuer';
 await crewRenderer('#crew', 1, [], historicalCrew, ['Zusatzfahrzeug']);
@@ -1046,7 +1057,7 @@ assert.match(root.innerHTML, /Fremdes Fahrzeug/);
 assert.doesNotMatch(root.innerHTML, /Andere Einheitszuordnung/);
 const renderCrew = new Function('document', 'api', 'dragEnabled', 'bindCrewBoard', 'esc', 'crewOnScene',
   `${apiTypesSource}; ${renderCrewSource}; return renderCrew;`
-)(document, api, false, () => {}, esc, 'Vor Ort');
+)(document, api, false, () => {}, esc, 'Vor Ort (ohne Fahrzeug)');
 assert.equal(await renderCrew('#crew', '1', incidents[0].assignments,
   [{memberId: 1, name: 'Mia', vehicle: 'LF 20', role: 'maschinist'}]), true);
 for (const text of ['LF 20', 'Mia', 'Zusatzfahrzeug']) assert(root.innerHTML.includes(text));

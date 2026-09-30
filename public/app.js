@@ -965,7 +965,9 @@ async function renderCrew(selector, unitId, assignments, selected = [], addition
       ...new Set([
         ...importedVehicles,
         ...additionalVehicles,
-        ...selected.map(person => person.vehicle).filter(vehicle => vehicle && vehicle !== crewOnScene)
+        ...selected.filter(person => (person.target || (person.vehicle ? 'vehicle' : 'without_vehicle')) === 'vehicle')
+          .map(person => person.vehicle)
+          .filter(Boolean)
       ])
     ],
     roles = [
@@ -974,13 +976,14 @@ async function renderCrew(selector, unitId, assignments, selected = [], addition
       ['besatzung', 'Besatzung']
     ];
   const zones = [
-    {key: 'available', vehicle: '', role: '', label: 'Verfügbar'},
-    {key: 'none', vehicle: '', role: 'besatzung', label: 'Ohne Fahrzeug'},
-    {key: 'on-scene', vehicle: crewOnScene, role: 'besatzung', label: crewOnScene},
+    {key: 'available', vehicle: '', target: '', role: '', label: 'Verfügbar'},
+    {key: 'none', vehicle: '', target: 'without_vehicle', role: 'besatzung', label: 'Ohne Fahrzeug'},
+    {key: 'on-scene', vehicle: '', target: 'on_scene', role: 'besatzung', label: crewOnScene},
     ...vehicles.flatMap((vehicle, index) =>
       roles.map(([role, label]) => ({
         key: `vehicle-${index}-${role}`,
         vehicle,
+        target: 'vehicle',
         role,
         label,
         historical: !assignableVehicles.includes(vehicle)
@@ -990,9 +993,14 @@ async function renderCrew(selector, unitId, assignments, selected = [], addition
   const targetFor = member => {
     const person = chosen.get(member.id);
     if (!person) return 'available';
-    if (!person.vehicle) return 'none';
+    const target = person.target || (person.vehicle ? 'vehicle' : 'without_vehicle');
     return (
-      zones.find(zone => zone.vehicle === person.vehicle && zone.role === (person.role || 'besatzung'))?.key ||
+      zones.find(
+        zone =>
+          zone.target === target &&
+          (target !== 'vehicle' || zone.vehicle === person.vehicle) &&
+          zone.role === (person.role || 'besatzung')
+      )?.key ||
       'available'
     );
   };
@@ -1018,9 +1026,9 @@ async function renderCrew(selector, unitId, assignments, selected = [], addition
       .map(card)
       .join('');
   const roleZone = zone =>
-    `<section class="crew-zone crew-role" data-target="${zone.key}" data-vehicle="${esc(zone.vehicle)}" data-role="${zone.role}" data-historical="${zone.historical || false}"><h5>${zone.label} <span data-count></span></h5><div class="crew-list">${cardsFor(zone.key)}</div></section>`;
+    `<section class="crew-zone crew-role" data-target="${zone.key}" data-vehicle="${esc(zone.vehicle)}" data-target-type="${zone.target}" data-role="${zone.role}" data-historical="${zone.historical || false}"><h5>${zone.label} <span data-count></span></h5><div class="crew-list">${cardsFor(zone.key)}</div></section>`;
   const restoreFocus = root.contains(document.activeElement);
-  root.innerHTML = `<fieldset><legend>Weitere Fahrzeuge der eigenen Einheit</legend><div class="check-grid">${additionalOptions.map(vehicle => `<label><input type="checkbox" data-additional-vehicle value="${esc(vehicle)}" ${additionalVehicles.includes(vehicle) ? 'checked' : ''}>${esc(vehicle)}${catalogVehicles.includes(vehicle) ? '' : ' (nicht mehr im Fahrzeugstamm)'}</label>`).join('') || '<p class="muted">Keine weiteren Fahrzeuge verfügbar.</p>'}</div></fieldset><h3 tabindex="-1">Besatzung</h3><p class="muted">Auf Touch-Geräten oder mit Tastatur das Auswahlfeld verwenden; alternativ kann Personal mit der Maus gezogen werden.</p><div class="vehicle-board">${vehicles.map((vehicle, index) => `<section class="vehicle-column"><h4>${esc(vehicle)}</h4>${roles.map(([role]) => roleZone(zones.find(zone => zone.key === `vehicle-${index}-${role}`))).join('')}</section>`).join('')}<section class="vehicle-column"><h4>Ohne Fahrzeug</h4>${roleZone(zones.find(zone => zone.key === 'none'))}</section><section class="vehicle-column"><h4>${esc(crewOnScene)}</h4>${roleZone(zones.find(zone => zone.key === 'on-scene'))}</section></div><details class="crew-available" open><summary>Verfügbares Personal</summary><section class="crew-zone crew-pool" data-target="available" data-vehicle="" data-role=""><h4>Mitglieder <span data-count></span></h4><div class="crew-list">${cardsFor('available')}</div></section></details>${members.length ? '' : '<p class="muted">Keine Mitglieder synchronisiert.</p>'}`;
+  root.innerHTML = `<fieldset><legend>Weitere Fahrzeuge der eigenen Einheit</legend><div class="check-grid">${additionalOptions.map(vehicle => `<label><input type="checkbox" data-additional-vehicle value="${esc(vehicle)}" ${additionalVehicles.includes(vehicle) ? 'checked' : ''}>${esc(vehicle)}${catalogVehicles.includes(vehicle) ? '' : ' (nicht mehr im Fahrzeugstamm)'}</label>`).join('') || '<p class="muted">Keine weiteren Fahrzeuge verfügbar.</p>'}</div></fieldset><h3 tabindex="-1">Besatzung</h3><p class="muted">Auf Touch-Geräten oder mit Tastatur das Auswahlfeld verwenden; alternativ kann Personal mit der Maus gezogen werden.</p><div class="vehicle-board">${vehicles.map((vehicle, index) => `<section class="vehicle-column"><h4>${esc(vehicle)}</h4>${roles.map(([role]) => roleZone(zones.find(zone => zone.key === `vehicle-${index}-${role}`))).join('')}</section>`).join('')}<section class="vehicle-column"><h4>Ohne Fahrzeug</h4>${roleZone(zones.find(zone => zone.key === 'none'))}</section><section class="vehicle-column"><h4>${esc(crewOnScene)}</h4>${roleZone(zones.find(zone => zone.key === 'on-scene'))}</section></div><details class="crew-available" open><summary>Verfügbares Personal</summary><section class="crew-zone crew-pool" data-target="available" data-vehicle="" data-target-type="" data-role=""><h4>Mitglieder <span data-count></span></h4><div class="crew-list">${cardsFor('available')}</div></section></details>${members.length ? '' : '<p class="muted">Keine Mitglieder synchronisiert.</p>'}`;
   bindCrewBoard(root);
   if (restoreFocus) root.querySelector('h3').focus();
   return true;
@@ -1082,7 +1090,7 @@ function crewSummary(value, vehicleNames = []) {
     order = Object.keys(labels),
     vehicles = new Map([...new Set(vehicleNames)].map(name => [name, {}]));
   for (const person of apiArray(value ?? [])) {
-    const vehicle = person.vehicle || 'Ohne Fahrzeug',
+    const vehicle = person.target === 'on_scene' ? crewOnScene : person.vehicle || 'Ohne Fahrzeug',
       role = person.role === 'mannschaft' ? 'besatzung' : order.includes(person.role) ? person.role : 'besatzung';
     if (!vehicles.has(vehicle)) vehicles.set(vehicle, {});
     const roles = vehicles.get(vehicle);
@@ -1151,6 +1159,7 @@ function selectedCrew(selector) {
         memberId: Number(select.dataset.member),
         name: card.dataset.name,
         vehicle: zone.dataset.vehicle,
+        target: zone.dataset.targetType,
         role: zone.dataset.role
       };
     });

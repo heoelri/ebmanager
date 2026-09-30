@@ -16,8 +16,10 @@ for _ in {1..60}; do
 done
 "${compose[@]}" exec -T db mysql --host=127.0.0.1 --user=root -ptest-password einsatzberichte --execute="SELECT 1" >/dev/null
 
-# Eine Altinstallation erhält Workflow, Stammdaten, Revisionen, Snapshots, Soft-Delete, Übungskennzeichnung, Bereinigungszustand und Berichtseinschränkung genau einmal.
+# Eine Altinstallation erhält Workflow, Stammdaten, Revisionen, Snapshots, Soft-Delete, Übungskennzeichnung, Bereinigungszustand, Berichtseinschränkung und Besatzungszielart genau einmal.
 "${compose[@]}" exec -T db mysql --default-character-set=utf8mb4 --user=root -ptest-password einsatzberichte --execute="
+  ALTER TABLE report_crew DROP COLUMN target_type;
+  DELETE FROM schema_migrations WHERE name='010-crew-target-type.sql';
   ALTER TABLE reports DROP COLUMN is_restricted;
   DELETE FROM schema_migrations WHERE name='009-restricted-reports.sql';
   DROP TABLE auth_cleanup_state;
@@ -61,7 +63,7 @@ done
   INSERT INTO members(id,organization_id,divera_id,name) VALUES
     (10,10,'historisch','Historisches Mitglied'),
     (11,11,'fremd','Fremdes Mitglied');
-  INSERT INTO report_crew(report_id,member_id) VALUES(10,10),(10,11);
+  INSERT INTO report_crew(report_id,member_id,vehicle) VALUES(10,10,'Vor Ort'),(10,11,'');
   INSERT INTO login_history(user_id,logged_in_at) VALUES(10,'2000-01-01 00:00:00');
   INSERT INTO sessions(token,user_id,expires_at) VALUES(SHA2('migration-auth-retention',256),10,'2000-01-01 00:00:00');"
 "${compose[@]}" run --rm migrate
@@ -99,9 +101,12 @@ result="$("${compose[@]}" exec -T db mysql --user=root -ptest-password --batch -
     (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='incident_exercise_changes'),'|',
     (SELECT SUM(is_exercise) FROM incidents WHERE id BETWEEN 10 AND 13),'|',
     (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='reports' AND column_name='is_restricted'),'|',
-    (SELECT COUNT(*) FROM schema_migrations WHERE name='009-restricted-reports.sql')
+    (SELECT COUNT(*) FROM schema_migrations WHERE name='009-restricted-reports.sql'),'|',
+    (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='report_crew' AND column_name='target_type'),'|',
+    (SELECT COUNT(*) FROM schema_migrations WHERE name='010-crew-target-type.sql'),'|',
+    (SELECT GROUP_CONCAT(target_type ORDER BY member_id) FROM report_crew WHERE report_id=10)
   )")"
-test "$result" = '1|1|author_draft,unit_review,wehr_review,wehr_review|4|1|1|1|1|1|1|7,2,2,2|9,2,2,2|1|1|1:0|1|1|1|1|0|1|1'
+test "$result" = '1|1|author_draft,unit_review,wehr_review,wehr_review|4|1|1|1|1|1|1|7,2,2,2|9,2,2,2|1|1|1:0|1|1|1|1|0|1|1|1|1|vehicle,without_vehicle'
 
 # Migration 008 wird genau einmal vermerkt und initialisiert die erste Bereinigung samt zeitgeordnetem Index ohne Datenlöschung.
 test "$("${compose[@]}" exec -T db mysql --user=root -ptest-password --batch --skip-column-names einsatzberichte --execute="

@@ -6,9 +6,11 @@ Die neue Kategorie erfasst keine zusätzlichen personenbezogenen Felder und
 ändert keine Leserechte. Der Server akzeptiert den zentralen Wert nur für
 Mitglieder der berichtenden Einheit und ausschließlich mit der Funktion
 `besatzung`; manipulierte Maschinisten- oder Einheitsführerzuordnungen werden
-abgewiesen. „Vor Ort“ bleibt Teil der geschützten Besatzungsdaten, wird aber
-nicht als Fahrzeug oder zusätzliches Fahrzeug ausgegeben beziehungsweise
-gezählt.
+abgewiesen. Die gespeicherte Zielart `on_scene` ist vom Anzeigenamen getrennt,
+sodass ein echtes Fahrzeug namens „Vor Ort“ weiterhin als `vehicle` mit allen
+zulässigen Funktionen verwendbar bleibt. „Vor Ort“ bleibt Teil der
+geschützten Besatzungsdaten, wird aber nicht als Fahrzeug oder zusätzliches
+Fahrzeug ausgegeben beziehungsweise gezählt.
 
 ## Eingeschränkte Einsatzberichte vom 30. September 2026
 

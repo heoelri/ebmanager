@@ -73,6 +73,14 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Breaking Changes
 
+**Die Besatzungskategorie „Vor Ort“ benötigt Migration 010 vor dem
+Anwendungscode.** Sie ergänzt `report_crew.target_type` und ordnet bestehende
+Zeilen anhand des bisherigen Fahrzeugnamens `vehicle` beziehungsweise
+`without_vehicle` zu. Dadurch bleibt auch ein echtes Fahrzeug namens „Vor
+Ort“ eindeutig. Reihenfolge: Sicherung, Migration 010 und Ledger-Vermerk,
+gemeinsamer PHP-/Browserwechsel, Besatzungs- und PDF-Prüfung. Details:
+[Deployment: Besatzungszielart](docs/WEBSPACE-DEPLOYMENT.md#besatzungszielart-einführen).
+
 **Berichtseinschränkung benötigt Migration 009 vor dem Anwendungscode.**
 Sie ergänzt `reports.is_restricted` mit dem sicheren Standardwert `0`.
 Reihenfolge: Sicherung, Migration 009 und Ledger-Vermerk, gemeinsamer

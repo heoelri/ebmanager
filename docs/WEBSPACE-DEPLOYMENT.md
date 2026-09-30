@@ -347,6 +347,33 @@ Spalte, setzt Einschränkungen aber nicht durch. Deshalb vor dem Rollback alle
 gesetzten Einschränkungen fachlich bewerten und den alten Code nicht als
 gleichwertigen Datenschutzschutz betreiben.
 
+### Besatzungszielart einführen
+
+1. Datenbank und bisherige Anwendungsdateien sichern.
+2. Prüfen, dass Migrationen 001 bis 009 vollständig ausgeführt und in
+   `schema_migrations` registriert sind.
+3. `migrations/010-crew-target-type.sql` mit einem DDL-berechtigten
+   Administrationskonto ausführen und danach einmalig vermerken:
+
+   ```sql
+   INSERT INTO schema_migrations(name,applied_at)
+   VALUES('010-crew-target-type.sql',UTC_TIMESTAMP());
+   ```
+
+   Lokal übernimmt `docker/migrate.sh` die Registrierung. Die Migration
+   kennzeichnet bestehende Zeilen mit leerem Fahrzeug als `without_vehicle`;
+   alle anderen bleiben echte Fahrzeugzuordnungen.
+4. PHP- und Browserdateien gemeinsam ausliefern. `/api/bootstrap` darf keinen
+   Schemafehler melden. Danach „Ohne Fahrzeug“, „Vor Ort“ und ein reales
+   Fahrzeug namens „Vor Ort“ speichern und in Ansicht sowie PDF prüfen.
+
+**Rollback von 010:** Den vorherigen Anwendungscode wiederherstellen.
+`report_crew.target_type` kann im Schema verbleiben; alter Code ignoriert die
+Spalte. Neue `on_scene`-Zeilen besitzen einen leeren Fahrzeugnamen und
+erscheinen im alten Code daher wie „Ohne Fahrzeug“. Keine Zielart oder
+Besatzungszeile löschen; falls diese vorübergehende Darstellung unzulässig
+ist, Rollback abbrechen und vorwärts korrigieren.
+
 ### Sitzungen und Loginhistorie bereinigen (#17, #97)
 
 Die bestätigte Aufbewahrungsfrist für erfolgreiche Anmeldungen beträgt
