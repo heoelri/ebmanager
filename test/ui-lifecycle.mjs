@@ -32,7 +32,7 @@ export async function checkUiLifecycle(browser, coverage) {
       let json = {};
       if (path === '/api/units') json = units;
       else if (path === '/api/incidents') json = incidents;
-      else if (path === '/api/options') json = {incidentTypes: ['Technische Hilfe'], ranks: {}, classifications: {site: ['Wald']}, classificationLabels: {site: 'Einsatzstelle'}};
+      else if (path === '/api/options') json = {incidentTypes: ['Technische Hilfe'], ranks: {}, classifications: {site: ['Wald']}, classificationLabels: {site: 'Einsatzstelle'}, crewOnScene: 'Vor Ort'};
       else if (path.endsWith('/resources')) json = {members: [{id: 1, name: 'Mitglied', active: 1}], vehicles: [{name: 'Zusatzfahrzeug'}]};
       else if (path.endsWith('/reports')) json = path.includes('/2/') ? reports : [];
       else if (path.endsWith('/exercise-history')) json = [];
@@ -140,6 +140,8 @@ export async function checkUiLifecycle(browser, coverage) {
     assert.equal(calls.filter(call => call.path === '/api/incidents').length, 1);
     if (id === 1) {
       assert.deepEqual(await page.evaluate(() => selectedCrew('#reportCrew')), [{memberId: 1, name: 'Mitglied', vehicle: '', role: 'besatzung'}]);
+      await page.locator('[data-member]').selectOption('on-scene');
+      assert.deepEqual(await page.evaluate(() => selectedCrew('#reportCrew')), [{memberId: 1, name: 'Mitglied', vehicle: 'Vor Ort', role: 'besatzung'}]);
       const requests = calls.filter(call => call.path.endsWith('/resources')).length;
       await page.locator('[data-additional-vehicle]').check();
       assert.equal(await page.locator('[data-additional-vehicle]').evaluate(input => input === document.activeElement), true);

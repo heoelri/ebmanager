@@ -10,6 +10,7 @@ let me,
   ranks = {},
   reportClassifications = {},
   classificationLabels = {},
+  crewOnScene = '',
   diveraWritePending = false,
   viewRequest = 0;
 const dragEnabled = matchMedia('(pointer:fine)').matches;
@@ -367,7 +368,8 @@ async function resetPassword(token, invitation = false) {
 async function load(current = viewContext(app.querySelector('h1'))) {
   const data = await Promise.all([api('/api/units'), api('/api/incidents'), api('/api/options')]);
   if (!current()) throw new DOMException('Ansicht verlassen', 'AbortError');
-  [units, incidents, {incidentTypes, ranks, classifications: reportClassifications, classificationLabels}] = data;
+  [units, incidents, {incidentTypes, ranks, classifications: reportClassifications, classificationLabels, crewOnScene}] =
+    data;
   nav.innerHTML = `
   <button type="button" data-action="home">Einsätze</button><button type="button" data-action="resources">Mitglieder & Fahrzeuge</button>${['einheitsleitung', 'wehrleitung'].includes(me.role) ? '<button type="button" data-action="statistics">Statistik</button>' : ''}${me.role === 'wehrleitung' ? '<button type="button" data-action="admin">Verwaltung</button><button type="button" data-action="systemOverview">System</button>' : ''}
   <button type="button" data-action="divera">DIVERA</button><button type="button" class="secondary" data-action="logout">Abmelden</button>`;
@@ -823,7 +825,7 @@ function rankOptions(selected = '') {
 }
 function reportTimeFields(prefix, incident, report) {
   const date = localDateTime(incident.started_at).slice(0, 10);
-  return `${prefix === 'new' ? `<div class="full-width"><label>Gemeinsames Datum<input name="reportDate" type="date" value="${date}" required></label><p class="muted">Gilt für Ausrücken, Eintreffen und Einsatzende. Einzelne Datumswerte können abweichen, etwa bei Einsätzen über Mitternacht. Die Alarmierung bleibt unverändert.</p></div>` : ''}${[
+  return `${[
     ['departedAt', 'departed_at', 'Ausgerückt um'],
     ['arrivedAt', 'arrived_at', 'Eingetroffen um'],
     ['endedAt', 'ended_at', 'Einsatz beendet um']
@@ -858,19 +860,6 @@ function bindDuration(form) {
   };
   form.elements.endedAt.addEventListener('input', update);
   form.elements.endedAtDate?.addEventListener('input', update);
-  const commonDate = form.elements.reportDate;
-  if (commonDate) {
-    let previous = commonDate.value;
-    commonDate.addEventListener('change', () => {
-      if (!commonDate.value) return;
-      for (const name of ['departedAtDate', 'arrivedAtDate', 'endedAtDate']) {
-        const input = form.elements[name];
-        if (input.value === previous) input.value = commonDate.value;
-      }
-      previous = commonDate.value;
-      update();
-    });
-  }
   update();
 }
 function reportDetailsPayload(form) {
@@ -976,7 +965,7 @@ async function renderCrew(selector, unitId, assignments, selected = [], addition
       ...new Set([
         ...importedVehicles,
         ...additionalVehicles,
-        ...selected.map(person => person.vehicle).filter(Boolean)
+        ...selected.map(person => person.vehicle).filter(vehicle => vehicle && vehicle !== crewOnScene)
       ])
     ],
     roles = [
@@ -987,6 +976,7 @@ async function renderCrew(selector, unitId, assignments, selected = [], addition
   const zones = [
     {key: 'available', vehicle: '', role: '', label: 'Verfügbar'},
     {key: 'none', vehicle: '', role: 'besatzung', label: 'Ohne Fahrzeug'},
+    {key: 'on-scene', vehicle: crewOnScene, role: 'besatzung', label: crewOnScene},
     ...vehicles.flatMap((vehicle, index) =>
       roles.map(([role, label]) => ({
         key: `vehicle-${index}-${role}`,
@@ -1014,7 +1004,7 @@ async function renderCrew(selector, unitId, assignments, selected = [], addition
       )
       .map(
         zone =>
-          `<option value="${zone.key}" ${current === zone.key ? 'selected' : ''}>${zone.key === 'available' ? 'Nicht eingesetzt' : zone.key === 'none' ? 'Ohne Fahrzeug' : `${esc(zone.vehicle)}: ${zone.label}`}</option>`
+          `<option value="${zone.key}" ${current === zone.key ? 'selected' : ''}>${zone.key === 'available' ? 'Nicht eingesetzt' : ['none', 'on-scene'].includes(zone.key) ? zone.label : `${esc(zone.vehicle)}: ${zone.label}`}</option>`
       )
       .join('');
   const card = member => {
@@ -1030,7 +1020,7 @@ async function renderCrew(selector, unitId, assignments, selected = [], addition
   const roleZone = zone =>
     `<section class="crew-zone crew-role" data-target="${zone.key}" data-vehicle="${esc(zone.vehicle)}" data-role="${zone.role}" data-historical="${zone.historical || false}"><h5>${zone.label} <span data-count></span></h5><div class="crew-list">${cardsFor(zone.key)}</div></section>`;
   const restoreFocus = root.contains(document.activeElement);
-  root.innerHTML = `<fieldset><legend>Weitere Fahrzeuge der eigenen Einheit</legend><div class="check-grid">${additionalOptions.map(vehicle => `<label><input type="checkbox" data-additional-vehicle value="${esc(vehicle)}" ${additionalVehicles.includes(vehicle) ? 'checked' : ''}>${esc(vehicle)}${catalogVehicles.includes(vehicle) ? '' : ' (nicht mehr im Fahrzeugstamm)'}</label>`).join('') || '<p class="muted">Keine weiteren Fahrzeuge verfügbar.</p>'}</div></fieldset><h3 tabindex="-1">Besatzung</h3><p class="muted">Auf Touch-Geräten oder mit Tastatur das Auswahlfeld verwenden; alternativ kann Personal mit der Maus gezogen werden.</p><div class="vehicle-board">${vehicles.map((vehicle, index) => `<section class="vehicle-column"><h4>${esc(vehicle)}</h4>${roles.map(([role]) => roleZone(zones.find(zone => zone.key === `vehicle-${index}-${role}`))).join('')}</section>`).join('')}<section class="vehicle-column"><h4>Ohne Fahrzeug</h4>${roleZone(zones.find(zone => zone.key === 'none'))}</section></div><details class="crew-available" open><summary>Verfügbares Personal</summary><section class="crew-zone crew-pool" data-target="available" data-vehicle="" data-role=""><h4>Mitglieder <span data-count></span></h4><div class="crew-list">${cardsFor('available')}</div></section></details>${members.length ? '' : '<p class="muted">Keine Mitglieder synchronisiert.</p>'}`;
+  root.innerHTML = `<fieldset><legend>Weitere Fahrzeuge der eigenen Einheit</legend><div class="check-grid">${additionalOptions.map(vehicle => `<label><input type="checkbox" data-additional-vehicle value="${esc(vehicle)}" ${additionalVehicles.includes(vehicle) ? 'checked' : ''}>${esc(vehicle)}${catalogVehicles.includes(vehicle) ? '' : ' (nicht mehr im Fahrzeugstamm)'}</label>`).join('') || '<p class="muted">Keine weiteren Fahrzeuge verfügbar.</p>'}</div></fieldset><h3 tabindex="-1">Besatzung</h3><p class="muted">Auf Touch-Geräten oder mit Tastatur das Auswahlfeld verwenden; alternativ kann Personal mit der Maus gezogen werden.</p><div class="vehicle-board">${vehicles.map((vehicle, index) => `<section class="vehicle-column"><h4>${esc(vehicle)}</h4>${roles.map(([role]) => roleZone(zones.find(zone => zone.key === `vehicle-${index}-${role}`))).join('')}</section>`).join('')}<section class="vehicle-column"><h4>Ohne Fahrzeug</h4>${roleZone(zones.find(zone => zone.key === 'none'))}</section><section class="vehicle-column"><h4>${esc(crewOnScene)}</h4>${roleZone(zones.find(zone => zone.key === 'on-scene'))}</section></div><details class="crew-available" open><summary>Verfügbares Personal</summary><section class="crew-zone crew-pool" data-target="available" data-vehicle="" data-role=""><h4>Mitglieder <span data-count></span></h4><div class="crew-list">${cardsFor('available')}</div></section></details>${members.length ? '' : '<p class="muted">Keine Mitglieder synchronisiert.</p>'}`;
   bindCrewBoard(root);
   if (restoreFocus) root.querySelector('h3').focus();
   return true;

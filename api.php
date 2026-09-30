@@ -918,7 +918,11 @@ function replaceCrew(
 ): array
 {
     if (!is_array($crew) || !array_is_list($crew)) throw new ApiError(400, 'Besatzung ist ungültig');
-    $vehicles = array_values(array_unique(array_merge(ownIncidentVehicleNames($incidentId, $unitId), $additionalVehicles)));
+    $vehicles = array_values(array_unique(array_merge(
+        ownIncidentVehicleNames($incidentId, $unitId),
+        $additionalVehicles,
+        [CREW_ON_SCENE]
+    )));
     $members = [];
     foreach (query(
         'SELECT m.id,m.name,mu.active FROM members m JOIN member_units mu ON mu.member_id=m.id
@@ -948,7 +952,8 @@ function replaceCrew(
             || ($vehicle !== '' && !in_array($vehicle, $vehicles, true)
                 && (!$unchanged || in_array($vehicle, $removedAdditionalVehicles, true)))
             || !in_array($role, ['maschinist', 'einheitsfuehrer', 'besatzung'], true)
-            || ($vehicle === '' && $role !== 'besatzung') || ($slot && isset($occupied[$slot]))) {
+            || (in_array($vehicle, ['', CREW_ON_SCENE], true) && $role !== 'besatzung')
+            || ($slot && isset($occupied[$slot]))) {
             throw new ApiError(400, 'Besatzung ist ungültig');
         }
         $seen[$memberId] = true;
@@ -962,7 +967,10 @@ function replaceCrew(
         [$reportId, $row['memberId'], $row['name'], $row['vehicle'], $row['role']]
     );
     return [
-        'vehicles' => implode(', ', array_values(array_unique(array_filter(array_column($rows, 'vehicle'), fn($vehicle) => $vehicle !== '')))),
+        'vehicles' => implode(', ', array_values(array_unique(array_filter(
+            array_column($rows, 'vehicle'),
+            fn($vehicle) => $vehicle !== '' && $vehicle !== CREW_ON_SCENE
+        )))),
         'personnel' => implode(', ', array_column($rows, 'name'))
     ];
 }
@@ -1440,7 +1448,8 @@ try {
             'ranks' => RANKS,
             'incidentTypes' => INCIDENT_TYPES,
             'classifications' => CLASSIFICATIONS,
-            'classificationLabels' => CLASSIFICATION_LABELS
+            'classificationLabels' => CLASSIFICATION_LABELS,
+            'crewOnScene' => CREW_ON_SCENE
         ]);
     }
 

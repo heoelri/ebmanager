@@ -106,17 +106,16 @@ async function checkReportDates(page) {
   await form.waitFor();
   const alarm = await form.locator('[name=alarmedAt]').inputValue();
   const day = alarm.slice(0, 10);
-  assert.equal(await form.locator('[name=reportDate]').inputValue(), day);
+  assert.equal(await form.locator('[name=reportDate]').count(), 0);
   for (const name of ['departedAt', 'arrivedAt', 'endedAt']) {
     assert.equal(await form.locator(`[name=${name}Date]`).inputValue(), day);
     assert.equal(await form.locator(`[name=${name}]`).inputValue(), '');
   }
   await form.locator('[name=departedAtDate]').fill('2027-01-02');
+  await form.locator('[name=endedAtDate]').fill('2027-01-03');
   await form.locator('[name=endedAt]').fill('12:30');
-  await form.locator('[name=reportDate]').fill('2027-01-03');
-  await form.locator('[name=reportDate]').blur();
   assert.equal(await form.locator('[name=departedAtDate]').inputValue(), '2027-01-02');
-  assert.equal(await form.locator('[name=arrivedAtDate]').inputValue(), '2027-01-03');
+  assert.equal(await form.locator('[name=arrivedAtDate]').inputValue(), day);
   assert.equal(await form.locator('[name=endedAtDate]').inputValue(), '2027-01-03');
   assert.equal(await form.locator('[name=alarmedAt]').inputValue(), alarm);
   const payload = await form.evaluate(form => reportDetailsPayload(form));

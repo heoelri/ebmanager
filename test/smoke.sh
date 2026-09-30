@@ -322,7 +322,7 @@ test "$(MYSQL_PWD="$DB_PASSWORD" mysql "${mysql_tls_args[@]}" --default-characte
 curl --insecure --silent --fail --cookie "$session_cookie=$session_token" \
   "$base_url/api/me" | grep --quiet '"role":"wehrleitung"'
 
-# Der Options-Endpunkt liefert exakt die zentral konfigurierten Einsatzarten und Klassifikationen.
+# Der Options-Endpunkt liefert die zentral konfigurierten Einsatzarten, Klassifikationen und Besatzungskategorie.
 options_json=$(curl --insecure --silent --fail --cookie "$session_cookie=$session_token" "$base_url/api/options")
 printf '%s' "$options_json" | php -r '
   require "constants.php";
@@ -331,6 +331,7 @@ printf '%s' "$options_json" | php -r '
   assert($options["incidentTypes"]===INCIDENT_TYPES);
   assert($options["classifications"]===CLASSIFICATIONS);
   assert($options["classificationLabels"]===CLASSIFICATION_LABELS);
+  assert($options["crewOnScene"]===CREW_ON_SCENE);
 '
 
 # Apache verhindert den direkten HTTP-Zugriff auf die zentrale Konstantendatei.
@@ -1284,6 +1285,7 @@ API_BASE_URL="$base_url" COOKIE="$session_cookie=$force_token" INCIDENT_ID="$inc
     "{\"crew\":{}}", "{\"crew\":\"[]\"}", "{\"crew\":[[]]}", "{\"crew\":[true]}",
     "{\"crew\":[{\"memberId\":100,\"vehicle\":[]}]}","{\"crew\":[{\"memberId\":100,\"role\":{}}]}",
     "{\"crew\":[{\"memberId\":100,\"vehicle\":0}]}",
+    "{\"crew\":[{\"memberId\":100,\"vehicle\":\"Vor Ort\",\"role\":\"maschinist\"}]}",
     "{\"additionalVehicles\":{}}", "{\"additionalVehicles\":[[]]}",
     "{\"endedAt\":[]}", "{\"departedAt\":{}}", "{\"arrivedAt\":true}", "{\"endedAt\":\"2026-02-30T19:00:00.000Z\"}",
     "{\"runningNumber\":{}}", "{\"narrative\":[],\"crew\":[],\"additionalVehicles\":[]}"
@@ -1344,6 +1346,14 @@ API_BASE_URL="$base_url" COOKIE="$session_cookie=$force_token" INCIDENT_ID="$inc
   $data=json_decode(getenv("PAYLOAD"),false,512,JSON_THROW_ON_ERROR);
   $data->revision=$saved->revision; $call($data);
 '
+
+# Personal kann als „Vor Ort“ gespeichert und ausgegeben werden, ohne den Wert als Fahrzeug zu führen.
+on_scene_payload="${base_report_payload/\"crew\":[]/\"crew\":[{\"memberId\":100,\"vehicle\":\"Vor Ort\",\"role\":\"besatzung\"}]}"
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" --header 'Content-Type: application/json' \
+  --request PUT --data "$(report_data "$on_scene_payload")" "$base_url/api/reports/$report_id" >/dev/null
+curl --insecure --silent --fail --cookie "$session_cookie=$force_token" "$base_url/api/incidents/$incident_id/reports" |
+  php -r '$report=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR)[0]; assert($report["vehicles"]===""); assert($report["crew"]===[["memberId"=>100,"name"=>"Person 100","vehicle"=>"Vor Ort","role"=>"besatzung"]]);'
+assert_pdf "$force_token" "/api/reports/$report_id/pdf" 'Vor Ort | Besatzung: Person 100'
 
 # Zwei geladene Editoren: Der erste speichert, der zweite darf weder Text noch native Besatzungslisten oder Zusatzfahrzeuge überschreiben.
 editor_one=$(report_data "$report_with_additional_vehicle")
