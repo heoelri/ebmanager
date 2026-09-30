@@ -16,8 +16,10 @@ for _ in {1..60}; do
 done
 "${compose[@]}" exec -T db mysql --host=127.0.0.1 --user=root -ptest-password einsatzberichte --execute="SELECT 1" >/dev/null
 
-# Eine Altinstallation erhält Workflow, Stammdaten, Revisionen, Snapshots, Soft-Delete, Übungskennzeichnung und Bereinigungszustand genau einmal.
+# Eine Altinstallation erhält Workflow, Stammdaten, Revisionen, Snapshots, Soft-Delete, Übungskennzeichnung, Bereinigungszustand und Berichtseinschränkung genau einmal.
 "${compose[@]}" exec -T db mysql --default-character-set=utf8mb4 --user=root -ptest-password einsatzberichte --execute="
+  ALTER TABLE reports DROP COLUMN is_restricted;
+  DELETE FROM schema_migrations WHERE name='009-restricted-reports.sql';
   DROP TABLE auth_cleanup_state;
   ALTER TABLE login_history DROP INDEX login_history_time;
   DELETE FROM schema_migrations WHERE name='008-auth-retention.sql';
@@ -95,9 +97,11 @@ result="$("${compose[@]}" exec -T db mysql --user=root -ptest-password --batch -
     (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='incident_deletions'),'|',
     (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='incidents' AND column_name='is_exercise'),'|',
     (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='incident_exercise_changes'),'|',
-    (SELECT SUM(is_exercise) FROM incidents WHERE id BETWEEN 10 AND 13)
+    (SELECT SUM(is_exercise) FROM incidents WHERE id BETWEEN 10 AND 13),'|',
+    (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='reports' AND column_name='is_restricted'),'|',
+    (SELECT COUNT(*) FROM schema_migrations WHERE name='009-restricted-reports.sql')
   )")"
-test "$result" = '1|1|author_draft,unit_review,wehr_review,wehr_review|4|1|1|1|1|1|1|7,2,2,2|9,2,2,2|1|1|1:0|1|1|1|1|0'
+test "$result" = '1|1|author_draft,unit_review,wehr_review,wehr_review|4|1|1|1|1|1|1|7,2,2,2|9,2,2,2|1|1|1:0|1|1|1|1|0|1|1'
 
 # Migration 008 wird genau einmal vermerkt und initialisiert die erste Bereinigung samt zeitgeordnetem Index ohne Datenlöschung.
 test "$("${compose[@]}" exec -T db mysql --user=root -ptest-password --batch --skip-column-names einsatzberichte --execute="

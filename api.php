@@ -18,9 +18,9 @@ function databaseConfigurationError(): ?string
         if (!one('SELECT last_run_at FROM auth_cleanup_state WHERE id=1')) return 'Datenbankschema ist unvollständig. Der Zustand der Anmeldebereinigung fehlt.';
         $reportColumns = db()->query(
             "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='reports'
-             AND column_name IN ('report_year','running_number','damaged_party','damaging_party','incident_command')"
+             AND column_name IN ('report_year','running_number','damaged_party','damaging_party','incident_command','is_restricted')"
         )->fetchColumn();
-        if ((int)$reportColumns !== 5) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
+        if ((int)$reportColumns !== 6) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
         $memberUnitColumns = db()->query(
             "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='member_units'
              AND column_name='active'"
@@ -320,13 +320,14 @@ function unitStatistics(array $user, mixed $fromValue, mixed $toValue, mixed $un
         $unitFilter = ' AND iu.unit_id=?';
         $params[] = $unitId;
     }
+    $reportFilter = $user['role'] === 'wehrleitung' ? '' : ' AND r.is_restricted=0';
 
     $incidents = query(
         'SELECT i.id,i.started_at,i.is_exercise,iu.unit_id,u.name unit_name,iu.vehicles,r.id report_id
          FROM incident_units iu
          JOIN incidents i ON i.id=iu.incident_id
          JOIN units u ON u.id=iu.unit_id AND u.organization_id=i.organization_id
-         LEFT JOIN reports r ON r.incident_id=i.id AND r.unit_id=iu.unit_id
+         LEFT JOIN reports r ON r.incident_id=i.id AND r.unit_id=iu.unit_id' . $reportFilter . '
          WHERE i.organization_id=? AND i.deleted_at IS NULL AND i.started_at>=? AND i.started_at<?' . $unitFilter . '
          ORDER BY i.started_at,i.id,iu.unit_id',
         $params
@@ -490,15 +491,21 @@ function reportVisibilitySql(array $user, string $alias = 'r'): array
     if ($user['role'] === 'wehrleitung') {
         return ["EXISTS(SELECT 1 FROM report_transitions rt WHERE rt.report_id=$alias.id AND rt.to_status='wehr_review')", []];
     }
+    $createdByCommand = "EXISTS(SELECT 1 FROM report_transitions created_rt
+        WHERE created_rt.report_id=$alias.id AND created_rt.from_status IS NULL AND created_rt.actor_role='wehrleitung')";
     if ($user['role'] === 'einheitsleitung') {
         return [
             "EXISTS(SELECT 1 FROM user_units uu WHERE uu.user_id=? AND uu.unit_id=$alias.unit_id)
-             AND EXISTS(SELECT 1 FROM report_transitions rt WHERE rt.report_id=$alias.id AND rt.to_status='unit_review')",
+             AND $alias.is_restricted=0
+             AND (EXISTS(SELECT 1 FROM report_transitions rt WHERE rt.report_id=$alias.id AND rt.to_status='unit_review')
+                  OR $createdByCommand)",
             [$user['id']]
         ];
     }
     return [
-        "$alias.author_id=? AND EXISTS(SELECT 1 FROM user_units uu WHERE uu.user_id=? AND uu.unit_id=$alias.unit_id)",
+        "$alias.is_restricted=0
+         AND EXISTS(SELECT 1 FROM user_units uu WHERE uu.user_id=? AND uu.unit_id=$alias.unit_id)
+         AND ($alias.author_id=? OR $createdByCommand)",
         [$user['id'], $user['id']]
     ];
 }
@@ -584,6 +591,7 @@ function visibleIncidentReports(int $incidentId, array $user): array
         $row['history'] = $history[(int)$row['id']] ?? [];
         $row['additionalVehicles'] = $additionalVehicles[(int)$row['id']] ?? [];
         $row['editable'] = canEditReport($row, $user);
+        $row['is_restricted'] = (bool)$row['is_restricted'];
         $row['duration_minutes'] = $row['ended_at'] && $row['alarmed_at']
             ? (int)round((strtotime($row['ended_at']) - strtotime($row['alarmed_at'])) / 60)
             : null;
@@ -744,6 +752,9 @@ function transitionReport(int $reportId, string $action, array $user, string $co
         );
         if (!$report || (int)$report['organization_id'] !== (int)$user['organization_id']) throw new ApiError(404, 'Bericht nicht gefunden');
         if ($report['status'] !== $from) throw new ApiError(409, 'Der Bericht wurde bereits geändert. Bitte Ansicht neu laden.');
+        if ($action === 'return-to-unit' && (bool)$report['is_restricted']) {
+            throw new ApiError(409, 'Heben Sie die Einschränkung vor der Rückgabe auf.');
+        }
         if ($action === 'submit-to-unit') {
             if ((int)$report['author_id'] !== (int)$user['id'] || !in_array((int)$report['unit_id'], $user['unitIds'], true)) {
                 throw new ApiError(403, 'Keine Berechtigung');
@@ -1703,7 +1714,8 @@ try {
         $assignmentParams = $user['role'] === 'wehrleitung' ? $params : array_merge([$user['id']], $params);
         foreach (query(
             "SELECT iu.incident_id,iu.unit_id unitId,iu.vehicles,u.name unitName,
-             r.id IS NOT NULL hasReport,r.status reportStatus,r.author_id reportAuthorId,r.author_name reportAuthorName
+             r.id IS NOT NULL hasReport,r.status reportStatus,r.author_id reportAuthorId,
+             r.author_name reportAuthorName,r.is_restricted reportRestricted
              FROM incident_units iu JOIN incidents i ON i.id=iu.incident_id JOIN units u ON u.id=iu.unit_id AND u.organization_id=i.organization_id
              $membershipJoin
              LEFT JOIN reports r ON r.incident_id=iu.incident_id AND r.unit_id=iu.unit_id
@@ -1714,6 +1726,7 @@ try {
             unset($assignment['incident_id']);
             $assignment['unitId'] = (int)$assignment['unitId'];
             $assignment['hasReport'] = (int)$assignment['hasReport'];
+            $assignment['reportRestricted'] = (bool)$assignment['reportRestricted'];
             $assignment['vehicles'] = storedJson($assignment['vehicles']);
             if ($assignment['reportAuthorId'] !== null) $assignment['reportAuthorId'] = (int)$assignment['reportAuthorId'];
             $assignments[$incidentId][] = $assignment;
@@ -1761,7 +1774,8 @@ try {
             $row['units'] = implode(', ', $unitNames);
             $row['canDelete'] = canDeleteIncident($row, $user);
             foreach ($relevant as &$assignment) {
-                if (!$assignment['reportAuthorName']
+                if ($assignment['reportRestricted']
+                    || !$assignment['reportAuthorName']
                     || $user['role'] !== 'fuehrungskraft'
                     || $assignment['reportAuthorId'] === $user['id']) {
                     unset($assignment['reportAuthorName']);
@@ -2021,6 +2035,33 @@ try {
                  $details['incidentType'], $details['classification'], $lockedReport['id']]
             );
             query('UPDATE incidents SET revision=revision+1 WHERE id=?', [$lockedReport['incident_id']]);
+        });
+        respond(200, ['ok' => true]);
+    }
+
+    if ($method === 'PUT' && preg_match('#^/api/reports/(\d+)/restricted$#', $path, $match)) {
+        assertRole($user, 'wehrleitung');
+        $reportId = (int)$match[1];
+        $data = input();
+        if (!is_bool($data['isRestricted'] ?? null)) throw new ApiError(400, 'Einschränkung ist ungültig');
+        transaction(function () use ($reportId, $data, $user) {
+            $reference = one(
+                "SELECT r.incident_id FROM reports r JOIN incidents i ON i.id=r.incident_id
+                 WHERE r.id=? AND i.organization_id=? AND i.deleted_at IS NULL
+                 AND EXISTS(SELECT 1 FROM report_transitions rt WHERE rt.report_id=r.id AND rt.to_status='wehr_review')",
+                [$reportId, $user['organization_id']]
+            );
+            if (!$reference) throw new ApiError(404, 'Bericht nicht gefunden');
+            query('SELECT id FROM incidents WHERE id=? FOR UPDATE', [$reference['incident_id']]);
+            $report = one('SELECT status,is_restricted,revision FROM reports WHERE id=? FOR UPDATE', [$reportId]);
+            if (!$report) throw new ApiError(404, 'Bericht nicht gefunden');
+            assertRevision($data['revision'] ?? null, (int)$report['revision']);
+            if ($report['status'] !== 'wehr_review') {
+                throw new ApiError(409, 'Die Einschränkung kann nur während der Prüfung durch die Wehrführung geändert werden.');
+            }
+            if ((bool)$report['is_restricted'] === $data['isRestricted']) return;
+            query('UPDATE reports SET is_restricted=?,revision=revision+1 WHERE id=?', [(int)$data['isRestricted'], $reportId]);
+            query('UPDATE incidents SET revision=revision+1 WHERE id=?', [$reference['incident_id']]);
         });
         respond(200, ['ok' => true]);
     }

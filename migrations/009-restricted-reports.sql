@@ -1,0 +1,1 @@
+ALTER TABLE reports ADD COLUMN is_restricted BOOLEAN NOT NULL DEFAULT 0 AFTER status;

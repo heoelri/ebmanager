@@ -6,6 +6,8 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Added
 
+- Die Wehrführung kann Einheitsberichte revisionsgeschützt als „Eingeschränkt“ markieren. Andere Rollen sehen weiterhin Einsatz und Fahrzeuge, erhalten aber keine Berichtsdetails oder Berichtsexporte.
+- Von der Wehrführung erstellte Berichte sind für Führungskräfte und Einheitsführung der jeweiligen Einheit lesbar.
 - Ein echter Browser-Berichtsworkflow prüft Anlage, Bearbeitung, Übergaben, beide kommentierten Rückgabewege und Konsolidierung über alle drei Rollen gegen Apache/MySQL. HTTP- und Browsertests prüfen erfolgreiches Abmelden einschließlich Cookie-Löschung, serverseitig unwirksamer Token-Wiederverwendung und Erhalt anderer Sitzungen.
 - CI veröffentlicht PHP-Zeilenabdeckung der HTTP-Smoke-Requests mit einem ausschließlich lokalen Xdebug-Router sowie Browser-Funktionsabdeckung, getrennt nach echtem Backend und synthetischen Lifecycle-Tests. Fehlende Zeilen beziehungsweise Funktionen bleiben sichtbar; es gibt keine irreführende Gesamtquote oder Prozenthürde.
 
@@ -45,6 +47,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Fixed
 
+- Eingeschränkte Berichte liefern der Einheitsführung keine berichtsbezogenen Statistikdetails, bleiben aber als Einsätze samt Alarmfahrzeugen gezählt. Einschränkungen sind nur im aktuellen Wehrführungsstatus möglich; sichtbare Admin-Berichte erzeugen keinen widersprüchlichen Sperrhinweis.
 - Coverage-Auswertung akzeptiert Xdebug-Ausführungszähler größer als eins; der Logout-Smoke-Test prüft die Löschattribute unabhängig vom PHP-Löschmarker des Sitzungscookies (Review zu #125).
 - Ein nachträglich geöffneter Dialog entwertet ausstehende Antworten auch dann, wenn beim Requeststart kein Dialog offen war. Dialogfehler blockieren keine erneute Übermittlung; Nachladefehler nach erfolgreichem Dialogschluss bleiben in der Hauptansicht sichtbar. Verzögerte Schließereignisse entziehen weder neuen Dialogen noch fokussierten Fehlern den Fokus. Auch die erste Anmeldeseite wird auf unbehandelte Browserfehler geprüft; Einheitenwechsel erlauben keinen zweiten DIVERA-Schreibvorgang, solange der erste noch läuft (Review zu #125).
 - Die Smoke-Suite verlangt nicht mehr den im Zuge von #88 entfernten globalen Warnungspuffer `pendingWarning`.
@@ -68,6 +71,12 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 - Die Einsatzlisten-API liefert konsolidierte Berichtstexte einschließlich zurückbehaltener Arbeitsstände ausschließlich an die Wehrführung. Führungskräfte und Einheitsführungen erhalten weiterhin ihre zulässigen Einsatz- und Statusdaten (#100).
 
 ### Breaking Changes
+
+**Berichtseinschränkung benötigt Migration 009 vor dem Anwendungscode.**
+Sie ergänzt `reports.is_restricted` mit dem sicheren Standardwert `0`.
+Reihenfolge: Sicherung, Migration 009 und Ledger-Vermerk, gemeinsamer
+PHP-/Browserwechsel, Rollen- und PDF-Prüfung. Details:
+[Deployment: Berichtseinschränkung](docs/WEBSPACE-DEPLOYMENT.md#berichtseinschränkung-einführen).
 
 **Anmeldebereinigung (#17/#97) benötigt Migration 008 vor dem Anwendungscode.**
 Sie ergänzt den zeitgeordneten Login-Index und `auth_cleanup_state`, löscht
