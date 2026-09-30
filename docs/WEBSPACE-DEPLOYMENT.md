@@ -322,6 +322,31 @@ und Historientabelle können im Schema verbleiben; alter Code ignoriert beide.
 Gesetzte Kennzeichnungen sind im alten Browser nicht sichtbar, bleiben aber
 gespeichert. Historieneinträge nicht löschen.
 
+### Berichtseinschränkung einführen
+
+1. Datenbank und bisherige Anwendungsdateien sichern.
+2. Prüfen, dass Migrationen 001 bis 008 vollständig ausgeführt und in
+   `schema_migrations` registriert sind.
+3. `migrations/009-restricted-reports.sql` mit einem DDL-berechtigten
+   Administrationskonto ausführen und danach einmalig vermerken:
+
+   ```sql
+   INSERT INTO schema_migrations(name,applied_at)
+   VALUES('009-restricted-reports.sql',UTC_TIMESTAMP());
+   ```
+
+   Lokal übernimmt `docker/migrate.sh` die Registrierung.
+4. PHP- und Browserdateien gemeinsam ausliefern. `/api/bootstrap` darf keinen
+   Schemafehler melden. Einen durch die Wehrführung erstellten Bericht mit
+   Führungskraft und Einheitsführung lesen, einschränken und die gesperrten
+   API-/PDF-Sichten prüfen.
+
+**Rollback von 009:** Den vorherigen Anwendungscode wiederherstellen.
+`reports.is_restricted` kann im Schema verbleiben; alter Code ignoriert die
+Spalte, setzt Einschränkungen aber nicht durch. Deshalb vor dem Rollback alle
+gesetzten Einschränkungen fachlich bewerten und den alten Code nicht als
+gleichwertigen Datenschutzschutz betreiben.
+
 ### Sitzungen und Loginhistorie bereinigen (#17, #97)
 
 Die bestätigte Aufbewahrungsfrist für erfolgreiche Anmeldungen beträgt

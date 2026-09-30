@@ -31,6 +31,8 @@ const actions = {
   deleteIncident: button => deleteIncident(Number(button.dataset.id)),
   download: button => downloadFile(button.dataset.href),
   editReport: button => editReport(Number(button.dataset.id), button),
+  toggleReportRestriction: button =>
+    toggleReportRestriction(Number(button.dataset.id), Number(button.dataset.incident)),
   submitReport: button =>
     submitReport(Number(button.dataset.id), Number(button.dataset.incident), button.dataset.workflow),
   returnReport: button =>
@@ -45,9 +47,15 @@ document.addEventListener('click', async event => {
   const control = event.target.closest('[data-action]'),
     action = control && actions[control.dataset.action];
   if (!action || control.disabled) return;
-  const writing = ['toggleExercise', 'deleteIncident', 'submitReport', 'resetUser', 'logout', 'syncDivera'].includes(
-    control.dataset.action
-  );
+  const writing = [
+    'toggleExercise',
+    'toggleReportRestriction',
+    'deleteIncident',
+    'submitReport',
+    'resetUser',
+    'logout',
+    'syncDivera'
+  ].includes(control.dataset.action);
   if (writing) control.disabled = true;
   let current = viewContext(control);
   try {
@@ -589,7 +597,7 @@ function exerciseHistory(history) {
     : '';
 }
 function authorReportNotice(report) {
-  if (me.role !== 'fuehrungskraft' || report.status === 'author_draft') return '';
+  if (me.role !== 'fuehrungskraft' || report.author_id !== me.id || report.status === 'author_draft') return '';
   const submissions = report.history.filter(
       item =>
         (item.from_status === 'author_draft' && item.to_status === 'unit_review') ||
@@ -616,9 +624,13 @@ function reportActions(report, incidentId) {
       `<button data-action="submitReport" data-id="${report.id}" data-incident="${incidentId}" data-workflow="submit-to-command">An Wehrführung senden</button>`
     );
   }
-  if (report.status === 'wehr_review' && me.role === 'wehrleitung')
+  if (report.status === 'wehr_review' && me.role === 'wehrleitung' && !report.is_restricted)
     actions.push(
       `<button class="secondary" data-action="returnReport" data-id="${report.id}" data-incident="${incidentId}" data-workflow="return-to-unit">An Einheitsführung zurückgeben</button>`
+    );
+  if (me.role === 'wehrleitung')
+    actions.push(
+      `<button class="secondary" data-action="toggleReportRestriction" data-id="${report.id}" data-incident="${incidentId}">${report.is_restricted ? 'Einschränkung aufheben' : 'Einschränken'}</button>`
     );
   return actions.join(' ');
 }
@@ -628,15 +640,29 @@ function existingReportsNotice() {
     : '';
 }
 function inaccessibleReportNotices(assignments) {
-  return me.role === 'fuehrungskraft'
+  return me.role !== 'wehrleitung'
     ? assignments
-        .filter(item => me.unitIds.includes(item.unitId) && item.reportAuthorName)
+        .filter(
+          item =>
+            me.unitIds.includes(item.unitId) &&
+            (item.reportRestricted || (me.role === 'fuehrungskraft' && item.reportAuthorName))
+        )
         .map(
           item =>
-            `<article class="report"><strong>${esc(units.find(unit => unit.id === item.unitId)?.name || `Einheit ${item.unitId}`)}</strong><p>Für diese Einheit wurde bereits ein Einsatzbericht durch ${esc(item.reportAuthorName)} verfasst. Die Berichtsinhalte sind nur für die verfassende Person, die Einheitsführung und die Wehrführung sichtbar.</p></article>`
+            `<article class="report"><strong>${esc(units.find(unit => unit.id === item.unitId)?.name || `Einheit ${item.unitId}`)}</strong><p>${item.reportRestricted ? 'Der Einsatzbericht wurde durch die Wehrführung eingeschränkt. Einsatz und Fahrzeuge bleiben sichtbar; die Berichtsinhalte sind nur für die Wehrführung lesbar.' : `Für diese Einheit wurde bereits ein Einsatzbericht durch ${esc(item.reportAuthorName)} verfasst. Die Berichtsinhalte sind nur für die verfassende Person, die Einheitsführung und die Wehrführung sichtbar.`}</p></article>`
         )
         .join('')
     : '';
+}
+async function toggleReportRestriction(reportId, incidentId) {
+  const report = currentReports.find(item => item.id === reportId);
+  if (!report) return;
+  const result = await reportWrite(
+    `/api/reports/${reportId}/restricted`,
+    {isRestricted: !report.is_restricted, revision: report.revision},
+    'PUT'
+  );
+  await refreshIncident(incidentId, result);
 }
 async function submitReport(reportId, incidentId, action) {
   const revision = currentReports.find(report => report.id === reportId).revision;
@@ -699,7 +725,7 @@ async function incident(id) {
     <section class="card"><h2>Einzelberichte</h2>${inaccessibleReports}${
       reports
         .map(
-          r => `<article class="report"><strong>${esc(r.unit_name)} · Nr. ${esc(r.running_number || '–')} · ${esc(r.author_name)}</strong> <span class="muted">${esc(reportStatusLabels[r.status] || r.status)}</span>
+          r => `<article class="report"><strong>${esc(r.unit_name)} · Nr. ${esc(r.running_number || '–')} · ${esc(r.author_name)}</strong> <span class="muted">${esc(reportStatusLabels[r.status] || r.status)}${r.is_restricted ? ' · Eingeschränkt' : ''}</span>
     <p><span data-report-exercise>${item.is_exercise ? '<b>Übung</b> · ' : ''}</span><b>${esc(r.incident_type || 'Ohne Einsatzart')}</b></p>${reportTimes(r)}
     ${commandSummary(r.incident_command)}${contactSummary('Geschädigt wurde', r.damaged_party)}${contactSummary('Schädiger', r.damaging_party)}
     ${classificationSummary(r.classification)}${additionalVehicleSummary(r.additionalVehicles)}<p><b>Besatzung:</b><br>${crewSummary(r.crew)}</p><p>${esc(r.narrative).replace(/\n/g, '<br>')}</p>${authorReportNotice(r)}

@@ -1,5 +1,26 @@
 # Security Review
 
+## Eingeschränkte Einsatzberichte vom 30. September 2026
+
+Die neue Berechtigung wird ausschließlich serverseitig im gemeinsamen
+Berichtssichtbarkeitsfilter erzwungen. Führungskräfte und Einheitsführungen
+erhalten von der Wehrführung angelegte Berichte nur bei aktueller Zuordnung
+zur berichtenden Einheit. Mandantenfremde Autoren bleiben durch den
+bestehenden Organisations-Join ausgeschlossen.
+
+`is_restricted` sperrt für alle Nicht-Wehrführungen Berichtslisten,
+Einzel-PDFs und Berichtsanteile der Einsatzakte. Sichtbar bleiben nur der
+bereits erlaubte Einsatz, sein Fahrzeug-Snapshot und ein boolescher
+Einschränkungshinweis; sensible Berichtstexte, Kontakte, Besatzung und
+Prüfverlauf werden nicht übertragen. Das Umschalten ist auf die Wehrführung
+begrenzt, prüft die geladene Revision und sperrt zuerst den Einsatz, dann den
+Bericht. Eine Rückgabe an die Einheitsführung ist gesperrt, solange diese den
+Bericht nicht lesen dürfte.
+
+Die Änderung erfasst keine neuen personenbezogenen Daten und protokolliert
+keine Einsatzinhalte. Sie ist ein gezielter Berechtigungsreview, kein
+vollständiger Penetrationstest.
+
 ## Testabdeckung und CI-Auslöser vom 21. September 2026
 
 Die neuen Logout-Prüfungen verwenden ausschließlich lokale Testkonten und

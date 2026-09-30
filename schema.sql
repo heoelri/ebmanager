@@ -186,6 +186,7 @@ CREATE TABLE reports (
   incident_type VARCHAR(100) NOT NULL DEFAULT '',
   classification JSON NOT NULL,
   status ENUM('author_draft','unit_review','wehr_review') NOT NULL DEFAULT 'author_draft',
+  is_restricted BOOLEAN NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   released_at DATETIME,
@@ -267,4 +268,5 @@ INSERT INTO schema_migrations(name,applied_at) VALUES
   ('005-historical-report-snapshots.sql',UTC_TIMESTAMP()),
   ('006-incident-soft-delete.sql',UTC_TIMESTAMP()),
   ('007-incident-exercises.sql',UTC_TIMESTAMP()),
-  ('008-auth-retention.sql',UTC_TIMESTAMP());
+  ('008-auth-retention.sql',UTC_TIMESTAMP()),
+  ('009-restricted-reports.sql',UTC_TIMESTAMP());

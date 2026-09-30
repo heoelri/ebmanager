@@ -459,6 +459,7 @@ Eindeutig ist `(unit_id, divera_id)`. Ein Stammdatenabgleich ersetzt den aktuell
 | `incident_type` | VARCHAR(100), NOT NULL | Validierte Einsatzart |
 | `classification` | JSON, NOT NULL | Aufgliederung |
 | `status` | ENUM, NOT NULL | `author_draft`, `unit_review` oder `wehr_review` |
+| `is_restricted` | BOOLEAN, NOT NULL, DEFAULT 0 | Nur die Wehrführung darf den Bericht lesen; Einsatz und Fahrzeug-Snapshot bleiben für zugeordnete Rollen sichtbar |
 | `created_at` | DATETIME, NOT NULL | Erstellungszeit in UTC |
 | `updated_at` | DATETIME, NOT NULL | Letzte Änderung in UTC |
 | `released_at` | DATETIME, NULL | Freigabezeit in UTC |
@@ -473,6 +474,10 @@ fehlen. Alle vorhandenen Einsatzzeiten müssen chronologisch sein. `alarmed_at`
 wird nicht vom Client übernommen. Die Dauer wird bei der Abfrage
 als `duration_minutes` aus `alarmed_at` und `ended_at` berechnet und nicht
 gespeichert.
+
+Von der Wehrführung angelegte Berichte sind für die zugeordneten
+Führungskräfte und die Einheitsführung lesbar. `is_restricted=1` übersteuert
+diese und alle anderen Nicht-Wehrführungs-Sichten einschließlich PDF-Export.
 
 Die Anwendung setzt die MySQL-Sitzungszeitzone jeder PDO-Verbindung auf UTC.
 Damit schreiben auch die `CURRENT_TIMESTAMP`-Defaults von `created_at` und

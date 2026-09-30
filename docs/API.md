@@ -135,6 +135,7 @@ Einheitsgrenzen. Antworten sind JSON, sofern nicht als PDF bezeichnet.
 | `GET /incidents/:id/reports` | A | Liste ausschließlich sichtbarer Berichte; siehe unten |
 | `POST /incidents/:id/reports` | A, alarmierte/erlaubte Einheit | Berichtseingabe plus `unitId` → 201 `{id}` |
 | `PUT /reports/:id` | Autor in `author_draft` / E in `unit_review` | vollständige Berichtseingabe plus `revision` → `{ok:true}` |
+| `PUT /reports/:id/restricted` | W, sichtbarer Bericht | `isRestricted` (boolean), `revision` → `{ok:true}` |
 | `POST /reports/:id/submit-to-unit` | ursprünglicher F-Autor | `revision`, optional `comment` → `{ok:true}`, ggf. `warning` |
 | `POST /reports/:id/return-to-author` | zuständige E | `revision, comment` → `{ok:true}`, ggf. `warning` |
 | `POST /reports/:id/submit-to-command` | zuständige E | `revision`, optional `comment` → `{ok:true}`, ggf. `warning` |
@@ -249,8 +250,14 @@ Antworten behalten die bestehenden Schlüsselnamen:
   Kontakte werden `{}`. Neu gespeicherte leere Kontakte enthalten leere
   Textfelder, eine leere Klassifikation die drei leeren Gruppenlisten.
   `history` und `additionalVehicles` bleiben Listen. Außerdem u. a.
-  Integer-`revision`, `editable` (boolean), `duration_minutes` (Integer/null)
+  Integer-`revision`, `editable` und `is_restricted` (boolean), `duration_minutes` (Integer/null)
   sowie die unveränderten fachlichen Spalten und Autoren-/Einheitsnamen.
+
+Ein initial durch W angelegter Bericht ist für E und F der berichtenden
+Einheit lesbar. Bei `is_restricted=true` liefern Berichtslisten und
+Berichts-PDFs für E/F keine Berichtsdaten; `assignments[].reportRestricted`
+bleibt als boolean sichtbar, damit der Browser neben Einsatz und
+Fahrzeug-Snapshot einen Einschränkungshinweis anzeigen kann.
 
 **Breaking Change (#92):** Die genannten Strukturen waren teilweise
 JSON-kodierte **Strings innerhalb der JSON-Antwort**. Clients müssen sie nun
