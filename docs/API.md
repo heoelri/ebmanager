@@ -116,7 +116,7 @@ Einheitsgrenzen. Antworten sind JSON, sofern nicht als PDF bezeichnet.
 | `POST /password-reset/confirm` | öffentlich | `token, password` → `{ok:true}`; verbraucht Link, widerruft Sitzungen |
 | `POST /logout` | A | `{}` → `{ok:true}`, beendet aktuelle Sitzung |
 | `GET /me` | A | `id, organization_id, organization_name, name, email, role, unitIds[]` |
-| `GET /options` | A | `ranks{}, incidentTypes[], classifications{}, classificationLabels{}` aus `constants.php` |
+| `GET /options` | A | `ranks{}, incidentTypes[], classifications{}, classificationLabels{}, crewOnScene` aus `constants.php` |
 | `GET /system` | W | kuratierte Objekte `application, database, email`, Listen `units, users`; keine Geheimnisse |
 | `GET /units` | A | sichtbare Liste mit `id, name, divera_configured` (0/1), `last_divera_import_at` |
 | `POST /units` | W | `name` → 201 `{id}` |
@@ -215,9 +215,16 @@ bleibt zulässig). Fehlend, `null` oder `{}` leeren die enthaltenen Texte.
 Auch eine fehlende oder `null`-Gruppe bedeutet `[]`. Werte müssen aus
 `/options` stammen; Duplikate werden entfernt.
 
-`crew` ist eine Liste von Objekten `{memberId, vehicle, role}`; `vehicle`
-fehlend/`null`/`""` bedeutet „Ohne Fahrzeug“, `role` fehlend/`null` bedeutet
-`besatzung`. Weitere Rollen: `maschinist`, `einheitsfuehrer`.
+`crew` ist eine Liste von Objekten `{memberId, vehicle, target, role}`.
+`target` ist `vehicle`, `without_vehicle` oder `on_scene`. Bei `vehicle` ist
+eine zulässige eigene Fahrzeugbezeichnung erforderlich; bei den beiden
+anderen Werten bleibt `vehicle` leer und nur `besatzung` ist erlaubt.
+`on_scene` wird mit `/options.crewOnScene` als „Vor Ort (ohne Fahrzeug)“
+angezeigt, aber nicht als Fahrzeug geführt. Damit bleibt ein echtes Fahrzeug namens „Vor Ort“
+eindeutig `target: "vehicle"`. Für ältere Clients wird ein fehlendes oder
+leeres `target` weiterhin aus `vehicle` abgeleitet: leer bedeutet
+`without_vehicle`, sonst `vehicle`. `role` fehlend/`null` bedeutet
+`besatzung`; weitere Rollen sind `maschinist` und `einheitsfuehrer`.
 `additionalVehicles` ist eine Liste eigener Fahrzeugbezeichnungen.
 Beide Listen werden bei fehlend/`null`/`[]` geleert. Kein Mitglied doppelt,
 Führungs-/Maschinistenfunktion höchstens einmal je Fahrzeug. Bestehende

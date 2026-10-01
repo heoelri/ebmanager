@@ -217,6 +217,7 @@ CREATE TABLE report_crew (
   report_id BIGINT UNSIGNED NOT NULL,
   member_id BIGINT UNSIGNED NOT NULL,
   vehicle VARCHAR(200) NOT NULL DEFAULT '',
+  target_type ENUM('vehicle','without_vehicle','on_scene') NOT NULL DEFAULT 'vehicle',
   member_name VARCHAR(200) NOT NULL,
   role ENUM('maschinist','einheitsfuehrer','besatzung') NOT NULL DEFAULT 'besatzung',
   PRIMARY KEY (report_id, member_id),
@@ -269,4 +270,5 @@ INSERT INTO schema_migrations(name,applied_at) VALUES
   ('006-incident-soft-delete.sql',UTC_TIMESTAMP()),
   ('007-incident-exercises.sql',UTC_TIMESTAMP()),
   ('008-auth-retention.sql',UTC_TIMESTAMP()),
-  ('009-restricted-reports.sql',UTC_TIMESTAMP());
+  ('009-restricted-reports.sql',UTC_TIMESTAMP()),
+  ('010-crew-target-type.sql',UTC_TIMESTAMP());

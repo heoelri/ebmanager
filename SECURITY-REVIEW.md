@@ -1,5 +1,20 @@
 # Security Review
 
+## Besatzungsziel „Vor Ort“ vom 30. September 2026
+
+Die neue Kategorie erfasst keine zusätzlichen personenbezogenen Felder und
+ändert keine Leserechte. Der Server akzeptiert den zentralen Wert nur für
+Mitglieder der berichtenden Einheit und ausschließlich mit der Funktion
+`besatzung`; manipulierte Maschinisten- oder Einheitsführerzuordnungen werden
+abgewiesen. Die gespeicherte Zielart `on_scene` ist vom Anzeigenamen getrennt,
+sodass ein echtes Fahrzeug namens „Vor Ort“ weiterhin als `vehicle` mit allen
+zulässigen Funktionen verwendbar bleibt. „Vor Ort“ bleibt Teil der
+geschützten Besatzungsdaten, wird aber nicht als Fahrzeug oder zusätzliches
+Fahrzeug ausgegeben beziehungsweise gezählt. Der Browser behandelt das über
+`/api/options` gelieferte Anzeigenlabel wie andere Serverwerte als
+unvertrauenswürdig und escaped es vor jeder HTML-Ausgabe; bei fehlendem Feld
+verwendet er ausschließlich den festen deutschen Standardtext.
+
 ## Eingeschränkte Einsatzberichte vom 30. September 2026
 
 Die neue Berechtigung wird ausschließlich serverseitig im gemeinsamen

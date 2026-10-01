@@ -37,6 +37,11 @@ function databaseConfigurationError(): ?string
                OR (table_name='incidents' AND column_name='report_data_frozen'))"
         )->fetchColumn();
         if ((int)$nameColumns !== 3) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
+        $crewTargetColumns = db()->query(
+            "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='report_crew'
+             AND column_name='target_type'"
+        )->fetchColumn();
+        if ((int)$crewTargetColumns !== 1) return 'Datenbankschema ist unvollständig. Importieren Sie schema.sql und alle ausstehenden Migrationen.';
         $incidentColumns = db()->query(
             "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE()
              AND table_name='incidents' AND column_name IN ('deleted_at','is_exercise')"
@@ -548,7 +553,9 @@ function visibleIncidentReports(int $incidentId, array $user): array
     )->fetchAll();
     $crew = [];
     foreach (query(
-        "SELECT rc.report_id reportId,rc.member_id memberId,rc.member_name name,rc.vehicle,rc.role
+        "SELECT rc.report_id reportId,rc.member_id memberId,rc.member_name name,rc.vehicle,
+                CASE WHEN rc.target_type='vehicle' AND rc.vehicle='' THEN 'without_vehicle' ELSE rc.target_type END target,
+                rc.role
          FROM report_crew rc JOIN members m ON m.id=rc.member_id JOIN reports r ON r.id=rc.report_id
          JOIN incidents i ON i.id=r.incident_id AND m.organization_id=i.organization_id
          WHERE r.incident_id=? AND i.organization_id=? AND i.deleted_at IS NULL$where ORDER BY rc.report_id,rc.member_id",
@@ -691,7 +698,7 @@ function reportExportLines(array $report): array
     $crew = exportJson($report['crew']);
     if (!$crew) exportLine($lines, 'Keine Besatzung');
     foreach ($crew as $person) {
-        $vehicle = $person['vehicle'] ?: 'Ohne Fahrzeug';
+        $vehicle = $person['target'] === 'on_scene' ? CREW_ON_SCENE : ($person['vehicle'] ?: 'Ohne Fahrzeug');
         exportLine($lines, "$vehicle | " . ($crewRoleLabels[$person['role']] ?? $person['role']) . ': ' . $person['name']);
     }
     exportLine($lines, 'Einsatzverlauf', true);
@@ -927,7 +934,8 @@ function replaceCrew(
         [$organizationId, $unitId, $reportId]
     )->fetchAll() as $member) $members[(int)$member['id']] = $member;
     $existingCrew = [];
-    foreach (query('SELECT member_id,member_name,vehicle,role FROM report_crew WHERE report_id=?', [$reportId])->fetchAll() as $item) {
+    foreach (query('SELECT member_id,member_name,vehicle,target_type,role FROM report_crew WHERE report_id=?', [$reportId])->fetchAll() as $item) {
+        if ($item['target_type'] === 'vehicle' && $item['vehicle'] === '') $item['target_type'] = 'without_vehicle';
         $existingCrew[(int)$item['member_id']] = $item;
     }
     $seen = $occupied = $rows = [];
@@ -935,34 +943,44 @@ function replaceCrew(
         $item = objectInput($item, 'Besatzungseintrag');
         $memberId = positiveId($item['memberId'] ?? null, 'Mitglieds-ID');
         $vehicle = optional($item['vehicle'] ?? null, 'Fahrzeug', 200);
+        $target = optional($item['target'] ?? null, 'Besatzungsziel', 30);
+        if ($target === '') $target = $vehicle === '' ? 'without_vehicle' : 'vehicle';
         $role = required($item['role'] ?? 'besatzung', 'Funktion', 30);
         $unchanged = isset($existingCrew[$memberId])
             && $existingCrew[$memberId]['vehicle'] === $vehicle
+            && $existingCrew[$memberId]['target_type'] === $target
             && $existingCrew[$memberId]['role'] === $role;
-        if ($vehicle !== '' && in_array($vehicle, $removedAdditionalVehicles, true)) {
+        if ($target === 'vehicle' && in_array($vehicle, $removedAdditionalVehicles, true)) {
             throw new ApiError(400, 'Das zusätzliche Fahrzeug ist noch einer Besatzung zugeordnet');
         }
         // Driver and unit leader are unique per vehicle; crew members are not.
-        $slot = $vehicle !== '' && $role !== 'besatzung' ? "$vehicle:$role" : '';
+        $slot = $target === 'vehicle' && $role !== 'besatzung' ? "$vehicle:$role" : '';
         if (!$memberId || isset($seen[$memberId]) || !isset($members[$memberId]) || (!(int)$members[$memberId]['active'] && !$unchanged)
-            || ($vehicle !== '' && !in_array($vehicle, $vehicles, true)
+            || !in_array($target, ['vehicle', 'without_vehicle', 'on_scene'], true)
+            || ($target === 'vehicle' && ($vehicle === '' || (!in_array($vehicle, $vehicles, true)
                 && (!$unchanged || in_array($vehicle, $removedAdditionalVehicles, true)))
+            ))
+            || ($target !== 'vehicle' && ($vehicle !== '' || $role !== 'besatzung'))
             || !in_array($role, ['maschinist', 'einheitsfuehrer', 'besatzung'], true)
-            || ($vehicle === '' && $role !== 'besatzung') || ($slot && isset($occupied[$slot]))) {
+            || ($slot && isset($occupied[$slot]))) {
             throw new ApiError(400, 'Besatzung ist ungültig');
         }
         $seen[$memberId] = true;
         if ($slot) $occupied[$slot] = true;
-        $rows[] = compact('memberId', 'vehicle', 'role') + ['name' => $existingCrew[$memberId]['member_name'] ?? $members[$memberId]['name']];
+        $rows[] = compact('memberId', 'vehicle', 'target', 'role')
+            + ['name' => $existingCrew[$memberId]['member_name'] ?? $members[$memberId]['name']];
     }
     usort($rows, fn($left, $right) => $left['memberId'] <=> $right['memberId']);
     query('DELETE FROM report_crew WHERE report_id=?', [$reportId]);
     foreach ($rows as $row) query(
-        'INSERT INTO report_crew(report_id,member_id,member_name,vehicle,role) VALUES(?,?,?,?,?)',
-        [$reportId, $row['memberId'], $row['name'], $row['vehicle'], $row['role']]
+        'INSERT INTO report_crew(report_id,member_id,member_name,vehicle,target_type,role) VALUES(?,?,?,?,?,?)',
+        [$reportId, $row['memberId'], $row['name'], $row['vehicle'], $row['target'], $row['role']]
     );
     return [
-        'vehicles' => implode(', ', array_values(array_unique(array_filter(array_column($rows, 'vehicle'), fn($vehicle) => $vehicle !== '')))),
+        'vehicles' => implode(', ', array_values(array_unique(array_filter(
+            array_map(fn($row) => $row['target'] === 'vehicle' ? $row['vehicle'] : '', $rows),
+            fn($vehicle) => $vehicle !== ''
+        )))),
         'personnel' => implode(', ', array_column($rows, 'name'))
     ];
 }
@@ -1440,7 +1458,8 @@ try {
             'ranks' => RANKS,
             'incidentTypes' => INCIDENT_TYPES,
             'classifications' => CLASSIFICATIONS,
-            'classificationLabels' => CLASSIFICATION_LABELS
+            'classificationLabels' => CLASSIFICATION_LABELS,
+            'crewOnScene' => CREW_ON_SCENE
         ]);
     }
 

@@ -473,7 +473,7 @@ assert.match(reportDetailsFields('new', {foreign_id: '', started_at: ''}), /DIVE
 // Neue Berichte übernehmen den lokalen Alarmtag, lassen Uhrzeiten leer und ändern die Alarmierung nicht.
 const newReportFields = reportDetailsFields('new', {started_at: '2026-08-22T22:30:42.000Z'});
 assert.match(newReportFields, /name="alarmedAt"[^>]+value="2026-08-23T00:30"[^>]+readonly/);
-assert.match(newReportFields, /name="reportDate" type="date" value="2026-08-23" required/);
+assert.doesNotMatch(newReportFields, /Gemeinsames Datum|name="reportDate"/);
 for (const name of ['departedAt', 'arrivedAt', 'endedAt']) {
   assert.match(newReportFields, new RegExp(`name="${name}Date" type="date" value="2026-08-23"`));
   assert.match(newReportFields, new RegExp(`name="${name}" type="time"[^>]*>`));
@@ -528,13 +528,12 @@ durationForm.elements.endedAt = {...durationForm.elements.endedAt, value: '2026-
 updateDuration();
 assert.match(durationOutput.textContent, /Einsatzdauer: Einsatzende ist wegen der Zeitumstellung mehrdeutig/);
 
-// Gemeinsame Datumsänderungen bewahren abweichende Tage und Uhrzeiten; Payload und Dauer nutzen dieselbe ISO-Auflösung.
+// Die drei vorbelegten Alarmtage bleiben einzeln änderbar; Payload und Dauer nutzen dieselbe ISO-Auflösung.
 {
 const control = value => ({value, dataset: {}, listeners: {}, addEventListener(event, handler) {this.listeners[event] = handler;}});
 const form = {elements: {}, querySelector: () => output};
 const output = {textContent: ''};
 form.elements.alarmedAt = {value: '2026-08-22T23:00', dataset: {}};
-form.elements.reportDate = control('2026-08-22');
 for (const name of ['departedAt', 'arrivedAt', 'endedAt']) {
   form.elements[`${name}Date`] = control('2026-08-22');
   form.elements[name] = {...control(''), type: 'time', name, form};
@@ -545,27 +544,21 @@ assert.equal(reportDateTime(form.elements.departedAt, 'Ausrückezeit'), null);
 assert.throws(() => reportDateTime(form.elements.endedAt, 'Einsatzende', true), /erforderlich/);
 form.elements.departedAtDate.value = '2026-08-24';
 form.elements.departedAt.value = '00:10';
+form.elements.endedAtDate.value = '2026-08-23';
 form.elements.endedAt.value = '00:30';
-form.elements.reportDate.value = '2026-08-23';
-form.elements.reportDate.listeners.change();
 assert.equal(form.elements.departedAtDate.value, '2026-08-24');
 assert.equal(form.elements.departedAt.value, '00:10');
-assert.equal(form.elements.arrivedAtDate.value, '2026-08-23');
+assert.equal(form.elements.arrivedAtDate.value, '2026-08-22');
 assert.equal(form.elements.endedAtDate.value, '2026-08-23');
 assert.equal(form.elements.endedAt.value, '00:30');
 assert.equal(form.elements.alarmedAt.value, '2026-08-22T23:00');
 assert.equal(reportDateTime(form.elements.endedAt, 'Einsatzende', true), '2026-08-22T22:30:00.000Z');
+form.elements.endedAt.listeners.input();
 assert.equal(output.textContent, 'Einsatzdauer: 1 Std. 30 Min.');
 form.elements.endedAtDate.value = '2026-08-24';
 form.elements.endedAtDate.listeners.input();
 assert.equal(output.textContent, 'Einsatzdauer: 25 Std. 30 Min.');
-form.elements.reportDate.value = '';
-form.elements.reportDate.listeners.change();
-assert.equal(form.elements.arrivedAtDate.value, '2026-08-23');
-form.elements.reportDate.value = '2026-08-25';
-form.elements.reportDate.listeners.change();
-assert.equal(form.elements.arrivedAtDate.value, '2026-08-25');
-assert.equal(form.elements.endedAtDate.value, '2026-08-24');
+assert.equal(form.elements.arrivedAtDate.value, '2026-08-22');
 form.elements.endedAtDate.value = '';
 assert.throws(() => reportDateTime(form.elements.endedAt, 'Einsatzende'), /ungültig/);
 form.elements.endedAtDate.value = '2026-03-29';
@@ -641,13 +634,19 @@ const resourceOverviewSource = html.match(/function crewSummary[\s\S]*?(?=\nfunc
 assert(resourceOverviewSource, 'Konsolidierte Fahrzeug- und Besatzungsübersicht fehlt');
 const consolidatedResources = new Function(
   'esc',
+  'crewOnScene',
   `${apiTypesSource}; ${resourceOverviewSource}; return consolidatedResources;`
-)(value => String(value ?? '').replaceAll('<', '&lt;'));
+)(value => String(value ?? '').replaceAll('<', '&lt;'), 'Vor Ort (ohne Fahrzeug)');
 const resourceOverview = consolidatedResources([
   {unitId: 2, vehicles: [{name: 'LF 20'}, {name: 'ELW <1>'}]},
   {unitId: 1, vehicles: ['MTF']}
 ], [
-  {unit_id: 2, crew: [{name: 'Mia', vehicle: 'LF 20', role: 'maschinist'}, {name: 'Noah', vehicle: '', role: 'besatzung'}]},
+  {unit_id: 2, crew: [
+    {name: 'Mia', vehicle: 'LF 20', target: 'vehicle', role: 'maschinist'},
+    {name: 'Vera', vehicle: 'Vor Ort', target: 'vehicle', role: 'besatzung'},
+    {name: 'Oskar', vehicle: '', target: 'on_scene', role: 'besatzung'},
+    {name: 'Noah', vehicle: '', target: 'without_vehicle', role: 'besatzung'}
+  ]},
   {unit_id: 1, crew: []}
 ], [
   {id: 2, name: 'Löschzug Süd'},
@@ -658,13 +657,18 @@ assert(resourceOverview.indexOf('ELW &lt;1>') < resourceOverview.indexOf('LF 20'
 assert.match(resourceOverview, /MTF: Keine Besatzung/);
 assert.match(resourceOverview, /LF 20: Mia \(Maschinist\)/);
 assert.match(resourceOverview, /Ohne Fahrzeug: Noah \(Besatzung\)/);
+assert.match(resourceOverview, /Vor Ort: Vera \(Besatzung\)/);
+assert.match(resourceOverview, /Vor Ort \(ohne Fahrzeug\): Oskar \(Besatzung\)/);
 // Bei gleicher angezeigter Einheit entscheidet die ID; auch kollationsgleiche Fahrzeugnamen besitzen eine feste Reihenfolge.
 const tiedUnits = [{id: 2, name: 'Gleicher Name'}, {id: 1, name: 'Gleicher Name'}];
 const tiedAssignments = [{unitId: 2, vehicles: ['Zweites Fahrzeug']}, {unitId: 1, vehicles: ['Erstes Fahrzeug']}];
 const tiedOverview = consolidatedResources(tiedAssignments, [], tiedUnits);
 assert(tiedOverview.indexOf('Erstes Fahrzeug') < tiedOverview.indexOf('Zweites Fahrzeug'));
 assert.equal(tiedOverview, consolidatedResources([...tiedAssignments].reverse(), [], tiedUnits));
-const crewSummary = new Function('esc', `${apiTypesSource}; ${resourceOverviewSource}; return crewSummary;`)(value => value);
+const crewSummary = new Function('esc', 'crewOnScene', `${apiTypesSource}; ${resourceOverviewSource}; return crewSummary;`)(
+  value => value,
+  'Vor Ort (ohne Fahrzeug)'
+);
 assert.equal(crewSummary([], ['Ä', 'A\u0308']), crewSummary([], ['A\u0308', 'Ä']));
 assert.throws(() => crewSummary('[]'), /Liste erwartet/);
 assert.match(html, /<h3>Fahrzeuge und Besatzung<\/h3>\$\{consolidatedResources\(assignments, reports, units\)\}/);
@@ -981,6 +985,8 @@ const renderCrewSource = html.match(/async function renderCrew[\s\S]*?(?=\nfunct
 assert(renderCrewSource, 'renderCrew fehlt');
 assert.match(renderCrewSource, /if \(!root\.isConnected \|\|/);
 assert.match(renderCrewSource, /if \(restoreFocus\) root\.querySelector\('h3'\)\.focus\(\)/);
+assert.equal((renderCrewSource.match(/esc\(zone\.label\)/g) ?? []).length, 3);
+assert.match(html, /crewOnScene = 'Vor Ort \(ohne Fahrzeug\)'/);
 
 // Historische Besatzungsnamen überleben Stammdatenänderungen und erneutes Rendern; neue Personen zeigen aktuelle Namen.
 const crewRoot = {isConnected: true, dataset: {}, contains: () => false};
@@ -988,12 +994,23 @@ const crewResources = {members: [
   {id: 1, name: 'Anna Neu', active: 1}, {id: 2, name: 'Bernd Aktuell', active: 1}
 ], vehicles: []};
 const historicalCrew = [{memberId: 1, name: 'Anna Historisch', vehicle: '', role: 'besatzung'}];
-const crewRenderer = new Function('document', 'api', 'esc', 'bindCrewBoard', 'dragEnabled',
-  `${apiTypesSource};${renderCrewSource};return renderCrew;`)({querySelector: () => crewRoot}, async () => crewResources, value => String(value ?? ''), () => {}, false);
+const crewRenderer = new Function('document', 'api', 'esc', 'bindCrewBoard', 'dragEnabled', 'crewOnScene',
+  `${apiTypesSource};${renderCrewSource};return renderCrew;`)({querySelector: () => crewRoot}, async () => crewResources, value => String(value ?? ''), () => {}, false, 'Vor Ort (ohne Fahrzeug)');
 await crewRenderer('#crew', 1, [], historicalCrew);
 assert.match(crewRoot.innerHTML, /data-name="Anna Historisch"/);
 assert.match(crewRoot.innerHTML, /data-name="Bernd Aktuell"/);
+assert.match(crewRoot.innerHTML, /data-target="on-scene" data-vehicle="" data-target-type="on_scene"/);
 assert(!crewRoot.innerHTML.includes('Anna Neu'));
+const unsafeCrewRoot = {isConnected: true, dataset: {}, contains: () => false};
+const escapeHtml = value =>
+  String(value ?? '').replace(/[&<>"']/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[character]));
+const unsafeCrewRenderer = new Function('document', 'api', 'esc', 'bindCrewBoard', 'dragEnabled', 'crewOnScene',
+  `${apiTypesSource};${renderCrewSource};return renderCrew;`)(
+  {querySelector: () => unsafeCrewRoot}, async () => crewResources, escapeHtml, () => {}, false, '<img src=x onerror=alert(1)>'
+);
+await unsafeCrewRenderer('#crew', 1, [], historicalCrew);
+assert.doesNotMatch(unsafeCrewRoot.innerHTML, /<img/);
+assert.match(unsafeCrewRoot.innerHTML, /&lt;img src=x onerror=alert\(1\)&gt;/);
 crewResources.members[0].name = 'Anna Noch Neuer';
 await crewRenderer('#crew', 1, [], historicalCrew, ['Zusatzfahrzeug']);
 assert.match(crewRoot.innerHTML, /data-name="Anna Historisch"/);
@@ -1050,9 +1067,9 @@ await renderResources('1');
 for (const text of ['Mia', 'Zusatzfahrzeug']) assert(root.innerHTML.includes(text));
 assert.match(root.innerHTML, /Fremdes Fahrzeug/);
 assert.doesNotMatch(root.innerHTML, /Andere Einheitszuordnung/);
-const renderCrew = new Function('document', 'api', 'dragEnabled', 'bindCrewBoard', 'esc',
+const renderCrew = new Function('document', 'api', 'dragEnabled', 'bindCrewBoard', 'esc', 'crewOnScene',
   `${apiTypesSource}; ${renderCrewSource}; return renderCrew;`
-)(document, api, false, () => {}, esc);
+)(document, api, false, () => {}, esc, 'Vor Ort (ohne Fahrzeug)');
 assert.equal(await renderCrew('#crew', '1', incidents[0].assignments,
   [{memberId: 1, name: 'Mia', vehicle: 'LF 20', role: 'maschinist'}]), true);
 for (const text of ['LF 20', 'Mia', 'Zusatzfahrzeug']) assert(root.innerHTML.includes(text));

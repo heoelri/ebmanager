@@ -32,7 +32,7 @@ export async function checkUiLifecycle(browser, coverage) {
       let json = {};
       if (path === '/api/units') json = units;
       else if (path === '/api/incidents') json = incidents;
-      else if (path === '/api/options') json = {incidentTypes: ['Technische Hilfe'], ranks: {}, classifications: {site: ['Wald']}, classificationLabels: {site: 'Einsatzstelle'}};
+      else if (path === '/api/options') json = {incidentTypes: ['Technische Hilfe'], ranks: {}, classifications: {site: ['Wald']}, classificationLabels: {site: 'Einsatzstelle'}, crewOnScene: 'Vor Ort (ohne Fahrzeug)'};
       else if (path.endsWith('/resources')) json = {members: [{id: 1, name: 'Mitglied', active: 1}], vehicles: [{name: 'Zusatzfahrzeug'}]};
       else if (path.endsWith('/reports')) json = path.includes('/2/') ? reports : [];
       else if (path.endsWith('/exercise-history')) json = [];
@@ -139,13 +139,15 @@ export async function checkUiLifecycle(browser, coverage) {
     assert.equal(await page.evaluate(() => currentIncident.revision), 5);
     assert.equal(calls.filter(call => call.path === '/api/incidents').length, 1);
     if (id === 1) {
-      assert.deepEqual(await page.evaluate(() => selectedCrew('#reportCrew')), [{memberId: 1, name: 'Mitglied', vehicle: '', role: 'besatzung'}]);
+      assert.deepEqual(await page.evaluate(() => selectedCrew('#reportCrew')), [{memberId: 1, name: 'Mitglied', vehicle: '', target: 'without_vehicle', role: 'besatzung'}]);
+      await page.locator('[data-member]').selectOption('on-scene');
+      assert.deepEqual(await page.evaluate(() => selectedCrew('#reportCrew')), [{memberId: 1, name: 'Mitglied', vehicle: '', target: 'on_scene', role: 'besatzung'}]);
       const requests = calls.filter(call => call.path.endsWith('/resources')).length;
       await page.locator('[data-additional-vehicle]').check();
       assert.equal(await page.locator('[data-additional-vehicle]').evaluate(input => input === document.activeElement), true);
       await page.locator('[data-member]').selectOption('vehicle-1-besatzung');
       assert.equal(calls.filter(call => call.path.endsWith('/resources')).length, requests, 'Zusatzfahrzeuge verwenden bereits geladene Ressourcen ohne Antwort-Rennen');
-      assert.equal((await page.evaluate(() => selectedCrew('#reportCrew')))[0].vehicle, 'Zusatzfahrzeug');
+      assert.deepEqual((await page.evaluate(() => selectedCrew('#reportCrew')))[0], {memberId: 1, name: 'Mitglied', vehicle: 'Zusatzfahrzeug', target: 'vehicle', role: 'besatzung'});
       const slow = test.hold('/api/units/2/resources');
       await page.locator('#reportUnit').selectOption('2');
       await slow.received;
