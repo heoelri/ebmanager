@@ -17,8 +17,12 @@ done
 "${compose[@]}" exec -T db mysql --host=127.0.0.1 --user=root -ptest-password einsatzberichte --execute="SELECT 1" >/dev/null
 
 # Eine Altinstallation erhält Workflow, Stammdaten, Revisionen, Snapshots, Soft-Delete, Übungskennzeichnung, Bereinigungszustand, Berichtseinschränkung und Besatzungszielart genau einmal.
+if [[ "$("${compose[@]}" exec -T db mysql --user=root -ptest-password --batch --skip-column-names einsatzberichte \
+  --execute="SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='report_crew' AND column_name='target_type'")" == 1 ]]; then
+  "${compose[@]}" exec -T db mysql --user=root -ptest-password einsatzberichte \
+    --execute="ALTER TABLE report_crew DROP COLUMN target_type"
+fi
 "${compose[@]}" exec -T db mysql --default-character-set=utf8mb4 --user=root -ptest-password einsatzberichte --execute="
-  ALTER TABLE report_crew DROP COLUMN target_type;
   DELETE FROM schema_migrations WHERE name='010-crew-target-type.sql';
   ALTER TABLE reports DROP COLUMN is_restricted;
   DELETE FROM schema_migrations WHERE name='009-restricted-reports.sql';

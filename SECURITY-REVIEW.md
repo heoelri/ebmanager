@@ -10,7 +10,10 @@ abgewiesen. Die gespeicherte Zielart `on_scene` ist vom Anzeigenamen getrennt,
 sodass ein echtes Fahrzeug namens „Vor Ort“ weiterhin als `vehicle` mit allen
 zulässigen Funktionen verwendbar bleibt. „Vor Ort“ bleibt Teil der
 geschützten Besatzungsdaten, wird aber nicht als Fahrzeug oder zusätzliches
-Fahrzeug ausgegeben beziehungsweise gezählt.
+Fahrzeug ausgegeben beziehungsweise gezählt. Der Browser behandelt das über
+`/api/options` gelieferte Anzeigenlabel wie andere Serverwerte als
+unvertrauenswürdig und escaped es vor jeder HTML-Ausgabe; bei fehlendem Feld
+verwendet er ausschließlich den festen deutschen Standardtext.
 
 ## Eingeschränkte Einsatzberichte vom 30. September 2026
 

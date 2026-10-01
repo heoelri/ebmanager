@@ -985,6 +985,8 @@ const renderCrewSource = html.match(/async function renderCrew[\s\S]*?(?=\nfunct
 assert(renderCrewSource, 'renderCrew fehlt');
 assert.match(renderCrewSource, /if \(!root\.isConnected \|\|/);
 assert.match(renderCrewSource, /if \(restoreFocus\) root\.querySelector\('h3'\)\.focus\(\)/);
+assert.equal((renderCrewSource.match(/esc\(zone\.label\)/g) ?? []).length, 3);
+assert.match(html, /crewOnScene = 'Vor Ort \(ohne Fahrzeug\)'/);
 
 // Historische Besatzungsnamen überleben Stammdatenänderungen und erneutes Rendern; neue Personen zeigen aktuelle Namen.
 const crewRoot = {isConnected: true, dataset: {}, contains: () => false};
@@ -999,6 +1001,16 @@ assert.match(crewRoot.innerHTML, /data-name="Anna Historisch"/);
 assert.match(crewRoot.innerHTML, /data-name="Bernd Aktuell"/);
 assert.match(crewRoot.innerHTML, /data-target="on-scene" data-vehicle="" data-target-type="on_scene"/);
 assert(!crewRoot.innerHTML.includes('Anna Neu'));
+const unsafeCrewRoot = {isConnected: true, dataset: {}, contains: () => false};
+const escapeHtml = value =>
+  String(value ?? '').replace(/[&<>"']/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[character]));
+const unsafeCrewRenderer = new Function('document', 'api', 'esc', 'bindCrewBoard', 'dragEnabled', 'crewOnScene',
+  `${apiTypesSource};${renderCrewSource};return renderCrew;`)(
+  {querySelector: () => unsafeCrewRoot}, async () => crewResources, escapeHtml, () => {}, false, '<img src=x onerror=alert(1)>'
+);
+await unsafeCrewRenderer('#crew', 1, [], historicalCrew);
+assert.doesNotMatch(unsafeCrewRoot.innerHTML, /<img/);
+assert.match(unsafeCrewRoot.innerHTML, /&lt;img src=x onerror=alert\(1\)&gt;/);
 crewResources.members[0].name = 'Anna Noch Neuer';
 await crewRenderer('#crew', 1, [], historicalCrew, ['Zusatzfahrzeug']);
 assert.match(crewRoot.innerHTML, /data-name="Anna Historisch"/);
