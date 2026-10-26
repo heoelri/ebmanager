@@ -1,6 +1,6 @@
 services:
   db:
-    image: mysql:8.4
+    image: mysql:26.10
     environment:
       MYSQL_DATABASE: einsatzberichte
       MYSQL_USER: einsatzberichte
@@ -16,7 +16,7 @@ services:
       retries: 20
 
   migrate:
-    image: mysql:8.4
+    image: mysql:26.10
     depends_on:
       db:
         condition: service_healthy
@@ -85,7 +85,7 @@ services:
 
   demo-seed:
     profiles: [demo]
-    image: mysql:8.4
+    image: mysql:26.10
     depends_on:
       migrate:
         condition: service_completed_successfully
