@@ -1,5 +1,24 @@
 # Security Review
 
+## Gemeinsame Docker-Abhängigkeitsupdates vom 23. November 2026
+
+Die Updates aus #130, #131 und #132 ändern ausschließlich die offiziellen
+PHP- und MySQL-Basis-Images: Apache und der lokale DIVERA-Fake verwenden
+PHP 8.6, Datenbank, Migrationen und Demo-Seed MySQL 26.10. Portbindungen an
+Loopback, HTTPS, Zugangsdatenquellen, Mandanten- und Rollenprüfungen sowie
+die ausschließlich lesende DIVERA-Anbindung bleiben unverändert. Der
+SFTP-Workflow überträgt weiterhin keine Container oder Datenbankdateien.
+
+Der MySQL-Versionssprung betrifft persistente lokale Daten. Die bestehenden
+Migrationstests prüfen Schemaänderungen auf einer frisch angelegten
+Datenbank, nicht die Binärkompatibilität eines MySQL-8.4-Volumes. Daher ist
+vor einer Übernahme vorhandener Daten eine Sicherung und Wiederherstellung
+in einer getrennten Umgebung erforderlich; Vorgehen und Rollback stehen in
+der kanonischen Deployment-Anleitung. Ein direktes Downgrade eines bereits
+aktualisierten Volumes wird nicht vorausgesetzt. Dieser Review bewertet den
+Änderungsumfang und ersetzt weder einen Image-Schwachstellenscan noch einen
+nachgewiesenen In-place-Datenbankupgrade.
+
 ## Besatzungsziel „Vor Ort“ vom 30. September 2026
 
 Die neue Kategorie erfasst keine zusätzlichen personenbezogenen Felder und

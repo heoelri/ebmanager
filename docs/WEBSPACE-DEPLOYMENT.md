@@ -248,6 +248,36 @@ Weitere Ziele wie `devpreview` benötigen ein eigenes GitHub-Environment, eigene
 
 Wenn das automatische Deployment verwendet wird, müssen erforderliche Migrationen vor dem Merge beziehungsweise Push nach `main` eingespielt werden. Der SFTP-Workflow kann SQL-Migrationen nicht sicher automatisieren, weil er absichtlich keine Datenbankzugangsdaten besitzt und Shared-Hosting-Anbieter unterschiedliche Verwaltungswege bereitstellen.
 
+### Docker-Basis-Images aktualisieren
+
+Die gemeinsamen Dependabot-Updates #130, #131 und #132 verwenden lokal
+PHP 8.6 und MySQL 26.10 statt PHP 8.5 und MySQL 8.4. Der produktive
+SFTP-Upload ändert weder die PHP-Version des Hosters noch dessen Datenbank.
+Es gibt keine zusätzliche Anwendungsmigration.
+
+Bei vorhandenen lokalen Daten ist ein direktes Upgrade des MySQL-8.4-Volumes
+nicht durch die CI abgedeckt. Die Migrationstests prüfen das Anwendungsschema
+mit der neuen Datenbankversion, nicht den Wechsel des MySQL-Datenformats.
+
+1. Mit dem bisherigen Stand und MySQL 8.4 einen vollständigen logischen
+   Datenbankdump erstellen und dessen Wiederherstellbarkeit prüfen.
+2. Den bisherigen Commit und das bisherige Volume erhalten. Keine
+   `down --volumes`- oder Reset-Befehle auf diese Umgebung anwenden.
+3. Den neuen Stand in einem getrennten Checkout mit eigenem Compose-Projektnamen,
+   freien HTTP-/HTTPS-Ports und einem neuen Datenbankvolume starten.
+   Die aktuellen Images mit `docker compose pull` und
+   `docker compose build --pull` laden.
+4. Den Dump in diese getrennte Datenbank wiederherstellen und ausstehende
+   Anwendungsmigrationen mit dem Compose-Dienst `migrate` ausführen.
+5. Bootstrap, Anmeldung, vorhandene Berichte, Besatzung und PDF-Export prüfen.
+   Erst nach erfolgreicher Prüfung auf die neue Umgebung umstellen.
+
+Für einen Rollback die neue Umgebung stoppen und den bisherigen Commit mit
+dem unveränderten MySQL-8.4-Volume starten. Ein bereits mit MySQL 26.10
+verwendetes Volume nicht mit MySQL 8.4 öffnen. Seit der Umstellung neu
+geschriebene Daten müssen vor einem Rollback separat gesichert und fachlich
+abgeglichen werden.
+
 ### Von `2026-08-23` auf `2026-09-03` aktualisieren
 
 1. Datenbank und bisherige Anwendungsdateien sichern.
