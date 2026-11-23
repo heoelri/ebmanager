@@ -104,7 +104,7 @@ services:
 
   divera:
     profiles: [test, demo]
-    image: php:8.5-cli
+    image: php:8.6-cli
     working_dir: /app
     environment:
       DIVERA_REQUEST_LOG: /tmp/divera/requests.log
