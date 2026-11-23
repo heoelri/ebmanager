@@ -97,7 +97,6 @@ assert.match(css, /@media \(forced-colors: active\)[\s\S]*?\.error\s*\{[\s\S]*?b
 assert.match(javascript, /<details(?=[^>]*\bid="pendingDivera")(?=[^>]*\bhidden\b)(?=[^>]*\baria-live="polite")[^>]*>\s*<summary>\s*DIVERA Import\s*<\/summary>/);
 assert.doesNotMatch(javascript, /<details(?=[^>]*\bid="pendingDivera")[^>]*\bopen(?:\s|=|>)/);
 assert.match(javascript, /summary\.textContent = 'DIVERA Import – Prüfung läuft …'/);
-assert.match(javascript, /summary\.textContent = `DIVERA Import – \$\{statuses\.join\(', '\) \|\| 'keine neuen Einsätze'\}`/);
 assert.match(deployment, /put "public\/styles\.css" "public\/styles\.css"/);
 assert.match(deployment, /put "public\/app\.js" "public\/app\.js"/);
 assert.match(screenshotsWorkflow, /pull_request:/);
@@ -1082,7 +1081,7 @@ await assert.rejects(renderCrew('#crew', '1', incidents[0].assignments), /Liste 
 assert.equal(root.innerHTML, markup);
 }
 
-// Der Importabgleich liest native Zuordnungen und ordnet gleichzeitige Alarme deterministisch nach Alarm- und Einheits-ID.
+// Nicht importierte Alarme bleiben auch bei gleicher oder älterer Alarmzeit sichtbar; eine fremde Einheitszuordnung zählt nicht als Import.
 {
 const importedSource = declaration('importedForUnit');
 const pendingSource = javascript.match(/async function checkPendingDivera[\s\S]*?(?=\nasync function importPendingDivera)/)?.[0];
@@ -1094,7 +1093,20 @@ const context = {
   document: {querySelector: () => out}, me: {role: 'wehrleitung'},
   units: [{id: 2, name: 'Zwei', divera_configured: 1}, {id: 1, name: 'Eins', divera_configured: 1}],
   incidents: [{divera_id: 'old', started_at: '2026-09-01T12:00:00Z', assignments: [{unitId: 1, vehicles: []}]}],
-  api: async () => ({alarms: ['b', 'a'].map(id => ({id, title: id, address: '', startedAt: '2026-09-02T12:00:00Z'}))}),
+  api: async path => ({
+    alarms: [
+      ['b', '2026-09-02T12:00:00Z'],
+      ['a', '2026-09-02T12:00:00Z'],
+      ['old', '2026-09-01T12:00:00Z'],
+      ...(path.includes('/units/1/') ? [
+        ['gleichzeitig', '2026-09-01T12:00:00Z'],
+        ['übersprungen', '2026-08-31T12:00:00Z']
+      ] : [])
+    ].map(([id, startedAt]) => ({id, title: id, address: '', startedAt}))
+  }),
+  Date: class extends Date {
+    static now() { return Date.parse('2026-09-08T12:00:00Z'); }
+  },
   esc: value => String(value ?? ''), formatDateTime: value => value
 };
 const result = new Function(...Object.keys(context),
@@ -1105,8 +1117,11 @@ assert.equal(result.importedForUnit('old', '1'), true);
 assert.equal(result.importedForUnit('old', '2'), false);
 assert.equal(result.importedForUnit('unknown', '1'), false);
 await result.checkPendingDivera();
-assert.deepEqual(result.items().map(({alarm, unit}) => [alarm.id, unit.id]), [['a', 1], ['a', 2], ['b', 1], ['b', 2]]);
-assert.equal(summary.textContent, 'DIVERA Import – 4 neue Einsätze');
+assert.deepEqual(result.items().map(({alarm, unit}) => [alarm.id, unit.id]), [
+  ['a', 1], ['a', 2], ['b', 1], ['b', 2], ['gleichzeitig', 1], ['old', 2], ['übersprungen', 1]
+]);
+assert.equal(summary.textContent, 'DIVERA Import – 7 nicht importierte Einsätze');
+assert.match(content.innerHTML, /Letzte 7 Tage[\s\S]*gleichzeitig[\s\S]*<details class="form-section"><summary>Ältere Einsätze \(1\)<\/summary>[\s\S]*übersprungen[\s\S]*data-pending="6"/);
 }
 
 const navigationSource = html.match(/function viewAllowed[\s\S]*?(?=\nasync function start)/)?.[0];
