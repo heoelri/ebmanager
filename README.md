@@ -45,7 +45,7 @@ Open-Source-Software im Sinne der Open Source Definition.
 - Mitglieder, Qualifikationen und Fahrzeugstammdaten aus DIVERA
 - vollständige DIVERA-Synchronisation aller Stammdaten und gelieferten Einsätze
 - idempotenter, serverseitig verifizierter DIVERA-Einsatzimport
-- Hinweis, Direktimport und letzter Importzeitpunkt für neue DIVERA-Einsätze in der Einsatzübersicht
+- Hinweis, Direktimport und letzter Importzeitpunkt für nicht importierte DIVERA-Einsätze in der Einsatzübersicht; Alarme der letzten sieben Tage erscheinen zuerst, ältere lassen sich aufklappen.
 - E-Mail-Benachrichtigungen an Einheits- und Wehrführungen bei neuen Einsätzen, erstellten Berichten und Freigaben
 - lokale Docker-Umgebung, GitHub-Tests und SFTP-Deployment
 

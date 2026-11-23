@@ -112,6 +112,7 @@
 - Echte Access-Keys werden nie protokolliert, an den Browser ausgegeben oder committed. Ausschließlich die offensichtlich unechten `demo-local-*`-Keys aus `demo/seed.sql` dürfen für den lokalen Fake versioniert werden.
 - Ein DIVERA-Einsatz ist innerhalb einer Organisation über `divera_id` eindeutig. Wiederholter Import aktualisiert Einsatz und bestehende `incident_units` nur vor dem ersten Bericht bei echten Änderungen; die Reihenfolge einer Fahrzeugliste allein ist keine Änderung. Das Importprotokoll darf trotzdem jeden erfolgreichen Import notieren.
 - Führungskräfte dürfen für ihre Einheiten Einsätze erkennen und einzeln importieren. Nur Einheits- und Wehrführung dürfen Access-Keys ändern oder Mitglieder, Qualifikationen und Fahrzeuge synchronisieren.
+- Die DIVERA-Box in der Einsatzübersicht erkennt offene Importe anhand von Alarm-ID und Einheit, nicht anhand des jüngsten importierten Alarms. Sie zeigt die letzten sieben Tage zuerst und hält ältere von DIVERA gelieferte, nicht importierte Alarme aufklappbar verfügbar.
 - „Alles synchronisieren“ ruft `pull/all` und `alarms` je höchstens einmal ab, ersetzt die Stammdaten und importiert beziehungsweise aktualisiert alle gelieferten Einsätze.
 - Der vollständige Abgleich führt alle Alarm-Upserts in stabiler DIVERA-ID-Reihenfolge vor dem Mitglieder-/Fahrzeugabgleich in derselben Transaktion aus. Damit werden bestehende und gleichzeitig angelegte Einsätze vor Mitgliedern/Ressourcen gesperrt; eine reine Vorabfrage bestehender Einsatz-IDs ersetzt diese Sperren nicht.
 

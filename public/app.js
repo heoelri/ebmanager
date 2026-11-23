@@ -487,23 +487,16 @@ async function checkPendingDivera() {
     .join('<br>');
   out.hidden = false;
   summary.textContent = 'DIVERA Import – Prüfung läuft …';
-  content.innerHTML = `<p><b>Letzter Import:</b><br>${importTimes}</p><p class="muted">Prüfe auf neue Einsätze …</p>`;
+  content.innerHTML = `<p><b>Letzter Import:</b><br>${importTimes}</p><p class="muted">Prüfe auf nicht importierte Einsätze …</p>`;
   const results = await Promise.allSettled(
     allowed.map(async unit => ({unit, data: await api(`/api/units/${unit.id}/divera?summary=1`)}))
   );
   if (!current() || !out.isConnected) return;
   pendingDivera = results
     .filter(result => result.status === 'fulfilled')
-    .flatMap(({value}) => {
-      const latest = incidents
-        .filter(
-          item => item.divera_id && apiArray(item.assignments).some(assignment => assignment.unitId === value.unit.id)
-        )
-        .reduce((time, item) => Math.max(time, Date.parse(item.started_at)), 0);
-      return value.data.alarms
-        .filter(alarm => !importedForUnit(alarm.id, value.unit.id) && (!latest || Date.parse(alarm.startedAt) > latest))
-        .map(alarm => ({unit: value.unit, alarm}));
-    })
+    .flatMap(({value: {unit, data}}) =>
+      data.alarms.filter(alarm => !importedForUnit(alarm.id, unit.id)).map(alarm => ({unit, alarm}))
+    )
     .sort(
       (a, b) =>
         Date.parse(b.alarm.startedAt) - Date.parse(a.alarm.startedAt) ||
@@ -513,13 +506,25 @@ async function checkPendingDivera() {
             ? 1
             : a.unit.id - b.unit.id)
     );
-  const failures = results.filter(result => result.status === 'rejected').length;
+  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000,
+    firstOlder = pendingDivera.findIndex(({alarm}) => Date.parse(alarm.startedAt) < cutoff),
+    recentCount = firstOlder === -1 ? pendingDivera.length : firstOlder,
+    olderCount = pendingDivera.length - recentCount,
+    failures = results.filter(result => result.status === 'rejected').length;
   const statuses = [];
   if (pendingDivera.length)
-    statuses.push(pendingDivera.length === 1 ? '1 neuer Einsatz' : `${pendingDivera.length} neue Einsätze`);
+    statuses.push(pendingDivera.length === 1 ? '1 nicht importierter Einsatz' : `${pendingDivera.length} nicht importierte Einsätze`);
   if (failures) statuses.push(failures === 1 ? '1 Fehler' : `${failures} Fehler`);
-  summary.textContent = `DIVERA Import – ${statuses.join(', ') || 'keine neuen Einsätze'}`;
-  content.innerHTML = `${pendingDivera.length ? '<p><b>Neue DIVERA-Einsätze</b></p>' : ''}<p><b>Letzter Import:</b><br>${importTimes}</p>${pendingDivera.map(({unit, alarm}, index) => `<article class="report"><b>${esc(alarm.title)}</b><p>${esc(formatDateTime(alarm.startedAt))} · ${esc(alarm.address)}<br><span class="muted">${esc(unit.name)}</span></p><button data-pending="${index}">Importieren</button></article>`).join('') || (!failures ? '<p>Keine neueren Einsätze vorhanden.</p>' : '')}${failures ? `<p class="error" role="alert">DIVERA konnte für ${failures} ${failures === 1 ? 'Einheit' : 'Einheiten'} nicht geprüft werden.</p>` : ''}`;
+  summary.textContent = `DIVERA Import – ${statuses.join(', ') || 'keine nicht importierten Einsätze'}`;
+  const renderAlarms = (start, end) =>
+    pendingDivera.slice(start, end).map(({unit, alarm}, index) =>
+      `<article class="report"><b>${esc(alarm.title)}</b><p>${esc(formatDateTime(alarm.startedAt))} · ${esc(alarm.address)}<br><span class="muted">${esc(unit.name)}</span></p><button data-pending="${start + index}">Importieren</button></article>`
+    ).join('');
+  content.innerHTML = `<p><b>Letzter Import:</b><br>${importTimes}</p>${
+    recentCount ? `<p><b>Letzte 7 Tage</b></p>${renderAlarms(0, recentCount)}` : ''
+  }${olderCount ? `<details class="form-section"><summary>Ältere Einsätze (${olderCount})</summary>${renderAlarms(recentCount)}</details>` : ''
+  }${!pendingDivera.length && !failures ? '<p>Keine nicht importierten DIVERA-Einsätze vorhanden.</p>' : ''
+  }${failures ? `<p class="error" role="alert">DIVERA konnte für ${failures} ${failures === 1 ? 'Einheit' : 'Einheiten'} nicht geprüft werden.</p>` : ''}`;
   out
     .querySelectorAll('[data-pending]')
     .forEach(button => (button.onclick = () => importPendingDivera(Number(button.dataset.pending), button)));
