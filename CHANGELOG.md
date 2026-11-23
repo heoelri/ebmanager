@@ -28,6 +28,7 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 
 ### Changed
 
+- Die Dependabot-Updates #130, #131 und #132 werden gemeinsam geprüft: Docker verwendet PHP 8.6 für Apache und den lokalen DIVERA-Fake sowie MySQL 26.10 für Datenbank, Migrationen und Demo-Seed. Der Webspace-Deploymentumfang bleibt unverändert.
 - `public/app.js` ist einmalig lesbar formatiert (eine Anweisung pro Zeile), damit Reviews einschließlich des Copilot-Reviews die Browserlogik nicht mehr als generierte Datei überspringen. Der minifizierte Code ist vor und nach der Formatierung identisch; HTML-Template-Strings bleiben bytegleich. Quelltextprüfungen lesen Funktionen jetzt vollständig über mehrere Zeilen aus, und `.git-blame-ignore-revs` blendet den Formatierungscommit in `git blame` aus (#126).
 - Browserprüfungen und die unverändert 17 Screenshots laufen für alle Pull Requests und Pushs auf `main`, auch bei reinen Backendänderungen. Der DIVERA-Vertragscheck läuft zusätzlich bei Pull Requests mit Änderungen an API, Fake, Vertragstest oder dessen Workflow.
 - Die Smoke-Suite verweigert den Start bei abgeschalteten PHP-Assertions; CI aktiviert sie ausdrücklich.
@@ -72,6 +73,15 @@ Alle relevanten Änderungen werden ab diesem Stand in dieser Datei dokumentiert.
 - Die Einsatzlisten-API liefert konsolidierte Berichtstexte einschließlich zurückbehaltener Arbeitsstände ausschließlich an die Wehrführung. Führungskräfte und Einheitsführungen erhalten weiterhin ihre zulässigen Einsatz- und Statusdaten (#100).
 
 ### Breaking Changes
+
+**Die lokale Docker-Datenbank wechselt von MySQL 8.4 auf 26.10.**
+Vorhandene Volumes nicht ungeprüft mit der neuen Version starten.
+Reihenfolge: Daten unter MySQL 8.4 sichern, in einer getrennten Umgebung
+mit frischem Volume wiederherstellen, Migrationen und Anwendung prüfen,
+erst danach umstellen. Das bisherige Volume für den Rollback erhalten;
+Details: [Deployment: Docker-Basis-Images aktualisieren](docs/WEBSPACE-DEPLOYMENT.md#docker-basis-images-aktualisieren).
+Für produktiven Webspace ist weder ein Datenbankwechsel noch eine neue
+Anwendungsmigration erforderlich.
 
 **Die Besatzungskategorie „Vor Ort“ benötigt Migration 010 vor dem
 Anwendungscode.** Sie ergänzt `report_crew.target_type` und ordnet bestehende
